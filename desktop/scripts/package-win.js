@@ -2,6 +2,7 @@ const path = require('path');
 const packager = require('electron-packager');
 
 const appName = process.env.ELECTRON_APP_NAME || 'RequestLoom-Desktop';
+const platform = process.env.ELECTRON_PLATFORM || 'win32';
 const arch = process.env.ELECTRON_ARCH || 'x64';
 const electronZipDir = process.env.ELECTRON_ZIP_DIR || undefined;
 // When packaging from WSL, the default temp dir (/tmp) is on the WSL
@@ -37,7 +38,7 @@ if (process.env.ELECTRON_MIRROR) {
       overwrite: true,
       prune: true,
       asar: false,
-      platform: 'win32',
+      platform,
       arch,
       name: appName,
       executableName: appName,
@@ -50,7 +51,7 @@ if (process.env.ELECTRON_MIRROR) {
       ],
     });
 
-    console.log(`Electron package created for win32-${arch}`);
+    console.log(`Electron package created for ${platform}-${arch}`);
   } catch (err) {
     console.error('Failed to package desktop app:', err);
     process.exit(1);

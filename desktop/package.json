@@ -5,7 +5,8 @@
   "description": "RequestLoom desktop wrapper",
   "main": "main.js",
   "scripts": {
-    "package:win": "node scripts/package-win.js"
+    "package:win": "node scripts/package-win.js",
+    "package:linux": "ELECTRON_PLATFORM=linux node scripts/package-win.js"
   },
   "devDependencies": {
     "electron": "31.7.7",

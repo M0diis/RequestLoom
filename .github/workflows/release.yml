@@ -93,3 +93,109 @@ jobs:
             dist/requestloom-linux-x64.tar.gz
             dist/requestloom-win-x64.zip
           generate_release_notes: true
+
+  desktop-windows:
+    name: Desktop App (Windows)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Copy frontend to wwwroot
+        run: |
+          rm -rf backend/wwwroot
+          cp -r frontend/dist backend/wwwroot
+
+      - name: Publish backend (win-x64)
+        working-directory: backend
+        run: |
+          dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ../desktop/runtime/backend
+
+      - name: Package Electron desktop app
+        working-directory: desktop
+        env:
+          ELECTRON_APP_NAME: RequestLoom-Desktop
+          ELECTRON_ARCH: x64
+        run: |
+          npm ci
+          npm run package:win
+
+      - name: Create archive
+        run: |
+          mkdir -p dist
+          cd desktop/dist
+          zip -r ../../dist/requestloom-desktop-win-x64.zip RequestLoom-Desktop-win32-x64/
+
+      - name: Attach to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/requestloom-desktop-win-x64.zip
+
+  desktop-linux:
+    name: Desktop App (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Copy frontend to wwwroot
+        run: |
+          rm -rf backend/wwwroot
+          cp -r frontend/dist backend/wwwroot
+
+      - name: Publish backend (linux-x64)
+        working-directory: backend
+        run: |
+          dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o ../desktop/runtime/backend
+
+      - name: Package Electron desktop app
+        working-directory: desktop
+        env:
+          ELECTRON_APP_NAME: RequestLoom-Desktop
+          ELECTRON_ARCH: x64
+        run: |
+          npm ci
+          npm run package:linux
+
+      - name: Create archive
+        run: |
+          mkdir -p dist
+          cd desktop/dist
+          tar -czf ../../dist/requestloom-desktop-linux-x64.tar.gz RequestLoom-Desktop-linux-x64/
+
+      - name: Attach to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/requestloom-desktop-linux-x64.tar.gz

@@ -21,7 +21,8 @@ function getBackendDir() {
 }
 
 function getBackendExecutablePath() {
-  return path.join(getBackendDir(), 'RequestLoom.Api.exe');
+  const exeName = process.platform === 'win32' ? 'RequestLoom.Api.exe' : 'RequestLoom.Api';
+  return path.join(getBackendDir(), exeName);
 }
 
 function getBackendLogPath() {
