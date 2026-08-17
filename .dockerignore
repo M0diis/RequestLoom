@@ -1,0 +1,46 @@
+# Docker
+**/Dockerfile*
+**/.dockerignore
+.docker/
+
+# Build outputs
+dist/
+output/
+.electron-tmp/
+.publish-windows/
+.publish-windows-backend/
+*.exe
+
+# Dev runtime
+.dev-logs/
+.dev-pids/
+
+# IDE
+.vs/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# .NET
+**/bin/
+**/obj/
+
+# Node
+**/node_modules/
+
+# Electron
+desktop/dist/
+desktop/runtime/backend/
+
+# Logs
+*.log
+
+# Database
+*.db
+*.db-wal
+*.db-shm

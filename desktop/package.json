@@ -1,0 +1,14 @@
+{
+  "name": "requestloom-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RequestLoom desktop wrapper",
+  "main": "main.js",
+  "scripts": {
+    "package:win": "node scripts/package-win.js"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-packager": "17.1.2"
+  }
+}

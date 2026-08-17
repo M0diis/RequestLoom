@@ -1,0 +1,47 @@
+# Build outputs
+dist/
+output/
+.electron-tmp/
+.publish-windows/
+.publish-windows-backend/
+*.exe
+
+# Dev runtime
+.dev-logs/
+.dev-pids/
+
+# IDE
+.vs/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# .NET
+backend/bin/
+backend/obj/
+backend/wwwroot/
+
+# Node
+node_modules/
+frontend/node_modules/
+desktop/node_modules/
+
+# Electron
+desktop/dist/
+desktop/runtime/backend/
+
+# Logs
+*.log
+
+# Misc
+.playwright-mcp
+# Runtime data
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+backend/requestloom*.json

@@ -1,0 +1,17 @@
+services:
+  requestloom:
+    build: .
+    container_name: requestloom
+    ports:
+      - "8080:8080"
+    volumes:
+      - requestloom-data:/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      # Storage mode: "sqlite" (default) or "json"
+      # - STORAGE_MODE=json
+      # - Storage__JsonPath=/data/requestloom-data.json
+    restart: unless-stopped
+
+volumes:
+  requestloom-data:
