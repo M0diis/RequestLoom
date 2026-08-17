@@ -96,7 +96,7 @@ jobs:
 
   desktop-windows:
     name: Desktop App (Windows)
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -118,9 +118,10 @@ jobs:
           npm run build
 
       - name: Copy frontend to wwwroot
+        shell: pwsh
         run: |
-          rm -rf backend/wwwroot
-          cp -r frontend/dist backend/wwwroot
+          Remove-Item -Recurse -Force backend/wwwroot -ErrorAction SilentlyContinue
+          Copy-Item -Recurse frontend/dist backend/wwwroot
 
       - name: Publish backend (win-x64)
         working-directory: backend
@@ -137,10 +138,10 @@ jobs:
           npm run package:win
 
       - name: Create archive
+        shell: pwsh
         run: |
-          mkdir -p dist
-          cd desktop/dist
-          zip -r ../../dist/requestloom-desktop-win-x64.zip RequestLoom-Desktop-win32-x64/
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path desktop/dist/RequestLoom-Desktop-win32-x64 -DestinationPath dist/requestloom-desktop-win-x64.zip
 
       - name: Attach to Release
         uses: softprops/action-gh-release@v2
