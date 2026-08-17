@@ -89,6 +89,3 @@ jobs:
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Install
-        run: npm ci
