@@ -8,7 +8,7 @@ import type {
   CurlParseResult, CodeSnippet, CollectionRunResult, DynamicValueDefinition,
   MockServer, CreateMockServerRequest, UpdateMockServerRequest,
   MockServerEndpoint, CreateMockEndpointRequest, UpdateMockEndpointRequest,
-  AppSettings, SettingsUpdate, ApiRequestSettings, StoredRequestFile,
+  AppSettings, SettingsUpdate, ApiRequestSettings, StoredRequestFile, ServiceFileResponse, JavaScriptRunResponse,
 } from '../types';
 
 const api = axios.create({
@@ -89,8 +89,22 @@ export const requestsApi = {
 };
 
 export const serviceFilesApi = {
+  list: (workspaceId: string, serviceId: string) =>
+    api.get<ServiceFileResponse[]>(`/workspaces/${workspaceId}/services/${serviceId}/files`).then(r => r.data),
   create: (workspaceId: string, serviceId: string, name: string, kind: 'folder' | 'js') =>
-    api.post<{ path: string }>(`/workspaces/${workspaceId}/services/${serviceId}/files`, { name, kind }).then(r => r.data),
+    api.post<ServiceFileResponse>(`/workspaces/${workspaceId}/services/${serviceId}/files`, { name, kind }).then(r => r.data),
+  save: (workspaceId: string, serviceId: string, fileName: string, content: string) =>
+    api.put<void>(
+      `/workspaces/${workspaceId}/services/${serviceId}/files/${encodeURIComponent(fileName)}`,
+      { content },
+    ),
+  delete: (workspaceId: string, serviceId: string, fileName: string) =>
+    api.delete(`/workspaces/${workspaceId}/services/${serviceId}/files/${encodeURIComponent(fileName)}`),
+  run: (workspaceId: string, serviceId: string, fileName: string, code: string) =>
+    api.post<JavaScriptRunResponse>(
+      `/workspaces/${workspaceId}/services/${serviceId}/files/${encodeURIComponent(fileName)}/run`,
+      { code },
+    ).then(r => r.data),
 };
 
 // Execute

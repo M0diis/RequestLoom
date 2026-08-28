@@ -13,12 +13,15 @@ import { useRequestStore } from './stores/requestStore';
 import { useMockServerStore } from './stores/mockServerStore';
 import { useUiStore } from './stores/uiStore';
 import { useSettingsStore } from './stores/settingsStore';
+import { useScriptFileStore } from './stores/scriptFileStore';
 import { DevToolsPanel } from './components/common/DevToolsPanel';
+import { JavaScriptFileEditor } from './components/script-files/JavaScriptFileEditor';
 
 function App() {
   const { activeWorkspaceId, load: loadWorkspaces } = useWorkspaceStore();
   const { load: loadEnvironments } = useEnvironmentStore();
-  const { loadServices, sendRequest } = useRequestStore();
+  const { loadServices, sendRequest, services } = useRequestStore();
+  const { load: loadScriptFiles, activeFileKey } = useScriptFileStore();
   const { load: loadMockServers } = useMockServerStore();
   const { load: loadSettings } = useSettingsStore();
   const {
@@ -35,6 +38,9 @@ function App() {
 
   const panelContainerRef = useRef<HTMLDivElement>(null);
   const isResizingPanel = useRef(false);
+  const serviceSignature = JSON.stringify(
+    services.map((service) => ({ id: service.id, name: service.name, storagePath: service.storagePath })),
+  );
 
   // Load data on startup and workspace change
   useEffect(() => {
@@ -47,6 +53,11 @@ function App() {
     loadServices(activeWorkspaceId);
     loadMockServers(activeWorkspaceId);
   }, [activeWorkspaceId, loadEnvironments, loadServices, loadMockServers]);
+
+  useEffect(() => {
+    const serviceIds = (JSON.parse(serviceSignature) as { id: string }[]).map((service) => service.id);
+    void loadScriptFiles(activeWorkspaceId, serviceIds);
+  }, [activeWorkspaceId, loadScriptFiles, serviceSignature]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -132,7 +143,8 @@ function App() {
   const showServiceSettings = Boolean(serviceSettingsServiceId);
   const showVariables = !showServiceSettings && sidebarTab === 'variables';
   const showMockDetail = !showServiceSettings && sidebarTab === 'mockservers';
-  const showRequestWorkspace = !showServiceSettings && sidebarTab !== 'variables' && sidebarTab !== 'mockservers';
+  const showScriptWorkspace = !showServiceSettings && sidebarTab === 'services' && Boolean(activeFileKey);
+  const showRequestWorkspace = !showServiceSettings && sidebarTab !== 'variables' && sidebarTab !== 'mockservers' && !showScriptWorkspace;
   // The request tab bar only belongs to the Services view.
   const showRequestTabs = !showServiceSettings && sidebarTab === 'services';
 
@@ -159,6 +171,10 @@ function App() {
             <div className="flex-1 overflow-hidden flex flex-col">
               <ResponseViewer />
             </div>
+          </div>
+
+          <div className={`${showScriptWorkspace ? 'flex' : 'hidden'} flex-1 overflow-hidden flex-col`}>
+            <JavaScriptFileEditor />
           </div>
 
           <div className={`${showVariables ? 'flex' : 'hidden'} flex-1 overflow-hidden flex-col`}>

@@ -145,50 +145,134 @@ public class JsonDataStore
         });
     }
 
-    public string CreateServiceFile(string serviceId, string name, string kind)
+    public ServiceFileResponse CreateServiceFile(string serviceId, string serviceName, string? storagePath, string name, string kind)
     {
-        if (!IsPerCollection)
+        if (!string.Equals(kind, "folder", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(kind, "js", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Collection files are available when JSON per collection storage is enabled.");
+            throw new ArgumentException("Asset kind must be 'folder' or 'js'.");
         }
 
-        string? createdPath = null;
-        Mutate(doc =>
+        lock (_lock)
         {
-            var service = doc.Services.FirstOrDefault(row => row.Id == serviceId);
-            if (service == null)
-            {
-                throw new KeyNotFoundException("Collection not found.");
-            }
-
-            var parent = Path.GetDirectoryName(service.StoragePath);
-            if (string.IsNullOrWhiteSpace(parent))
-            {
-                throw new InvalidOperationException("Collection storage path is not configured.");
-            }
-
+            var parent = GetServiceFilesDirectory(serviceId, serviceName, storagePath);
             Directory.CreateDirectory(parent);
             var safeName = SanitizeFileName(name);
+
             if (string.Equals(kind, "folder", StringComparison.OrdinalIgnoreCase))
             {
-                createdPath = Path.Combine(parent, safeName);
-                Directory.CreateDirectory(createdPath);
-                return;
+                var folderPath = Path.Combine(parent, safeName);
+                Directory.CreateDirectory(folderPath);
+                return new ServiceFileResponse
+                {
+                    Path = folderPath,
+                    Name = safeName,
+                };
             }
 
-            if (!string.Equals(kind, "js", StringComparison.OrdinalIgnoreCase))
+            var fileName = NormalizeScriptFileName(safeName);
+            var filePath = Path.Combine(parent, fileName);
+            if (!File.Exists(filePath))
             {
-                throw new ArgumentException("Asset kind must be 'folder' or 'js'.");
+                File.WriteAllText(filePath, DefaultScriptContent(fileName));
             }
 
-            createdPath = Path.Combine(parent, safeName.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ? safeName : $"{safeName}.js");
-            if (!File.Exists(createdPath))
+            return new ServiceFileResponse
             {
-                File.WriteAllText(createdPath, "// RequestLoom collection script\n");
-            }
-        });
+                Path = filePath,
+                Name = fileName,
+                Content = File.ReadAllText(filePath),
+            };
+        }
+    }
 
-        return createdPath ?? "";
+    public void SaveServiceFile(string serviceId, string serviceName, string? storagePath, string name, string content)
+    {
+        lock (_lock)
+        {
+            var filePath = ResolveServiceScriptPath(serviceId, serviceName, storagePath, name);
+            if (!File.Exists(filePath))
+            {
+                throw new FileNotFoundException("Collection JavaScript file was not found.", filePath);
+            }
+
+            File.WriteAllText(filePath, content ?? "");
+        }
+    }
+
+    public IReadOnlyList<ServiceFileResponse> GetServiceFiles(string serviceId, string serviceName, string? storagePath)
+    {
+        lock (_lock)
+        {
+            var parent = GetServiceFilesDirectory(serviceId, serviceName, storagePath);
+            if (!Directory.Exists(parent))
+            {
+                return [];
+            }
+
+            return Directory.EnumerateFiles(parent, "*.js", SearchOption.TopDirectoryOnly)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .Select(path => new ServiceFileResponse
+                {
+                    Path = path,
+                    Name = Path.GetFileName(path),
+                    Content = File.ReadAllText(path),
+                })
+                .ToList();
+        }
+    }
+
+    public void DeleteServiceFile(string serviceId, string serviceName, string? storagePath, string name)
+    {
+        lock (_lock)
+        {
+            var filePath = ResolveServiceScriptPath(serviceId, serviceName, storagePath, name);
+            if (!File.Exists(filePath))
+            {
+                throw new FileNotFoundException("Collection JavaScript file was not found.", filePath);
+            }
+
+            File.Delete(filePath);
+        }
+    }
+
+    private string ResolveServiceScriptPath(string serviceId, string serviceName, string? storagePath, string name)
+    {
+        var parent = GetServiceFilesDirectory(serviceId, serviceName, storagePath);
+        var fileName = NormalizeScriptFileName(SanitizeFileName(name));
+        return Path.Combine(parent, fileName);
+    }
+
+    private string GetServiceFilesDirectory(string serviceId, string serviceName, string? storagePath)
+    {
+        if (IsPerCollection && !string.IsNullOrWhiteSpace(storagePath))
+        {
+            var collectionDirectory = Path.GetDirectoryName(Path.GetFullPath(storagePath));
+            if (!string.IsNullOrWhiteSpace(collectionDirectory))
+            {
+                return collectionDirectory;
+            }
+        }
+
+        var storageDirectory = Path.GetDirectoryName(Path.GetFullPath(_settings.StoragePath))
+            ?? Directory.GetCurrentDirectory();
+        var collectionsDirectory = Path.Combine(storageDirectory, "requestloom-collections");
+        var safeName = SanitizeFileName(serviceName);
+        var suffix = serviceId.Length > 8 ? serviceId[..8] : serviceId;
+        var legacyDirectory = Path.Combine(collectionsDirectory, $"{safeName}-{suffix}");
+        return Directory.Exists(legacyDirectory)
+            ? legacyDirectory
+            : Path.Combine(collectionsDirectory, $"collection-{suffix}");
+    }
+
+    private static string NormalizeScriptFileName(string name)
+    {
+        return name.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ? name : $"{name}.js";
+    }
+
+    private static string DefaultScriptContent(string fileName)
+    {
+        return $"// Shared collection script: {fileName}\n// Use module.exports to expose reusable helpers to request scripts.\n\nmodule.exports = {{}};\n";
     }
 
     private string DefaultCollectionsDirectory => Path.Combine(

@@ -8,7 +8,10 @@ import { ImportModal } from '../common/ImportModal';
 import { CollectionRunnerModal } from '../common/CollectionRunnerModal';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import { AlertModal } from '../common/AlertModal';
+import { ConfirmModal } from '../common/ConfirmModal';
+import { TextInputModal } from '../common/TextInputModal';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useScriptFileStore, type ScriptFileEntry } from '../../stores/scriptFileStore';
 import { exportImportApi, requestsApi, serviceFilesApi } from '../../services/api';
 import type { ApiRequest } from '../../types';
 
@@ -141,13 +144,21 @@ export function Sidebar() {
     setServiceSettingsServiceId,
     setTerminalCwd,
   } = useUiStore();
+  const {
+    files: scriptFiles,
+    addFile: addScriptFile,
+    openFile: openScriptFile,
+    setActiveFile: setActiveScriptFile,
+    run: runScriptFile,
+    removeFile: removeScriptFile,
+  } = useScriptFileStore();
   const { settings } = useSettingsStore();
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePath, setNewServicePath] = useState('');
   const [addingService, setAddingService] = useState(false);
   const [addingRequestToService, setAddingRequestToService] = useState<string | null>(null);
   const [newRequestName, setNewRequestName] = useState('');
-  const [contextMenu, setContextMenu] = useState<{ type: 'service' | 'request'; id: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ type: 'service' | 'request' | 'script'; id: string; x: number; y: number } | null>(null);
   const [collapsedServices, setCollapsedServices] = useState<Set<string>>(new Set());
   const [showImport, setShowImport] = useState(false);
   const [showCollectionRunner, setShowCollectionRunner] = useState<string | null>(null);
@@ -157,6 +168,12 @@ export function Sidebar() {
   const [renamingServiceName, setRenamingServiceName] = useState('');
   const [showCodeForRequest, setShowCodeForRequest] = useState<ApiRequest | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [collectionAssetDialog, setCollectionAssetDialog] = useState<{
+    serviceId: string;
+    kind: 'folder' | 'js';
+  } | null>(null);
+  const [scriptToDelete, setScriptToDelete] = useState<ScriptFileEntry | null>(null);
+  const [deletingScript, setDeletingScript] = useState(false);
   const addRequestSubmitting = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -215,6 +232,7 @@ export function Sidebar() {
       const req = await createRequest(serviceId, newRequestName.trim(), 'GET');
       setNewRequestName('');
       setAddingRequestToService(null);
+      setActiveScriptFile(null);
       await selectRequest(req.id);
     } finally {
       addRequestSubmitting.current = false;
@@ -283,7 +301,7 @@ export function Sidebar() {
     setRenamingServiceName('');
   };
 
-  const handleContextMenu = (e: React.MouseEvent, type: 'service' | 'request', id: string) => {
+  const handleContextMenu = (e: React.MouseEvent, type: 'service' | 'request' | 'script', id: string) => {
     e.preventDefault();
     setContextMenu({ type, id, x: e.clientX, y: e.clientY });
   };
@@ -295,6 +313,7 @@ export function Sidebar() {
 
   const handleRunRequest = async (requestId: string) => {
     setContextMenu(null);
+    setActiveScriptFile(null);
     const store = useRequestStore.getState();
     if (store.activeRequestId === requestId && store.isRequestDirty(requestId)) {
       await store.sendRequest(activeWorkspaceId);
@@ -326,6 +345,7 @@ export function Sidebar() {
 
   const handleCloneRequest = async (requestId: string) => {
     setContextMenu(null);
+    setActiveScriptFile(null);
     try {
       const clonedRequest = await duplicateRequest(requestId);
       await selectRequest(clonedRequest.id);
@@ -334,15 +354,61 @@ export function Sidebar() {
     }
   };
 
-  const handleCreateCollectionAsset = async (serviceId: string, kind: 'folder' | 'js') => {
+  const handleCreateCollectionAsset = (serviceId: string, kind: 'folder' | 'js') => {
     setContextMenu(null);
-    const label = kind === 'folder' ? 'Folder name' : 'JavaScript file name';
-    const name = window.prompt(label);
-    if (!name?.trim()) return;
+    setCollectionAssetDialog({ serviceId, kind });
+  };
+
+  const handleOpenScriptFile = (serviceId: string, file: typeof scriptFiles[number]) => {
+    setContextMenu(null);
+    setServiceSettingsServiceId(null);
+    setSidebarTab('services');
+    openScriptFile(serviceId, file);
+  };
+
+  const handleRunScriptFile = (file: ScriptFileEntry) => {
+    setContextMenu(null);
+    setServiceSettingsServiceId(null);
+    setSidebarTab('services');
+    openScriptFile(file.serviceId, file);
+    void runScriptFile(activeWorkspaceId, file.key).catch(() => {});
+  };
+
+  const handleCopyScriptPath = async (file: ScriptFileEntry) => {
+    setContextMenu(null);
+    await navigator.clipboard.writeText(file.path).catch(() => {});
+    setAlertMessage(`Path copied to clipboard:\n${file.path}`);
+  };
+
+  const handleDeleteScript = async () => {
+    if (!scriptToDelete) return;
+
+    setDeletingScript(true);
     try {
-      const result = await serviceFilesApi.create(activeWorkspaceId, serviceId, name.trim(), kind);
-      await revealPath(result.path);
+      await serviceFilesApi.delete(activeWorkspaceId, scriptToDelete.serviceId, scriptToDelete.name);
+      removeScriptFile(scriptToDelete.key);
+      setScriptToDelete(null);
     } catch (error) {
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to delete JavaScript file');
+    } finally {
+      setDeletingScript(false);
+    }
+  };
+
+  const handleCollectionAssetSubmit = async (name: string) => {
+    if (!collectionAssetDialog) return;
+
+    const { serviceId, kind } = collectionAssetDialog;
+    try {
+      const result = await serviceFilesApi.create(activeWorkspaceId, serviceId, name, kind);
+      setCollectionAssetDialog(null);
+      if (kind === 'js') {
+        addScriptFile(serviceId, result);
+      } else {
+        await revealPath(result.path);
+      }
+    } catch (error) {
+      setCollectionAssetDialog(null);
       setAlertMessage(error instanceof Error ? error.message : 'Failed to create collection file');
     }
   };
@@ -513,7 +579,7 @@ export function Sidebar() {
               {favorites.map((req) => (
                 <button
                   key={req.id}
-                  onClick={() => { setServiceSettingsServiceId(null); selectRequest(req.id); }}
+                  onClick={() => { setServiceSettingsServiceId(null); setActiveScriptFile(null); void selectRequest(req.id); }}
                   onContextMenu={(e) => handleContextMenu(e, 'request', req.id)}
                   className={`flex w-full items-center gap-2 px-2 py-1 text-left text-xs ${
                     activeRequestId === req.id ? 'bg-gray-800/70 text-gray-100' : 'text-gray-300 hover:bg-gray-900/60'
@@ -674,7 +740,7 @@ export function Sidebar() {
                 return (
                   <button
                     key={req.id}
-                    onClick={() => { setServiceSettingsServiceId(null); selectRequest(req.id); }}
+                  onClick={() => { setServiceSettingsServiceId(null); setActiveScriptFile(null); void selectRequest(req.id); }}
                     onContextMenu={(e) => handleContextMenu(e, 'request', req.id)}
                     className={`w-full text-left pl-8 pr-3 py-1.5 text-xs flex items-center gap-2 ${
                       activeRequestId === req.id
@@ -692,6 +758,25 @@ export function Sidebar() {
                   </button>
                 );
               })}
+
+              {/* Collection JavaScript files */}
+              {!collapsedServices.has(service.id) && scriptFiles
+                .filter((file) => file.serviceId === service.id)
+                .map((file) => (
+                  <button
+                    key={file.key}
+                    type="button"
+                    onClick={() => handleOpenScriptFile(service.id, file)}
+                    onContextMenu={(event) => handleContextMenu(event, 'script', file.key)}
+                    className="flex w-full items-center gap-2 px-8 py-1.5 text-left text-xs text-gray-400 hover:bg-gray-900/50 hover:text-gray-200"
+                  >
+                    <svg className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                      <path d="M7 3h7l4 4v14H7a2 2 0 01-2-2V5a2 2 0 012-2zM14 3v5h5" />
+                      <path d="M10 13l-2 2 2 2M14 13l2 2-2 2" />
+                    </svg>
+                    <span className="truncate">{file.name}</span>
+                  </button>
+                ))}
 
               {/* Add request inline */}
               {!collapsedServices.has(service.id) && addingRequestToService === service.id && (
@@ -733,7 +818,7 @@ export function Sidebar() {
         <div
           ref={contextMenuRef}
           role="menu"
-          aria-label={contextMenu.type === 'request' ? 'Request actions' : 'Collection actions'}
+          aria-label={contextMenu.type === 'request' ? 'Request actions' : contextMenu.type === 'script' ? 'JavaScript file actions' : 'Collection actions'}
           className="fixed z-50 max-h-[calc(100vh-1rem)] min-w-[210px] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-gray-700/80 bg-[#1b1b1b] p-1 shadow-[0_16px_36px_rgba(0,0,0,0.55)] ring-1 ring-black/40"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
@@ -872,6 +957,31 @@ export function Sidebar() {
               </ContextMenuItem>
             </>
           )}
+          {contextMenu.type === 'script' && (() => {
+            const file = scriptFiles.find((item) => item.key === contextMenu.id);
+            if (!file) return null;
+
+            return (
+              <>
+                <ContextMenuItem icon="play" onClick={() => handleRunScriptFile(file)}>
+                  Run Script
+                </ContextMenuItem>
+                <ContextMenuItem icon="file-code" onClick={() => handleOpenScriptFile(file.serviceId, file)}>
+                  Open
+                </ContextMenuItem>
+                <ContextMenuItem icon="copy" onClick={() => { void handleCopyScriptPath(file); }}>
+                  Copy Path
+                </ContextMenuItem>
+                <ContextMenuItem icon="folder" onClick={() => { setContextMenu(null); void revealPath(file.path); }}>
+                  Reveal in File Explorer
+                </ContextMenuItem>
+                <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+                <ContextMenuItem icon="trash" danger onClick={() => { setContextMenu(null); setScriptToDelete(file); }}>
+                  Delete
+                </ContextMenuItem>
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -880,6 +990,29 @@ export function Sidebar() {
         <ImportModal
           onClose={() => setShowImport(false)}
           workspaceId={activeWorkspaceId}
+        />
+      )}
+
+      {collectionAssetDialog && (
+        <TextInputModal
+          title={collectionAssetDialog.kind === 'folder' ? 'Create folder' : 'Create JavaScript file'}
+          label={collectionAssetDialog.kind === 'folder' ? 'Folder name' : 'JavaScript file name'}
+          placeholder={collectionAssetDialog.kind === 'folder' ? 'e.g. scripts' : 'e.g. pre-request.js'}
+          confirmLabel="Create"
+          onConfirm={handleCollectionAssetSubmit}
+          onClose={() => setCollectionAssetDialog(null)}
+        />
+      )}
+
+      {scriptToDelete && (
+        <ConfirmModal
+          title="Delete JavaScript file"
+          message={`Delete ${scriptToDelete.name}? This cannot be undone.`}
+          confirmLabel="Delete"
+          variant="danger"
+          busy={deletingScript}
+          onConfirm={() => { void handleDeleteScript(); }}
+          onClose={() => { if (!deletingScript) setScriptToDelete(null); }}
         />
       )}
 

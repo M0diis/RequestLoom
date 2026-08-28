@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using RequestLoom.Api.Data;
 using RequestLoom.Api.Data.Repositories;
 using RequestLoom.Api.Models;
+using RequestLoom.Api.Services;
 
 namespace RequestLoom.Api.Controllers;
 
@@ -11,11 +12,16 @@ public class ServicesController : ControllerBase
 {
     private readonly IServiceRepository _repo;
     private readonly JsonDataStore _jsonStore;
+    private readonly JavaScriptRunnerService _javascriptRunner;
 
-    public ServicesController(IServiceRepository repo, JsonDataStore jsonStore)
+    public ServicesController(
+        IServiceRepository repo,
+        JsonDataStore jsonStore,
+        JavaScriptRunnerService javascriptRunner)
     {
         _repo = repo;
         _jsonStore = jsonStore;
+        _javascriptRunner = javascriptRunner;
     }
 
     [HttpGet]
@@ -88,8 +94,16 @@ public class ServicesController : ControllerBase
 
         try
         {
-            var path = _jsonStore.CreateServiceFile(id, request.Name, request.Kind);
-            return Ok(new { path });
+            var service = await _repo.GetByIdAsync(id);
+            if (service == null) return NotFound();
+
+            var file = _jsonStore.CreateServiceFile(
+                service.Id,
+                service.Name,
+                service.StoragePath,
+                request.Name,
+                request.Kind);
+            return Ok(file);
         }
         catch (KeyNotFoundException)
         {
@@ -98,6 +112,78 @@ public class ServicesController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id}/files")]
+    public async Task<IActionResult> GetFiles(string id)
+    {
+        var service = await _repo.GetByIdAsync(id);
+        if (service == null) return NotFound();
+
+        return Ok(_jsonStore.GetServiceFiles(service.Id, service.Name, service.StoragePath));
+    }
+
+    [HttpPut("{id}/files/{fileName}")]
+    public async Task<IActionResult> SaveFile(string id, string fileName, [FromBody] SaveServiceFileRequest request)
+    {
+        var service = await _repo.GetByIdAsync(id);
+        if (service == null) return NotFound();
+
+        try
+        {
+            _jsonStore.SaveServiceFile(service.Id, service.Name, service.StoragePath, fileName, request.Content);
+            return NoContent();
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpDelete("{id}/files/{fileName}")]
+    public async Task<IActionResult> DeleteFile(string id, string fileName)
+    {
+        var service = await _repo.GetByIdAsync(id);
+        if (service == null) return NotFound();
+
+        try
+        {
+            _jsonStore.DeleteServiceFile(service.Id, service.Name, service.StoragePath, fileName);
+            return NoContent();
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("{id}/files/{fileName}/run")]
+    public async Task<IActionResult> RunFile(string id, string fileName, [FromBody] RunServiceFileRequest request)
+    {
+        var service = await _repo.GetByIdAsync(id);
+        if (service == null) return NotFound();
+
+        try
+        {
+            _jsonStore.SaveServiceFile(service.Id, service.Name, service.StoragePath, fileName, request.Code);
+            return Ok(_javascriptRunner.Run(request.Code));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
         }
         catch (ArgumentException ex)
         {

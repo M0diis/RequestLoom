@@ -469,3 +469,16 @@ export interface StoredRequestFile {
   content: string;
   isJsonStorage: boolean;
 }
+
+export interface ServiceFileResponse {
+  path: string;
+  name: string;
+  content: string;
+}
+
+export interface JavaScriptRunResponse {
+  success: boolean;
+  logs: string[];
+  result?: string | null;
+  error?: string | null;
+}

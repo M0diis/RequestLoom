@@ -73,6 +73,7 @@ builder.Services.AddScoped<SpecificationImportService>();
 builder.Services.AddScoped<ExportImportService>();
 builder.Services.AddScoped<ToolsService>();
 builder.Services.AddScoped<CollectionRunnerService>();
+builder.Services.AddScoped<JavaScriptRunnerService>();
 builder.Services.AddScoped<MockServerService>();
 builder.Services.AddScoped<ExampleDataService>();
 

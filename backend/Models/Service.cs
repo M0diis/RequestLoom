@@ -48,6 +48,31 @@ public class CreateServiceFileRequest
     public string Kind { get; set; } = "";
 }
 
+public class ServiceFileResponse
+{
+    public string Path { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Content { get; set; } = "";
+}
+
+public class SaveServiceFileRequest
+{
+    public string Content { get; set; } = "";
+}
+
+public class RunServiceFileRequest
+{
+    public string Code { get; set; } = "";
+}
+
+public class JavaScriptRunResponse
+{
+    public bool Success { get; set; }
+    public List<string> Logs { get; set; } = [];
+    public string? Result { get; set; }
+    public string? Error { get; set; }
+}
+
 public class UpdateServiceRequest
 {
     public string Name { get; set; } = "";
