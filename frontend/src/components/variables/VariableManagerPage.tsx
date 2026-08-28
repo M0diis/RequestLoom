@@ -6,6 +6,8 @@ import { useRequestStore } from '../../stores/requestStore';
 import { useUiStore } from '../../stores/uiStore';
 import type { ServiceVariable, WorkspaceVariable } from '../../types';
 import { CustomDropdown } from '../common/CustomDropdown';
+import { AutocompleteInput } from '../common/AutocompleteInput';
+import { DEFAULT_DYNAMIC_VALUE_SUGGESTIONS } from '../../lib/dynamicValues';
 
 interface VariableDraft {
   key: string;
@@ -379,10 +381,12 @@ export function VariableManagerPage() {
       />
 
       <div className="relative flex items-center" style={{ flex: '2 1 150px', minWidth: '100px' }}>
-        <input
-          type={draft.isSecret && !draft.reveal ? 'password' : 'text'}
+        <AutocompleteInput
           value={draft.value}
-          onChange={(e) => patch(id, { value: e.target.value })}
+          onChange={(value) => patch(id, { value })}
+          suggestions={[]}
+          dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
+          type={draft.isSecret && !draft.reveal ? 'password' : 'text'}
           className={`${INPUT} ${draft.isSecret ? 'pr-7' : ''}`}
           placeholder="value"
         />
@@ -451,14 +455,15 @@ export function VariableManagerPage() {
         style={{ flex: '1 1 110px', minWidth: '80px' }}
       />
 
-      <input
-        type={isSecret ? 'password' : 'text'}
+      <AutocompleteInput
         value={valueVal}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={setValue}
         onKeyDown={(e) => { if (e.key === 'Enter') void onAdd(); }}
+        suggestions={[]}
+        dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
+        type={isSecret ? 'password' : 'text'}
         placeholder="value"
         className={INPUT}
-        style={{ flex: '2 1 150px', minWidth: '100px' }}
       />
 
       <div className="flex-shrink-0 w-[112px]">

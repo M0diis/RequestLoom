@@ -81,7 +81,7 @@ public class MockServerService
         }
 
         // Resolve variables in response body
-        var responseBody = await _variableResolver.ResolveAsync(endpoint.ResponseBody, server.WorkspaceId);
+        var responseBody = await _variableResolver.ResolveAsync(endpoint.ResponseBody, server.WorkspaceId, includeDynamicValues: false);
 
         // Parse response headers
         var responseHeaders = new List<Kvp>();
@@ -94,7 +94,7 @@ public class MockServerService
                 {
                     foreach (var h in headerList.Where(h => h.Enabled))
                     {
-                        var resolvedValue = await _variableResolver.ResolveAsync(h.Value, server.WorkspaceId);
+                        var resolvedValue = await _variableResolver.ResolveAsync(h.Value, server.WorkspaceId, includeDynamicValues: false);
                         responseHeaders.Add(new Kvp { Key = h.Key, Value = resolvedValue });
                     }
                 }

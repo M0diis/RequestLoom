@@ -17,6 +17,7 @@ interface Props {
   readOnly?: boolean;
   onChange?: (value: string) => void;
   className?: string;
+  dynamicSuggestions?: string[];
 }
 
 export function CodeEditor({
@@ -25,6 +26,7 @@ export function CodeEditor({
   readOnly = false,
   onChange,
   className = '',
+  dynamicSuggestions = [],
 }: Props) {
   const { darkMode } = useUiStore();
   const [editorReady, setEditorReady] = useState(false);
@@ -33,8 +35,9 @@ export function CodeEditor({
     let disposed = false;
 
     const setupEditor = async () => {
-      const { ensureMonacoConfigured } = await import('../../lib/monaco');
+      const { ensureMonacoConfigured, setDynamicValueCompletions } = await import('../../lib/monaco');
       await ensureMonacoConfigured();
+      setDynamicValueCompletions(dynamicSuggestions);
 
       if (!disposed) {
         setEditorReady(true);
@@ -46,7 +49,7 @@ export function CodeEditor({
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [dynamicSuggestions]);
 
   if (!editorReady) {
     return <EditorLoadingState className={className} />;

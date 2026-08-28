@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
@@ -6,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using Jint;
+using Jint.Native;
+using Jint.Runtime;
 using RequestLoom.Api.Data.Repositories;
 using RequestLoom.Api.Models;
 
@@ -20,9 +21,7 @@ public class RequestExecutionService
     private readonly IHistoryRepository _historyRepo;
     private readonly SettingsService _settings;
     private readonly ILogger<RequestExecutionService> _logger;
-
-    private static readonly ConcurrentDictionary<string, Dictionary<string, RuntimeScriptVariable>> RuntimeVariablesByScope =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly RuntimeVariableStore _runtimeVariableStore;
 
     public RequestExecutionService(
         IHttpClientFactory httpClientFactory,
@@ -31,7 +30,8 @@ public class RequestExecutionService
         IRequestRepository requestRepo,
         IHistoryRepository historyRepo,
         SettingsService settings,
-        ILogger<RequestExecutionService> logger)
+        ILogger<RequestExecutionService> logger,
+        RuntimeVariableStore runtimeVariableStore)
     {
         _httpClientFactory = httpClientFactory;
         _variableService = variableService;
@@ -40,13 +40,13 @@ public class RequestExecutionService
         _historyRepo = historyRepo;
         _settings = settings;
         _logger = logger;
+        _runtimeVariableStore = runtimeVariableStore;
     }
 
     public async Task<ExecuteResponse> ExecuteAsync(ExecuteRequestPayload payload, CancellationToken cancellationToken)
     {
         var workspaceId = payload.WorkspaceId ?? "default";
-        var runtimeScopeKey = BuildRuntimeScopeKey(workspaceId, payload.RequestId);
-        var runtimeVariables = GetRuntimeVariables(runtimeScopeKey);
+        var runtimeVariables = _runtimeVariableStore.Get(workspaceId, payload.RequestId);
         var scriptLogs = new List<string>();
         var stopwatch = Stopwatch.StartNew();
         var urlForDiagnostics = payload.Url ?? "";
@@ -54,11 +54,11 @@ public class RequestExecutionService
         try
         {
             var requestVariables = BuildRequestVariableMap(payload.Variables);
-
-            foreach (var (key, variable) in runtimeVariables)
-            {
-                requestVariables[key] = variable.Value;
-            }
+            var resolutionSession = await _variableService.CreateSessionAsync(
+                workspaceId,
+                payload.ServiceId,
+                requestVariables,
+                runtimeVariables.ToDictionary(pair => pair.Key, pair => pair.Value.Value, StringComparer.OrdinalIgnoreCase));
 
             var requestState = new ScriptRequestState
             {
@@ -71,13 +71,12 @@ public class RequestExecutionService
             };
 
             var preRequestScript = await ResolvePreRequestScriptAsync(payload);
-            var preScriptVariables = await _variableService.BuildVariableMapAsync(workspaceId, payload.ServiceId, requestVariables);
             var preScriptResult = ExecuteScript(
                 script: preRequestScript,
                 requestState: requestState,
                 responseState: null,
                 runtimeVariables: runtimeVariables,
-                availableVariables: preScriptVariables,
+                resolutionSession: resolutionSession,
                 sourceLabel: "Pre-request script");
 
             scriptLogs.AddRange(preScriptResult.Logs);
@@ -96,12 +95,6 @@ public class RequestExecutionService
                 };
             }
 
-            requestVariables = BuildRequestVariableMap(payload.Variables);
-            foreach (var (key, variable) in runtimeVariables)
-            {
-                requestVariables[key] = variable.Value;
-            }
-
             var serviceDefaults = !string.IsNullOrWhiteSpace(payload.ServiceId)
                 ? await _serviceRepo.GetByIdAsync(payload.ServiceId)
                 : null;
@@ -109,10 +102,10 @@ public class RequestExecutionService
             var effectiveAuth = ResolveEffectiveAuth(payload.Auth, serviceDefaults?.Auth);
 
             // Resolve variables
-            var resolvedUrl = await _variableService.ResolveAsync(requestState.Url, workspaceId, payload.ServiceId, requestVariables);
+            var resolvedUrl = resolutionSession.Resolve(requestState.Url);
             urlForDiagnostics = resolvedUrl;
             var resolvedBody = requestState.Body != null
-                ? await _variableService.ResolveAsync(requestState.Body, workspaceId, payload.ServiceId, requestVariables)
+                ? resolutionSession.Resolve(requestState.Body)
                 : null;
 
             // Build query string from params
@@ -122,8 +115,8 @@ public class RequestExecutionService
                 var queryParts = new List<string>();
                 foreach (var p in enabledParams)
                 {
-                    var key = await _variableService.ResolveAsync(p.Key, workspaceId, payload.ServiceId, requestVariables);
-                    var value = await _variableService.ResolveAsync(p.Value, workspaceId, payload.ServiceId, requestVariables);
+                    var key = resolutionSession.Resolve(p.Key);
+                    var value = resolutionSession.Resolve(p.Value);
                     queryParts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
                 }
                 if (queryParts.Count > 0)
@@ -208,18 +201,46 @@ public class RequestExecutionService
             var httpMethod = new HttpMethod((requestState.Method ?? payload.Method).ToUpperInvariant());
             var request = new HttpRequestMessage(httpMethod, resolvedUrl);
 
+            var resolvedHeaders = new List<KeyValuePairRequest>();
+
             // Apply headers
             foreach (var h in mergedHeaders.Where(h => h.Enabled))
             {
-                var headerKey = await _variableService.ResolveAsync(h.Key, workspaceId, payload.ServiceId, requestVariables);
-                var headerValue = await _variableService.ResolveAsync(h.Value, workspaceId, payload.ServiceId, requestVariables);
+                var headerKey = resolutionSession.Resolve(h.Key);
+                var headerValue = resolutionSession.Resolve(h.Value);
+                resolvedHeaders.Add(new KeyValuePairRequest { Key = headerKey, Value = headerValue, Enabled = true });
                 request.Headers.TryAddWithoutValidation(headerKey, headerValue);
             }
 
             // Apply auth
             if (effectiveAuth != null && effectiveAuth.AuthType != "none")
             {
-                await ApplyAuthAsync(request, effectiveAuth, workspaceId, payload.ServiceId, requestVariables);
+                ApplyAuth(request, effectiveAuth, resolutionSession);
+                if (request.RequestUri != null)
+                {
+                    resolvedUrl = request.RequestUri.ToString();
+                    urlForDiagnostics = resolvedUrl;
+                }
+
+                foreach (var header in request.Headers)
+                {
+                    var materialized = new KeyValuePairRequest
+                    {
+                        Key = header.Key,
+                        Value = string.Join(", ", header.Value),
+                        Enabled = true
+                    };
+                    var existing = resolvedHeaders.FirstOrDefault(item =>
+                        string.Equals(item.Key, materialized.Key, StringComparison.OrdinalIgnoreCase));
+                    if (existing == null)
+                    {
+                        resolvedHeaders.Add(materialized);
+                    }
+                    else
+                    {
+                        existing.Value = materialized.Value;
+                    }
+                }
             }
 
             // Apply body
@@ -261,7 +282,6 @@ public class RequestExecutionService
             };
 
             var postRequestScript = await ResolvePostRequestScriptAsync(payload);
-            var postScriptVariables = await _variableService.BuildVariableMapAsync(workspaceId, payload.ServiceId, requestVariables);
             var postScriptResult = ExecuteScript(
                 script: postRequestScript,
                 requestState: requestState,
@@ -274,7 +294,7 @@ public class RequestExecutionService
                     Headers = responseHeaders
                 },
                 runtimeVariables: runtimeVariables,
-                availableVariables: postScriptVariables,
+                resolutionSession: resolutionSession,
                 sourceLabel: "Post-request script");
 
             scriptLogs.AddRange(postScriptResult.Logs);
@@ -283,13 +303,12 @@ public class RequestExecutionService
                 scriptLogs.Add($"Post-request script failed: {postScriptResult.ErrorMessage}");
             }
 
-            SetRuntimeVariables(runtimeScopeKey, runtimeVariables);
+            _runtimeVariableStore.Set(workspaceId, payload.RequestId, runtimeVariables);
             result.ScriptVariables = CloneRuntimeVariables(runtimeVariables);
             result.ScriptLogs = scriptLogs;
 
             var testScript = await ResolveTestScriptAsync(payload);
-            var testVariables = await _variableService.BuildVariableMapAsync(workspaceId, payload.ServiceId, requestVariables);
-            result.TestResults = TestScriptRunner.Run(testScript, result, testVariables);
+            result.TestResults = TestScriptRunner.Run(testScript, result, resolutionSession.ToDictionary());
 
             // Check for SOAP fault
             if (result.ContentType.Contains("xml"))
@@ -306,7 +325,7 @@ public class RequestExecutionService
                     RequestId = payload.RequestId,
                     Method = requestState.Method,
                     Url = resolvedUrl,
-                    RequestHeadersJson = JsonSerializer.Serialize(mergedHeaders),
+                    RequestHeadersJson = JsonSerializer.Serialize(resolvedHeaders),
                     RequestBody = resolvedBody,
                     ResponseStatus = result.StatusCode,
                     ResponseHeadersJson = JsonSerializer.Serialize(responseHeaders),
@@ -439,7 +458,7 @@ public class RequestExecutionService
         ScriptRequestState requestState,
         ScriptResponseState? responseState,
         Dictionary<string, RuntimeScriptVariable> runtimeVariables,
-        Dictionary<string, string> availableVariables,
+        TemplateResolutionSession resolutionSession,
         string sourceLabel)
     {
         var logs = new List<string>();
@@ -452,6 +471,14 @@ public class RequestExecutionService
         try
         {
             var engine = new Engine(options => options.TimeoutInterval(TimeSpan.FromMilliseconds(500)));
+            var availableVariables = resolutionSession.ToDictionary();
+            var requestObject = new Dictionary<string, object?>
+            {
+                ["method"] = requestState.Method,
+                ["url"] = requestState.Url,
+                ["body"] = requestState.Body,
+                ["bodyType"] = requestState.BodyType
+            };
 
             engine.SetValue("setVar", new Action<string, object?>((key, value) =>
             {
@@ -464,7 +491,8 @@ public class RequestExecutionService
                     Value = normalizedValue,
                     Source = sourceLabel
                 };
-                availableVariables[normalizedKey] = normalizedValue;
+                resolutionSession.SetVariable(normalizedKey, normalizedValue);
+                RefreshAvailableVariables(availableVariables, resolutionSession);
             }));
 
             engine.SetValue("getVar", new Func<string, string?>((key) =>
@@ -472,14 +500,7 @@ public class RequestExecutionService
                 var normalizedKey = key?.Trim();
                 if (string.IsNullOrWhiteSpace(normalizedKey)) return null;
 
-                if (runtimeVariables.TryGetValue(normalizedKey, out var runtimeVar))
-                {
-                    return runtimeVar.Value;
-                }
-
-                return availableVariables.TryGetValue(normalizedKey, out var value)
-                    ? value
-                    : null;
+                return resolutionSession.GetVariable(normalizedKey);
             }));
 
             engine.SetValue("unsetVar", new Action<string>((key) =>
@@ -488,12 +509,14 @@ public class RequestExecutionService
                 if (string.IsNullOrWhiteSpace(normalizedKey)) return;
 
                 runtimeVariables.Remove(normalizedKey);
-                availableVariables.Remove(normalizedKey);
+                resolutionSession.UnsetVariable(normalizedKey);
+                RefreshAvailableVariables(availableVariables, resolutionSession);
             }));
 
             engine.SetValue("setUrl", new Action<string>((url) =>
             {
                 requestState.Url = url ?? "";
+                requestObject["url"] = requestState.Url;
             }));
             engine.SetValue("getUrl", new Func<string>(() => requestState.Url));
 
@@ -502,13 +525,36 @@ public class RequestExecutionService
                 if (!string.IsNullOrWhiteSpace(method))
                 {
                     requestState.Method = method.Trim().ToUpperInvariant();
+                    requestObject["method"] = requestState.Method;
                 }
             }));
             engine.SetValue("getMethod", new Func<string>(() => requestState.Method));
 
-            engine.SetValue("setBody", new Action<string?>((body) =>
+            engine.SetValue("setBody", new Action<JsValue>((body) =>
             {
-                requestState.Body = body;
+                if (body == JsValue.Null || body == JsValue.Undefined)
+                {
+                    requestState.Body = null;
+                }
+                else if (body.Type == Types.String)
+                {
+                    requestState.Body = body.ToObject()?.ToString() ?? "";
+                }
+                else
+                {
+                    var stringify = engine.GetValue("JSON").AsObject().Get("stringify");
+                    var serialized = engine.Invoke(stringify, new object[] { body }).ToObject()?.ToString();
+                    if (serialized == null)
+                    {
+                        throw new InvalidOperationException("setBody could not serialize the supplied value");
+                    }
+
+                    requestState.Body = serialized;
+                    requestState.BodyType = "json";
+                }
+
+                requestObject["body"] = requestState.Body;
+                requestObject["bodyType"] = requestState.BodyType;
             }));
             engine.SetValue("getBody", new Func<string?>(() => requestState.Body));
 
@@ -543,13 +589,8 @@ public class RequestExecutionService
                 logs.Add(value?.ToString() ?? "null");
             }));
 
-            engine.SetValue("request", new Dictionary<string, object?>
-            {
-                ["method"] = requestState.Method,
-                ["url"] = requestState.Url,
-                ["body"] = requestState.Body,
-                ["bodyType"] = requestState.BodyType
-            });
+            engine.SetValue("vars", availableVariables);
+            engine.SetValue("request", requestObject);
 
             if (responseState != null)
             {
@@ -595,6 +636,15 @@ public class RequestExecutionService
         }).ToList();
     }
 
+    private static void RefreshAvailableVariables(
+        Dictionary<string, string> availableVariables,
+        TemplateResolutionSession resolutionSession)
+    {
+        availableVariables.Clear();
+        foreach (var (key, value) in resolutionSession.ToDictionary())
+            availableVariables[key] = value;
+    }
+
     private static void UpsertKeyValue(List<KeyValuePairRequest> collection, string key, string value)
     {
         if (string.IsNullOrWhiteSpace(key)) return;
@@ -631,31 +681,6 @@ public class RequestExecutionService
         var normalizedKey = key.Trim();
         return collection.FirstOrDefault(entry =>
             string.Equals(entry.Key?.Trim(), normalizedKey, StringComparison.OrdinalIgnoreCase))?.Value;
-    }
-
-    private static string BuildRuntimeScopeKey(string workspaceId, string? requestId)
-    {
-        if (string.IsNullOrWhiteSpace(requestId))
-        {
-            return $"{workspaceId}::adhoc";
-        }
-
-        return $"{workspaceId}::{requestId.Trim()}";
-    }
-
-    private static Dictionary<string, RuntimeScriptVariable> GetRuntimeVariables(string scopeKey)
-    {
-        if (!RuntimeVariablesByScope.TryGetValue(scopeKey, out var variables))
-        {
-            return new Dictionary<string, RuntimeScriptVariable>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        return CloneRuntimeVariables(variables);
-    }
-
-    private static void SetRuntimeVariables(string scopeKey, Dictionary<string, RuntimeScriptVariable> runtimeVariables)
-    {
-        RuntimeVariablesByScope[scopeKey] = CloneRuntimeVariables(runtimeVariables);
     }
 
     private static Dictionary<string, RuntimeScriptVariable> CloneRuntimeVariables(
@@ -738,43 +763,36 @@ public class RequestExecutionService
         return string.Equals(authType?.Trim(), expected, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task ApplyAuthAsync(
+    private static void ApplyAuth(
         HttpRequestMessage request,
         AuthRequest auth,
-        string workspaceId,
-        string? serviceId,
-        Dictionary<string, string> requestVariables)
+        TemplateResolutionSession resolutionSession)
     {
         var config = JsonSerializer.Deserialize<JsonElement>(auth.ConfigJson);
 
         switch ((auth.AuthType ?? "").Trim().ToLowerInvariant())
         {
             case "basic":
-                var username = await _variableService.ResolveAsync(
-                    config.GetProperty("username").GetString() ?? "", workspaceId, serviceId, requestVariables);
-                var password = await _variableService.ResolveAsync(
-                    config.GetProperty("password").GetString() ?? "", workspaceId, serviceId, requestVariables);
+                var username = resolutionSession.Resolve(config.GetProperty("username").GetString() ?? "");
+                var password = resolutionSession.Resolve(config.GetProperty("password").GetString() ?? "");
                 var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
                 request.Headers.TryAddWithoutValidation("Authorization", $"Basic {encoded}");
                 break;
 
             case "bearer":
-                var token = await _variableService.ResolveAsync(
-                    config.GetProperty("token").GetString() ?? "", workspaceId, serviceId, requestVariables);
+                var token = resolutionSession.Resolve(config.GetProperty("token").GetString() ?? "");
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
                 break;
 
             case "apikey":
-                var keyName = await _variableService.ResolveAsync(
-                    config.GetProperty("key").GetString() ?? "", workspaceId, serviceId, requestVariables);
-                var keyValue = await _variableService.ResolveAsync(
-                    config.GetProperty("value").GetString() ?? "", workspaceId, serviceId, requestVariables);
-                var location = config.GetProperty("in").GetString() ?? "header";
-                if (location == "header")
+                var keyName = resolutionSession.Resolve(config.GetProperty("key").GetString() ?? "");
+                var keyValue = resolutionSession.Resolve(config.GetProperty("value").GetString() ?? "");
+                var location = resolutionSession.Resolve(config.GetProperty("in").GetString() ?? "header");
+                if (string.Equals(location, "header", StringComparison.OrdinalIgnoreCase))
                 {
                     request.Headers.TryAddWithoutValidation(keyName, keyValue);
                 }
-                else if (location == "query" && request.RequestUri != null)
+                else if (string.Equals(location, "query", StringComparison.OrdinalIgnoreCase) && request.RequestUri != null)
                 {
                     var uriBuilder = new UriBuilder(request.RequestUri);
                     var queryPrefix = string.IsNullOrEmpty(uriBuilder.Query) || uriBuilder.Query == "?"

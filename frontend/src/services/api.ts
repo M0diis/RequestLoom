@@ -5,7 +5,7 @@ import type {
   WorkspaceVariable, EnvironmentVariable, UpdateApiRequestPayload,
   ServiceVariable, ImportSpecificationRequest, ImportSpecificationResult,
   KeyValuePairRequest, AuthRequest, WorkspaceExport, ServiceExport, RequestExport,
-  CurlParseResult, CodeSnippet, CollectionRunResult,
+  CurlParseResult, CodeSnippet, CollectionRunResult, DynamicValueDefinition,
   MockServer, CreateMockServerRequest, UpdateMockServerRequest,
   MockServerEndpoint, CreateMockEndpointRequest, UpdateMockEndpointRequest,
   AppSettings, SettingsUpdate, ApiRequestSettings, StoredRequestFile,
@@ -195,8 +195,23 @@ export const toolsApi = {
     api.post<CurlParseResult>('/tools/curl/parse', { curl }).then(r => r.data),
   generateCurl: (payload: ExecuteRequestPayload) =>
     api.post<{ curl: string }>('/tools/curl/generate', payload).then(r => r.data),
-  generateSnippets: (payload: { method: string; url: string; body?: string | null; bodyType: string; headers: KeyValuePairRequest[]; language?: string }) =>
+  generateSnippets: (payload: {
+    method: string;
+    url: string;
+    body?: string | null;
+    bodyType: string;
+    headers: KeyValuePairRequest[];
+    params?: KeyValuePairRequest[];
+    variables?: { key: string; value: string; enabled: boolean }[];
+    auth?: AuthRequest | null;
+    workspaceId?: string;
+    serviceId?: string;
+    requestId?: string;
+    language?: string;
+  }) =>
     api.post<CodeSnippet[]>('/tools/snippets', payload).then(r => r.data),
+  getDynamicValues: () =>
+    api.get<DynamicValueDefinition[]>('/tools/dynamic-values').then(r => r.data),
 };
 
 // Collection Runner

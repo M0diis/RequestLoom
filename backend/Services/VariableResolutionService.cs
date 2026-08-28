@@ -1,9 +1,8 @@
-using System.Text.RegularExpressions;
 using RequestLoom.Api.Data.Repositories;
 
 namespace RequestLoom.Api.Services;
 
-public partial class VariableResolutionService
+public class VariableResolutionService
 {
     private readonly IEnvironmentRepository _environmentRepo;
     private readonly IWorkspaceVariableRepository _workspaceVarRepo;
@@ -21,16 +20,37 @@ public partial class VariableResolutionService
 
     public async Task<string> ResolveAsync(string input, string workspaceId,
         string? serviceId = null,
-        Dictionary<string, string>? requestVariables = null)
+        Dictionary<string, string>? requestVariables = null,
+        bool includeDynamicValues = true)
     {
         if (string.IsNullOrEmpty(input)) return input;
 
+        var session = await CreateSessionAsync(workspaceId, serviceId, requestVariables);
+        return includeDynamicValues ? session.Resolve(input) : session.ResolveOrdinary(input);
+    }
+
+    public async Task<TemplateResolutionSession> CreateSessionAsync(
+        string workspaceId,
+        string? serviceId = null,
+        Dictionary<string, string>? requestVariables = null,
+        IReadOnlyDictionary<string, string>? runtimeVariables = null)
+    {
         var variables = await BuildVariableMapAsync(workspaceId, serviceId, requestVariables);
-        return VariablePattern().Replace(input, match =>
+
+        // Runtime variables are request-scoped and have the highest precedence,
+        // matching the existing execution behavior.
+        if (runtimeVariables != null)
         {
-            var key = match.Groups[1].Value;
-            return variables.TryGetValue(key, out var value) ? value : match.Value;
-        });
+            foreach (var (key, value) in runtimeVariables)
+            {
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    variables[key.Trim()] = value ?? "";
+                }
+            }
+        }
+
+        return new TemplateResolutionSession(variables);
     }
 
     public async Task<Dictionary<string, string>> BuildVariableMapAsync(string workspaceId,
@@ -67,7 +87,4 @@ public partial class VariableResolutionService
 
         return variables;
     }
-
-    [GeneratedRegex(@"\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}")]
-    private static partial Regex VariablePattern();
 }

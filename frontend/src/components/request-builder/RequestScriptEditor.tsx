@@ -12,6 +12,7 @@ interface Props {
 const PRE_REQUEST_HELP = [
   'Pre-request script runs before variable resolution and sending.',
   'Use setVar("key", "value") to create request-scoped runtime variables.',
+  'Resolved variables are available through vars; setBody(object) serializes JSON and changes the body type to JSON.',
   'Use setHeader / removeHeader / setParam / removeParam to shape the outgoing call.',
   'You can also use setUrl, setMethod, setBody, getVar and log.',
 ].join(' ');

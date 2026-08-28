@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import type { ApiRequest } from '../../types';
+import { AutocompleteInput } from '../common/AutocompleteInput';
 
 interface Props {
   request: ApiRequest;
   onUpdate: (id: string, data: Partial<ApiRequest>) => Promise<void>;
+  dynamicSuggestions?: string[];
 }
 
 type RequestAuthOption = 'inherit' | 'none' | 'basic' | 'bearer' | 'apikey';
@@ -29,7 +31,7 @@ function normalizeAuthType(authType: string | null | undefined): RequestAuthOpti
   return 'none';
 }
 
-export function AuthEditor({ request, onUpdate }: Props) {
+export function AuthEditor({ request, onUpdate, dynamicSuggestions = [] }: Props) {
   const authType = normalizeAuthType(request.auth?.authType);
   const [config, setConfig] = useState<Record<string, string>>({});
 
@@ -70,6 +72,33 @@ export function AuthEditor({ request, onUpdate }: Props) {
     saveAuth(authType, newConfig);
   };
 
+  const renderInput = (field: string, placeholder: string, type = 'text') => {
+    const value = config[field] ?? '';
+    if (dynamicSuggestions.length > 0) {
+      return (
+        <AutocompleteInput
+          value={value}
+          onChange={(next) => updateField(field, next)}
+          suggestions={[]}
+          dynamicSuggestions={dynamicSuggestions}
+          placeholder={placeholder}
+          type={type}
+          className="w-full border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-gray-100 outline-none focus:border-gray-500"
+        />
+      );
+    }
+
+    return (
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => updateField(field, event.target.value)}
+        placeholder={placeholder}
+        className="w-full border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-gray-100 outline-none focus:border-gray-500"
+      />
+    );
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
@@ -92,23 +121,11 @@ export function AuthEditor({ request, onUpdate }: Props) {
         <div className="space-y-2">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Username</label>
-            <input
-              type="text"
-              value={config.username ?? ''}
-              onChange={(e) => updateField('username', e.target.value)}
-              placeholder="{{username}}"
-              className="w-full border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-gray-100 outline-none focus:border-gray-500"
-            />
+            {renderInput('username', '{{username}}')}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Password</label>
-            <input
-              type="password"
-              value={config.password ?? ''}
-              onChange={(e) => updateField('password', e.target.value)}
-              placeholder="{{password}}"
-              className="w-full border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-gray-100 outline-none focus:border-gray-500"
-            />
+            {renderInput('password', '{{password}}', 'password')}
           </div>
         </div>
       )}
@@ -116,13 +133,7 @@ export function AuthEditor({ request, onUpdate }: Props) {
       {authType === 'bearer' && (
         <div>
           <label className="block text-xs text-gray-500 mb-1">Token</label>
-          <input
-            type="text"
-            value={config.token ?? ''}
-            onChange={(e) => updateField('token', e.target.value)}
-            placeholder="{{token}}"
-            className="w-full border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-gray-100 outline-none focus:border-gray-500"
-          />
+          {renderInput('token', '{{token}}')}
         </div>
       )}
 
@@ -130,23 +141,11 @@ export function AuthEditor({ request, onUpdate }: Props) {
         <div className="space-y-2">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Key Name</label>
-            <input
-              type="text"
-              value={config.key ?? ''}
-              onChange={(e) => updateField('key', e.target.value)}
-              placeholder="X-API-Key"
-              className="w-full border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-gray-100 outline-none focus:border-gray-500"
-            />
+            {renderInput('key', 'X-API-Key')}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Value</label>
-            <input
-              type="text"
-              value={config.value ?? ''}
-              onChange={(e) => updateField('value', e.target.value)}
-              placeholder="{{apiKey}}"
-              className="w-full border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-gray-100 outline-none focus:border-gray-500"
-            />
+            {renderInput('value', '{{apiKey}}')}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Add to</label>

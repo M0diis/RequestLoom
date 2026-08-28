@@ -15,6 +15,8 @@ import { RequestHistoryTab } from './RequestHistoryTab';
 import RequestSettingsEditor from './RequestSettingsEditor';
 import { RequestFileViewer } from './RequestFileViewer';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
+import { DynamicValueReferenceModal } from '../common/DynamicValueReferenceModal';
+import { getDynamicValueSuggestions } from '../../lib/dynamicValues';
 import type {
   HttpMethod,
   BodyType,
@@ -22,6 +24,7 @@ import type {
   RequestVariable,
   ServiceVariable,
   WorkspaceVariable,
+  DynamicValueDefinition,
 } from '../../types';
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
@@ -196,6 +199,8 @@ export function RequestBuilder() {
   const { activeRequestTab, setActiveRequestTab } = useUiStore();
 
   const [showSnippets, setShowSnippets] = useState(false);
+  const [showDynamicValues, setShowDynamicValues] = useState(false);
+  const [dynamicValues, setDynamicValues] = useState<DynamicValueDefinition[]>([]);
   const [curlCopied, setCurlCopied] = useState(false);
   const [historyCount, setHistoryCount] = useState(0);
 
@@ -204,6 +209,16 @@ export function RequestBuilder() {
   const [workspaceVariablesLoading, setWorkspaceVariablesLoading] = useState(true);
   const [serviceVariablesLoading, setServiceVariablesLoading] = useState(true);
   const [serviceVariablesServiceId, setServiceVariablesServiceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let canceled = false;
+    toolsApi.getDynamicValues().then((values) => {
+      if (!canceled) setDynamicValues(values);
+    }).catch(() => {});
+    return () => { canceled = true; };
+  }, []);
+
+  const dynamicSuggestions = useMemo(() => getDynamicValueSuggestions(dynamicValues), [dynamicValues]);
 
   const activeEnvironment = useMemo(
     () => environments.find((environment) => environment.isActive),
@@ -449,6 +464,12 @@ export function RequestBuilder() {
         headers: activeRequest.headers.map(h => ({ key: h.key, value: h.value, enabled: h.enabled })),
         params: activeRequest.params.map(p => ({ key: p.key, value: p.value, enabled: p.enabled })),
         variables: activeRequest.variables.map(v => ({ key: v.key, value: v.value, enabled: v.enabled })),
+        auth: activeRequest.auth
+          ? { authType: activeRequest.auth.authType, configJson: activeRequest.auth.configJson }
+          : null,
+        workspaceId: activeWorkspaceId,
+        serviceId: activeRequest.serviceId,
+        requestId: activeRequest.id,
       });
       await navigator.clipboard.writeText(curl);
       setCurlCopied(true);
@@ -518,6 +539,7 @@ export function RequestBuilder() {
             }}
             placeholder="{{baseUrl}}/api/endpoint"
             variableStates={urlVariableStates}
+            dynamicSuggestions={dynamicSuggestions}
           />
 
           {sending ? (
@@ -531,9 +553,9 @@ export function RequestBuilder() {
             <div className="flex items-center gap-1">
               <button
                 onClick={handleSend}
-                className="border border-[#ff6c37] bg-[#ff6c37] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#f95e26] whitespace-nowrap"
+                className="border border-[#ff6c37] bg-[#ff6c37] px-3 py-1 text-sm font-semibold text-white hover:bg-[#f95e26] whitespace-nowrap"
               >
-                  <svg className="inline-block h-4 w-4 -mt-[1px] fill-current" viewBox="0 0 24 24">
+                  <svg className="inline-block h-4 w-4 -mt-[1px] fill-current" viewBox="0 3 24 24">
                     <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
                   </svg>
               </button>
@@ -551,6 +573,13 @@ export function RequestBuilder() {
               >
                 Code
               </button>
+              <button
+                onClick={() => setShowDynamicValues(true)}
+                className="border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-300 hover:bg-gray-800 whitespace-nowrap"
+                title="Dynamic value reference"
+              >
+                {'{{$}}'}
+              </button>
             </div>
           )}
         </div>
@@ -563,6 +592,9 @@ export function RequestBuilder() {
           >
             {resolvedUrlPreview.value || activeRequest.url || 'Enter URL to preview resolution'}
           </span>
+        </div>
+        <div className="mt-1 text-[10px] text-amber-300/80">
+          cURL and code snapshots resolve variables and may contain secrets.
         </div>
 
         {resolvedUrlPreview.missingVariables.length > 0 && (
@@ -601,6 +633,7 @@ export function RequestBuilder() {
             onChange={handleParamsChange}
             keyPlaceholder="Parameter name"
             valuePlaceholder="Value"
+            dynamicSuggestions={dynamicSuggestions}
           />
         )}
         {activeRequestTab === 'headers' && (
@@ -611,12 +644,14 @@ export function RequestBuilder() {
             valuePlaceholder="Value"
             keySuggestions={HEADER_KEY_SUGGESTIONS}
             valueSuggestionsMap={HEADER_VALUE_MAP}
+            dynamicSuggestions={dynamicSuggestions}
           />
         )}
         {activeRequestTab === 'variables' && (
           <RequestVariableEditor
             entries={activeRequest.variables}
             onChange={handleVariablesChange}
+            dynamicSuggestions={dynamicSuggestions}
           />
         )}
         {activeRequestTab === 'body' && (
@@ -624,10 +659,11 @@ export function RequestBuilder() {
             body={activeRequest.body}
             bodyType={activeRequest.bodyType}
             onChange={handleBodyChange}
+            dynamicSuggestions={dynamicSuggestions}
           />
         )}
         {activeRequestTab === 'auth' && (
-          <AuthEditor request={activeRequest} onUpdate={updateRequest} />
+          <AuthEditor request={activeRequest} onUpdate={updateRequest} dynamicSuggestions={dynamicSuggestions} />
         )}
         {activeRequestTab === 'pre-script' && (
           <RequestScriptEditor request={activeRequest} stage="pre" onUpdate={updateRequest} />
@@ -657,6 +693,19 @@ export function RequestBuilder() {
           body={activeRequest.body}
           bodyType={activeRequest.bodyType}
           headers={activeRequest.headers.map(h => ({ key: h.key, value: h.value, enabled: h.enabled }))}
+          params={activeRequest.params.map(p => ({ key: p.key, value: p.value, enabled: p.enabled }))}
+          variables={activeRequest.variables.map(v => ({ key: v.key, value: v.value, enabled: v.enabled }))}
+          auth={activeRequest.auth ? { authType: activeRequest.auth.authType, configJson: activeRequest.auth.configJson } : null}
+          workspaceId={activeWorkspaceId}
+          serviceId={activeRequest.serviceId}
+          requestId={activeRequest.id}
+        />
+      )}
+
+      {showDynamicValues && (
+        <DynamicValueReferenceModal
+          definitions={dynamicValues}
+          onClose={() => setShowDynamicValues(false)}
         />
       )}
     </div>

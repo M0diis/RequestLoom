@@ -38,18 +38,18 @@ public class ToolsController : ControllerBase
 
     /// <summary>Generate a cURL command from a request payload.</summary>
     [HttpPost("curl/generate")]
-    public IActionResult GenerateCurl([FromBody] ExecuteRequestPayload payload)
+    public async Task<IActionResult> GenerateCurl([FromBody] ExecuteRequestPayload payload)
     {
         if (payload == null)
             return BadRequest(new { error = "Request payload is required" });
 
-        var curl = _tools.GenerateCurl(payload);
+        var curl = await _tools.GenerateCurlAsync(payload);
         return Ok(new { curl });
     }
 
     /// <summary>Generate code snippets for a request.</summary>
     [HttpPost("snippets")]
-    public IActionResult GenerateSnippets([FromBody] SnippetRequest req)
+    public async Task<IActionResult> GenerateSnippets([FromBody] SnippetRequest req)
     {
         if (req == null)
             return BadRequest(new { error = "Request payload is required" });
@@ -60,11 +60,24 @@ public class ToolsController : ControllerBase
             Url = req.Url,
             Body = req.Body,
             BodyType = req.BodyType,
-            Headers = req.Headers
+            Headers = req.Headers,
+            Params = req.Params,
+            Variables = req.Variables,
+            Auth = req.Auth,
+            WorkspaceId = req.WorkspaceId,
+            ServiceId = req.ServiceId,
+            RequestId = req.RequestId,
         };
 
-        var snippets = _tools.GenerateSnippets(payload, req.Language);
+        var snippets = await _tools.GenerateSnippetsAsync(payload, req.Language);
         return Ok(snippets);
+    }
+
+    /// <summary>Return the supported dynamic request value definitions.</summary>
+    [HttpGet("dynamic-values")]
+    public IActionResult GetDynamicValues()
+    {
+        return Ok(DynamicValueRegistry.GetDefinitions());
     }
 }
 

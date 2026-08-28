@@ -9,6 +9,7 @@ interface Props {
   valuePlaceholder?: string;
   keySuggestions?: string[];
   valueSuggestionsMap?: Record<string, string[]>;
+  dynamicSuggestions?: string[];
 }
 
 const GRID_COLS = 'grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)] gap-2 items-center';
@@ -16,7 +17,7 @@ const GRID_COLS = 'grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)] gap-2 items
 const iconButtonClass = 'flex h-[26px] w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-700 hover:text-gray-200 disabled:cursor-default disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-gray-500';
 const deleteButtonClass = 'flex h-[26px] w-7 items-center justify-center rounded text-gray-500 hover:bg-rose-500/20 hover:text-rose-300';
 
-export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valuePlaceholder = 'Value', keySuggestions, valueSuggestionsMap }: Props) {
+export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valuePlaceholder = 'Value', keySuggestions, valueSuggestionsMap, dynamicSuggestions = [] }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const nextPlaceholderId = useRef(1);
   const lastFocus = useRef<{ id: string; field: string } | null>(null);
@@ -107,7 +108,7 @@ export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valu
                 title={entry.enabled ? 'Disable entry' : 'Enable entry'}
                 className="h-3.5 w-3.5 justify-self-center border-gray-600 accent-emerald-500"
               />
-              {keySuggestions ? (
+              {keySuggestions || dynamicSuggestions.length > 0 ? (
                 <div className="min-w-0">
                   <AutocompleteInput
                     value={entry.key}
@@ -115,7 +116,8 @@ export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valu
                     onFocusCapture={() => { lastFocus.current = { id: entry.id, field: 'key' }; }}
                     dataCellId={entry.id}
                     dataCellField="key"
-                    suggestions={keySuggestions}
+                    suggestions={keySuggestions ?? []}
+                    dynamicSuggestions={dynamicSuggestions}
                     placeholder={keyPlaceholder}
                     className={inputClass}
                   />
@@ -133,14 +135,15 @@ export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valu
                 />
               )}
               <div className="relative min-w-0">
-                {valueSuggestions ? (
+                {valueSuggestions || dynamicSuggestions.length > 0 ? (
                   <AutocompleteInput
                     value={entry.value}
                     onChange={(v) => handleUpdate(i, 'value', v)}
                     onFocusCapture={() => { lastFocus.current = { id: entry.id, field: 'value' }; }}
                     dataCellId={entry.id}
                     dataCellField="value"
-                    suggestions={valueSuggestions}
+                    suggestions={valueSuggestions ?? []}
+                    dynamicSuggestions={dynamicSuggestions}
                     placeholder={valuePlaceholder}
                     className={valueInputClass}
                   />
@@ -194,7 +197,7 @@ export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valu
         {showPlaceholder && (
           <div key={placeholderId} className={`${GRID_COLS} px-2 py-1.5`}>
             <div className="ml-1.5 h-4 w-4 flex-shrink-0 border border-dashed border-gray-700 opacity-30" />
-            {keySuggestions ? (
+            {keySuggestions || dynamicSuggestions.length > 0 ? (
               <div className="min-w-0">
                 <AutocompleteInput
                   value=""
@@ -202,7 +205,8 @@ export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valu
                   onFocusCapture={() => { lastFocus.current = { id: placeholderId, field: 'key' }; }}
                   dataCellId={placeholderId}
                   dataCellField="key"
-                  suggestions={keySuggestions}
+                  suggestions={keySuggestions ?? []}
+                  dynamicSuggestions={dynamicSuggestions}
                   placeholder={keyPlaceholder}
                   className={inputClass}
                 />
@@ -219,16 +223,30 @@ export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valu
                 className={`min-w-0 ${inputClass}`}
               />
             )}
-            <input
-              type="text"
-              value=""
-              onChange={(e) => handleUpdate(entries.length, 'value', e.target.value)}
-              onFocusCapture={() => { lastFocus.current = { id: placeholderId, field: 'value' }; }}
-              data-cell-id={placeholderId}
-              data-cell-field="value"
-              placeholder={valuePlaceholder}
-              className={valueInputClass}
-            />
+            {dynamicSuggestions.length > 0 ? (
+              <AutocompleteInput
+                value=""
+                onChange={(v) => handleUpdate(entries.length, 'value', v)}
+                onFocusCapture={() => { lastFocus.current = { id: placeholderId, field: 'value' }; }}
+                dataCellId={placeholderId}
+                dataCellField="value"
+                suggestions={[]}
+                dynamicSuggestions={dynamicSuggestions}
+                placeholder={valuePlaceholder}
+                className={valueInputClass}
+              />
+            ) : (
+              <input
+                type="text"
+                value=""
+                onChange={(e) => handleUpdate(entries.length, 'value', e.target.value)}
+                onFocusCapture={() => { lastFocus.current = { id: placeholderId, field: 'value' }; }}
+                data-cell-id={placeholderId}
+                data-cell-field="value"
+                placeholder={valuePlaceholder}
+                className={valueInputClass}
+              />
+            )}
           </div>
         )}
       </div>

@@ -37,6 +37,7 @@ export async function ensureMonacoConfigured(): Promise<void> {
 
   // Register custom script completions on the shared monaco instance
   registerScriptCompletionsInternal(monaco);
+  registerDynamicCompletionsInternal(monaco);
 
   monacoInstance = monaco;
 }
@@ -44,6 +45,49 @@ export async function ensureMonacoConfigured(): Promise<void> {
 // Script completions
 
 let completionsRegistered = false;
+let dynamicCompletionsRegistered = false;
+let dynamicValueSuggestions: string[] = [];
+
+export function setDynamicValueCompletions(suggestions: string[]): void {
+  dynamicValueSuggestions = suggestions;
+  if (monacoInstance) {
+    registerDynamicCompletionsInternal(monacoInstance);
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function registerDynamicCompletionsInternal(monaco: any): void {
+  if (dynamicCompletionsRegistered) return;
+  dynamicCompletionsRegistered = true;
+
+  for (const language of ['json', 'plaintext', 'xml', 'javascript']) {
+    monaco.languages.registerCompletionItemProvider(language, {
+      triggerCharacters: ['$'],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      provideCompletionItems: (model: any, position: any) => {
+        const line = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+        const match = line.match(/\{\{\s*\$[a-zA-Z0-9]*$/);
+        if (!match) return { suggestions: [] };
+
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: position.column - match[0].length,
+          endColumn: position.column,
+        };
+        return {
+          suggestions: dynamicValueSuggestions.map((suggestion) => ({
+            label: suggestion,
+            kind: monaco.languages.CompletionItemKind.Value,
+            insertText: suggestion,
+            documentation: 'Dynamic request value',
+            range,
+          })),
+        };
+      },
+    });
+  }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function registerScriptCompletionsInternal(monaco: any): void {

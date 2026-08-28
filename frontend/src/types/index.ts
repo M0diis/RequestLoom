@@ -369,6 +369,16 @@ export interface CodeSnippet {
   code: string;
 }
 
+export interface DynamicValueDefinition {
+  name: string;
+  signature: string;
+  aliases: string[];
+  category: string;
+  description: string;
+  example: string;
+  outputType: string;
+}
+
 export interface CollectionRunResult {
   serviceId: string;
   serviceName: string;

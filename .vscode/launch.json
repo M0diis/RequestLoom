@@ -28,6 +28,22 @@
       "skipFiles": [
         "<node_internals>/**"
       ]
+    },
+    {
+      "name": "Web: Chrome",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "preLaunchTask": "web: start dev server",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend"
+    },
+    {
+      "name": "Web: Firefox",
+      "type": "firefox",
+      "request": "launch",
+      "preLaunchTask": "web: start dev server",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend"
     }
   ]
 }

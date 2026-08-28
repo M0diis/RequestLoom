@@ -21,6 +21,33 @@
         }
       },
       "problemMatcher": []
+    },
+    {
+      "label": "web: start dev server",
+      "type": "process",
+      "command": "pwsh",
+      "windows": {
+        "command": "${env:SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+      },
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/dev.ps1",
+        "start"
+      ],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "requestloom-web",
+        "pattern": {
+          "regexp": "."
+        },
+        "background": {
+          "activeOnStart": true,
+          "endsPattern": "Dev app started\\."
+        }
+      }
     }
   ]
 }

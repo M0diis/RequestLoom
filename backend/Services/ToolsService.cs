@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using RequestLoom.Api.Data.Repositories;
 using RequestLoom.Api.Models;
 
 namespace RequestLoom.Api.Services;
@@ -11,6 +12,22 @@ namespace RequestLoom.Api.Services;
 public partial class ToolsService
 {
     private const string DefaultGeneratedUrl = "https://example.com";
+    private readonly VariableResolutionService _variableService;
+    private readonly IServiceRepository _serviceRepo;
+    private readonly IRequestRepository _requestRepo;
+    private readonly RuntimeVariableStore _runtimeVariableStore;
+
+    public ToolsService(
+        VariableResolutionService variableService,
+        IServiceRepository serviceRepo,
+        IRequestRepository requestRepo,
+        RuntimeVariableStore runtimeVariableStore)
+    {
+        _variableService = variableService;
+        _serviceRepo = serviceRepo;
+        _requestRepo = requestRepo;
+        _runtimeVariableStore = runtimeVariableStore;
+    }
 
     public CurlParseResult ParseCurl(string curlCommand)
     {
@@ -122,7 +139,19 @@ public partial class ToolsService
         return trimmed.StartsWith('{') || trimmed.StartsWith('[');
     }
 
-    public string GenerateCurl(ExecuteRequestPayload payload)
+    public async Task<string> GenerateCurlAsync(ExecuteRequestPayload payload)
+    {
+        var materialized = await PrepareSnapshotAsync(payload);
+        return GenerateCurlMaterialized(materialized);
+    }
+
+    public async Task<List<CodeSnippet>> GenerateSnippetsAsync(ExecuteRequestPayload payload, string? language = null)
+    {
+        var materialized = await PrepareSnapshotAsync(payload);
+        return GenerateSnippetsMaterialized(materialized, language);
+    }
+
+    private static string GenerateCurlMaterialized(ExecuteRequestPayload payload)
     {
         var sb = new StringBuilder();
         sb.Append("curl");
@@ -152,7 +181,7 @@ public partial class ToolsService
         return sb.ToString();
     }
 
-    public List<CodeSnippet> GenerateSnippets(ExecuteRequestPayload payload, string? language = null)
+    private static List<CodeSnippet> GenerateSnippetsMaterialized(ExecuteRequestPayload payload, string? language = null)
     {
         var snippets = new List<CodeSnippet>();
 
@@ -167,7 +196,7 @@ public partial class ToolsService
             .FirstOrDefault(h => h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))?.Value ?? "";
 
         if (language == null || language == "curl")
-            snippets.Add(new CodeSnippet { Language = "Shell", Client = "cURL", Code = GenerateCurl(payload).TrimEnd() });
+            snippets.Add(new CodeSnippet { Language = "Shell", Client = "cURL", Code = GenerateCurlMaterialized(payload).TrimEnd() });
 
         if (language == null || language == "javascript-fetch")
             snippets.Add(new CodeSnippet { Language = "JavaScript", Client = "fetch", Code = GenerateJsFetch(method, url, headersList, body, contentType) });
@@ -197,6 +226,214 @@ public partial class ToolsService
             snippets.Add(new CodeSnippet { Language = "Ruby", Client = "Net::HTTP", Code = GenerateRuby(method, url, headersList, body, contentType) });
 
         return snippets;
+    }
+
+    private async Task<ExecuteRequestPayload> PrepareSnapshotAsync(ExecuteRequestPayload input)
+    {
+        var persistedRequest = !string.IsNullOrWhiteSpace(input.RequestId)
+            ? await _requestRepo.GetByIdAsync(input.RequestId)
+            : null;
+        var serviceId = input.ServiceId ?? persistedRequest?.ServiceId;
+        var service = !string.IsNullOrWhiteSpace(serviceId)
+            ? await _serviceRepo.GetByIdAsync(serviceId)
+            : null;
+        var workspaceId = input.WorkspaceId ?? service?.WorkspaceId ?? "default";
+
+        var requestVariables = MergeRequestVariables(persistedRequest?.Variables, input.Variables);
+        var runtimeVariables = _runtimeVariableStore.Get(workspaceId, input.RequestId);
+        var session = await _variableService.CreateSessionAsync(
+            workspaceId,
+            serviceId,
+            requestVariables,
+            runtimeVariables.ToDictionary(pair => pair.Key, pair => pair.Value.Value, StringComparer.OrdinalIgnoreCase));
+
+        var requestHeaders = input.Headers.Count > 0
+            ? input.Headers
+            : persistedRequest?.Headers.Select(header => new KeyValuePairRequest
+            {
+                Key = header.Key,
+                Value = header.Value,
+                Enabled = header.Enabled
+            }).ToList() ?? [];
+        var requestParams = input.Params.Count > 0
+            ? input.Params
+            : persistedRequest?.Params.Select(param => new KeyValuePairRequest
+            {
+                Key = param.Key,
+                Value = param.Value,
+                Enabled = param.Enabled
+            }).ToList() ?? [];
+
+        var resolvedUrl = session.Resolve(string.IsNullOrWhiteSpace(input.Url)
+            ? persistedRequest?.Url ?? DefaultGeneratedUrl
+            : input.Url);
+        foreach (var param in requestParams.Where(param => param.Enabled))
+        {
+            var key = session.Resolve(param.Key);
+            var value = session.Resolve(param.Value);
+            resolvedUrl = AppendQueryParameter(resolvedUrl, key, value);
+        }
+
+        var headers = MergeHeaders(service?.Headers ?? [], requestHeaders)
+            .Where(header => header.Enabled && !string.IsNullOrWhiteSpace(header.Key))
+            .Select(header => new KeyValuePairRequest
+            {
+                Key = session.Resolve(header.Key),
+                Value = session.Resolve(header.Value),
+                Enabled = true
+            })
+            .ToList();
+
+        var persistedAuth = persistedRequest?.Auth == null
+            ? null
+            : new AuthRequest
+            {
+                AuthType = persistedRequest.Auth.AuthType,
+                ConfigJson = persistedRequest.Auth.ConfigJson
+            };
+        var effectiveAuth = ResolveEffectiveAuth(input.Auth ?? persistedAuth, service?.Auth);
+        ApplyAuthToSnapshot(headers, ref resolvedUrl, effectiveAuth, session);
+
+        var body = input.Body == null && persistedRequest != null
+            ? persistedRequest.Body == null ? null : session.Resolve(persistedRequest.Body)
+            : input.Body == null ? null : session.Resolve(input.Body);
+        var bodyType = input.Body == null && persistedRequest != null
+            ? persistedRequest.BodyType
+            : input.BodyType;
+
+        return new ExecuteRequestPayload
+        {
+            Method = string.IsNullOrWhiteSpace(input.Method) ? persistedRequest?.Method ?? "GET" : input.Method,
+            Url = resolvedUrl,
+            Body = body,
+            BodyType = bodyType,
+            Headers = headers,
+            Params = requestParams,
+            Variables = requestVariables.Select(pair => new RequestVariableRequest
+            {
+                Key = pair.Key,
+                Value = session.GetVariable(pair.Key) ?? pair.Value,
+                Enabled = true
+            }).ToList(),
+            Auth = effectiveAuth,
+        };
+    }
+
+    private static Dictionary<string, string> MergeRequestVariables(
+        IEnumerable<RequestVariable>? persisted,
+        IEnumerable<RequestVariableRequest> current)
+    {
+        var currentVariables = current.ToList();
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (persisted != null)
+        {
+            foreach (var variable in persisted.Where(variable => variable.Enabled && !string.IsNullOrWhiteSpace(variable.Key)))
+                result[variable.Key.Trim()] = variable.Value ?? "";
+        }
+
+        foreach (var variable in currentVariables.Where(variable => !string.IsNullOrWhiteSpace(variable.Key)))
+        {
+            var key = variable.Key.Trim();
+            if (variable.Enabled)
+                result[key] = variable.Value ?? "";
+            else
+                result.Remove(key);
+        }
+
+        return result;
+    }
+
+    private static string AppendQueryParameter(string url, string key, string value)
+    {
+        var separator = url.Contains('?') ? "&" : "?";
+        return $"{url}{separator}{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}";
+    }
+
+    private static void ApplyAuthToSnapshot(
+        List<KeyValuePairRequest> headers,
+        ref string url,
+        AuthRequest? auth,
+        TemplateResolutionSession session)
+    {
+        if (auth == null || string.Equals(auth.AuthType, "none", StringComparison.OrdinalIgnoreCase)) return;
+
+        using var document = JsonDocument.Parse(session.Resolve(auth.ConfigJson));
+        var config = document.RootElement;
+        string GetString(string name) => config.TryGetProperty(name, out var property)
+            ? session.Resolve(property.GetString() ?? "")
+            : "";
+
+        switch ((auth.AuthType ?? "").Trim().ToLowerInvariant())
+        {
+            case "basic":
+                var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{GetString("username")}:{GetString("password")}"));
+                UpsertHeader(headers, "Authorization", $"Basic {credentials}");
+                break;
+            case "bearer":
+                UpsertHeader(headers, "Authorization", $"Bearer {GetString("token")}");
+                break;
+            case "apikey":
+                var key = GetString("key");
+                var value = GetString("value");
+                var location = GetString("in");
+                if (string.Equals(location, "query", StringComparison.OrdinalIgnoreCase))
+                    url = AppendQueryParameter(url, key, value);
+                else
+                    UpsertHeader(headers, key, value);
+                break;
+        }
+    }
+
+    private static void UpsertHeader(List<KeyValuePairRequest> headers, string key, string value)
+    {
+        var existing = headers.FirstOrDefault(header => string.Equals(header.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            existing.Value = value;
+            return;
+        }
+
+        headers.Add(new KeyValuePairRequest { Key = key, Value = value, Enabled = true });
+    }
+
+    private static AuthRequest? ResolveEffectiveAuth(AuthRequest? requestAuth, ServiceAuth? serviceAuth)
+    {
+        if (requestAuth == null || IsAuthType(requestAuth.AuthType, "inherit"))
+        {
+            if (serviceAuth == null || IsAuthType(serviceAuth.AuthType, "none")) return null;
+            return new AuthRequest { AuthType = serviceAuth.AuthType, ConfigJson = serviceAuth.ConfigJson };
+        }
+
+        return IsAuthType(requestAuth.AuthType, "none") ? null : requestAuth;
+    }
+
+    private static bool IsAuthType(string? authType, string expected) =>
+        string.Equals(authType?.Trim(), expected, StringComparison.OrdinalIgnoreCase);
+
+    private static List<KeyValuePairRequest> MergeHeaders(
+        IEnumerable<RequestLoom.Api.Models.KeyValuePair> serviceHeaders,
+        IEnumerable<KeyValuePairRequest> requestHeaders)
+    {
+        var merged = new Dictionary<string, KeyValuePairRequest>(StringComparer.OrdinalIgnoreCase);
+        foreach (var serviceHeader in serviceHeaders.Where(header => header.Enabled && !string.IsNullOrWhiteSpace(header.Key)))
+        {
+            var key = serviceHeader.Key.Trim();
+            merged[key] = new KeyValuePairRequest { Key = key, Value = serviceHeader.Value ?? "", Enabled = true };
+        }
+
+        foreach (var requestHeader in requestHeaders.Where(header => !string.IsNullOrWhiteSpace(header.Key)))
+        {
+            var key = requestHeader.Key.Trim();
+            if (!requestHeader.Enabled)
+            {
+                merged.Remove(key);
+                continue;
+            }
+
+            merged[key] = new KeyValuePairRequest { Key = key, Value = requestHeader.Value ?? "", Enabled = true };
+        }
+
+        return merged.Values.ToList();
     }
 
     private static string EscapeBash(string s) => s.Replace("'", "'\"'\"'");

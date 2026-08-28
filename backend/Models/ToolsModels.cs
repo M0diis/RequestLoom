@@ -24,6 +24,12 @@ public class SnippetRequest
     public string? Body { get; set; }
     public string BodyType { get; set; } = "none";
     public List<KeyValuePairRequest> Headers { get; set; } = [];
+    public List<KeyValuePairRequest> Params { get; set; } = [];
+    public List<RequestVariableRequest> Variables { get; set; } = [];
+    public AuthRequest? Auth { get; set; }
+    public string? WorkspaceId { get; set; }
+    public string? ServiceId { get; set; }
+    public string? RequestId { get; set; }
     public string? Language { get; set; } // null = all languages
 }
 

@@ -5,6 +5,7 @@ interface Props {
   body: string | null;
   bodyType: BodyType;
   onChange: (body: string | null, bodyType: BodyType) => void;
+  dynamicSuggestions?: string[];
 }
 
 const BODY_TYPES: { value: BodyType; label: string }[] = [
@@ -22,7 +23,7 @@ const LANGUAGE_MAP: Record<string, string> = {
   form: 'plaintext',
 };
 
-export function BodyEditor({ body, bodyType, onChange }: Props) {
+export function BodyEditor({ body, bodyType, onChange, dynamicSuggestions = [] }: Props) {
   if (bodyType === 'none') {
     return (
       <div>
@@ -69,6 +70,7 @@ export function BodyEditor({ body, bodyType, onChange }: Props) {
           language={LANGUAGE_MAP[bodyType] || 'plaintext'}
           value={body ?? ''}
           onChange={(value) => onChange(value, bodyType)}
+          dynamicSuggestions={dynamicSuggestions}
         />
       </div>
     </div>

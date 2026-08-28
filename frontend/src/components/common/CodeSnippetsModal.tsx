@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toolsApi } from '../../services/api';
-import type { CodeSnippet, KeyValuePairRequest } from '../../types';
+import type { AuthRequest, CodeSnippet, KeyValuePairRequest } from '../../types';
 
 interface Props {
   onClose: () => void;
@@ -9,9 +9,15 @@ interface Props {
   body?: string | null;
   bodyType: string;
   headers: KeyValuePairRequest[];
+  params?: KeyValuePairRequest[];
+  variables?: KeyValuePairRequest[];
+  auth?: AuthRequest | null;
+  workspaceId?: string;
+  serviceId?: string;
+  requestId?: string;
 }
 
-export function CodeSnippetsModal({ onClose, method, url, body, bodyType, headers }: Props) {
+export function CodeSnippetsModal({ onClose, method, url, body, bodyType, headers, params = [], variables = [], auth, workspaceId, serviceId, requestId }: Props) {
   const [snippets, setSnippets] = useState<CodeSnippet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,14 +27,14 @@ export function CodeSnippetsModal({ onClose, method, url, body, bodyType, header
     setLoading(true);
     setError(null);
     try {
-      const result = await toolsApi.generateSnippets({ method, url, body, bodyType, headers });
+      const result = await toolsApi.generateSnippets({ method, url, body, bodyType, headers, params, variables, auth, workspaceId, serviceId, requestId });
       setSnippets(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate snippets');
     } finally {
       setLoading(false);
     }
-  }, [method, url, body, bodyType, headers]);
+  }, [method, url, body, bodyType, headers, params, variables, auth, workspaceId, serviceId, requestId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -55,6 +61,10 @@ export function CodeSnippetsModal({ onClose, method, url, body, bodyType, header
         </div>
 
         <div className="overflow-y-auto p-4 space-y-4 flex-1">
+          <div className="flex items-center justify-between border border-amber-900/60 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-200">
+            <span>Snapshots resolve variables and may contain secrets.</span>
+            <button onClick={load} className="ml-3 flex-shrink-0 border border-amber-800 px-2 py-1 text-[10px] hover:bg-amber-900/40">Regenerate</button>
+          </div>
           {loading && <div className="text-xs text-gray-500 text-center py-6">Generating snippets...</div>}
           {error && <div className="rounded border border-rose-900/60 bg-rose-950/20 px-3 py-2 text-xs text-rose-300">{error}</div>}
 

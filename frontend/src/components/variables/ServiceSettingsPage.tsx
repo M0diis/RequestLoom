@@ -6,6 +6,8 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useEnvironmentStore } from '../../stores/environmentStore';
 import { CustomDropdown, type DropdownOption } from '../common/CustomDropdown';
+import { AutocompleteInput } from '../common/AutocompleteInput';
+import { DEFAULT_DYNAMIC_VALUE_SUGGESTIONS } from '../../lib/dynamicValues';
 import type {
   ServiceVariable,
   KeyValueEntry,
@@ -373,6 +375,18 @@ export function ServiceSettingsPage({ serviceId }: Props) {
     setDefaultAuthConfig((prev) => ({ ...prev, [field]: value }));
   };
 
+  const renderDynamicInput = (field: string, placeholder: string, type = 'text') => (
+    <AutocompleteInput
+      value={defaultAuthConfig[field] ?? ''}
+      onChange={(value) => updateAuthField(field, value)}
+      suggestions={[]}
+      dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
+      type={type}
+      placeholder={placeholder}
+      className={`${MONO_INPUT_CLASS} w-full`}
+    />
+  );
+
   if (!service) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-gray-500">
@@ -446,6 +460,7 @@ export function ServiceSettingsPage({ serviceId }: Props) {
             valuePlaceholder="Value"
             keySuggestions={HEADER_KEY_SUGGESTIONS}
             valueSuggestionsMap={HEADER_VALUE_MAP}
+            dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
           />
         </div>
 
@@ -475,23 +490,11 @@ export function ServiceSettingsPage({ serviceId }: Props) {
             <div className="space-y-2">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Username</label>
-                <input
-                  type="text"
-                  value={defaultAuthConfig.username ?? ''}
-                  onChange={(e) => updateAuthField('username', e.target.value)}
-                  placeholder="{{username}}"
-                  className={`${MONO_INPUT_CLASS} w-full`}
-                />
+                {renderDynamicInput('username', '{{username}}')}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Password</label>
-                <input
-                  type="password"
-                  value={defaultAuthConfig.password ?? ''}
-                  onChange={(e) => updateAuthField('password', e.target.value)}
-                  placeholder="{{password}}"
-                  className={`${MONO_INPUT_CLASS} w-full`}
-                />
+                {renderDynamicInput('password', '{{password}}', 'password')}
               </div>
             </div>
           )}
@@ -499,13 +502,7 @@ export function ServiceSettingsPage({ serviceId }: Props) {
           {defaultAuthType === 'bearer' && (
             <div>
               <label className="block text-xs text-gray-500 mb-1">Token</label>
-              <input
-                type="text"
-                value={defaultAuthConfig.token ?? ''}
-                onChange={(e) => updateAuthField('token', e.target.value)}
-                placeholder="{{token}}"
-                className={`${MONO_INPUT_CLASS} w-full`}
-              />
+              {renderDynamicInput('token', '{{token}}')}
             </div>
           )}
 
@@ -513,23 +510,11 @@ export function ServiceSettingsPage({ serviceId }: Props) {
             <div className="space-y-2">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Key Name</label>
-                <input
-                  type="text"
-                  value={defaultAuthConfig.key ?? ''}
-                  onChange={(e) => updateAuthField('key', e.target.value)}
-                  placeholder="X-API-Key"
-                  className={`${MONO_INPUT_CLASS} w-full`}
-                />
+                {renderDynamicInput('key', 'X-API-Key')}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Value</label>
-                <input
-                  type="text"
-                  value={defaultAuthConfig.value ?? ''}
-                  onChange={(e) => updateAuthField('value', e.target.value)}
-                  placeholder="{{apiKey}}"
-                  className={`${MONO_INPUT_CLASS} w-full`}
-                />
+                {renderDynamicInput('value', '{{apiKey}}')}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Add to</label>
@@ -585,10 +570,12 @@ export function ServiceSettingsPage({ serviceId }: Props) {
                     onChange={(e) => updateDraft(variable.id, { key: e.target.value })}
                     className={`${MONO_INPUT_CLASS} w-full`}
                   />
-                <input
-                  type={draft.isSecret && !draft.reveal ? 'password' : 'text'}
+                <AutocompleteInput
                   value={draft.value}
-                  onChange={(e) => updateDraft(variable.id, { value: e.target.value })}
+                  onChange={(value) => updateDraft(variable.id, { value })}
+                  suggestions={[]}
+                  dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
+                  type={draft.isSecret && !draft.reveal ? 'password' : 'text'}
                   className={`${MONO_INPUT_CLASS} w-full`}
                 />
                   <div className="flex flex-wrap items-center justify-end gap-1">
@@ -646,10 +633,12 @@ export function ServiceSettingsPage({ serviceId }: Props) {
               placeholder="key"
               className={`${MONO_INPUT_CLASS} w-full`}
             />
-            <input
-              type={newSecret ? 'password' : 'text'}
+            <AutocompleteInput
               value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
+              onChange={setNewValue}
+              suggestions={[]}
+              dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
+              type={newSecret ? 'password' : 'text'}
               placeholder="value"
               className={`${MONO_INPUT_CLASS} w-full`}
             />

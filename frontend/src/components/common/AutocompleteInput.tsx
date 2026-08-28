@@ -4,42 +4,69 @@ interface Props {
   value: string;
   onChange: (value: string) => void;
   suggestions: string[];
+  dynamicSuggestions?: string[];
   placeholder?: string;
   className?: string;
+  type?: string;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
   onFocusCapture?: () => void;
   dataCellId?: string;
   dataCellField?: string;
 }
 
-export function AutocompleteInput({ value, onChange, suggestions, placeholder, className, onFocusCapture, dataCellId, dataCellField }: Props) {
+export function AutocompleteInput({ value, onChange, suggestions, dynamicSuggestions = [], placeholder, className, type = 'text', onKeyDown: onKeyDownProp, onFocusCapture, dataCellId, dataCellField }: Props) {
   const [open, setOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
+  const dynamicMatch = value.match(/\{\{\s*\$[a-zA-Z0-9]*$/);
   const filtered = suggestions.filter(
     (s) => s.toLowerCase().includes(value.toLowerCase()) && s.toLowerCase() !== value.toLowerCase()
   );
+  const activeSuggestions = dynamicMatch
+    ? dynamicSuggestions.filter((suggestion) => suggestion.toLowerCase().includes(dynamicMatch[0].toLowerCase()))
+    : filtered;
 
   const handleSelect = useCallback((suggestion: string) => {
-    onChange(suggestion);
+    if (dynamicMatch && dynamicMatch.index !== undefined) {
+      onChange(value.slice(0, dynamicMatch.index) + suggestion);
+    } else {
+      onChange(suggestion);
+    }
     setOpen(false);
     setHighlightIndex(-1);
-  }, [onChange]);
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  }, [dynamicMatch, onChange, value]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!open || filtered.length === 0) return;
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open || activeSuggestions.length === 0) {
+      onKeyDownProp?.(e);
+      return;
+    }
+    let handled = false;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightIndex((i) => Math.min(i + 1, filtered.length - 1));
+      setHighlightIndex((i) => Math.min(i + 1, activeSuggestions.length - 1));
+      handled = true;
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlightIndex((i) => Math.max(i - 1, 0));
+      handled = true;
     } else if (e.key === 'Enter' && highlightIndex >= 0) {
       e.preventDefault();
-      handleSelect(filtered[highlightIndex]);
+      handleSelect(activeSuggestions[highlightIndex]);
+      handled = true;
     } else if (e.key === 'Escape') {
       setOpen(false);
+      handled = true;
     }
+    if (!handled) onKeyDownProp?.(e);
   };
 
   useEffect(() => {
@@ -55,7 +82,8 @@ export function AutocompleteInput({ value, onChange, suggestions, placeholder, c
   return (
     <div ref={wrapperRef} className="relative flex-1">
       <input
-        type="text"
+        ref={inputRef}
+        type={type}
         value={value}
         onChange={(e) => { onChange(e.target.value); setOpen(true); setHighlightIndex(-1); }}
         onFocus={() => setOpen(true)}
@@ -66,9 +94,9 @@ export function AutocompleteInput({ value, onChange, suggestions, placeholder, c
         placeholder={placeholder}
         className={className}
       />
-      {open && filtered.length > 0 && (
+      {open && activeSuggestions.length > 0 && (
         <div className="absolute z-50 left-0 right-0 top-full mt-0.5 max-h-48 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-xl">
-          {filtered.map((s, i) => (
+          {activeSuggestions.map((s, i) => (
             <button
               key={s}
               type="button"
