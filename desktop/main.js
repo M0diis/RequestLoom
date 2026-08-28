@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 
 const APP_URL = process.env.REQUESTLOOM_APP_URL || 'http://127.0.0.1:5056';
+const DEBUG_MODE = process.env.REQUESTLOOM_ELECTRON_DEBUG === '1';
 const HEALTH_PATH = '/api/workspaces';
 const STARTUP_TIMEOUT_MS = 120000;
 const RETRY_INTERVAL_MS = 500;
@@ -253,6 +254,10 @@ app.whenReady().then(async () => {
     startBackend();
     await waitForBackendReady(APP_URL, STARTUP_TIMEOUT_MS);
     await mainWindow.loadURL(APP_URL);
+
+    if (DEBUG_MODE) {
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     dialog.showErrorBox('Failed To Start RequestLoom', message);

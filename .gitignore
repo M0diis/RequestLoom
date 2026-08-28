@@ -4,6 +4,7 @@ output/
 .electron-tmp/
 .publish-windows/
 .publish-windows-backend/
+.publish-debug-backend/
 *.exe
 
 # Dev runtime
@@ -12,7 +13,9 @@ output/
 
 # IDE
 .vs/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 *.swp
 *.swo
 *~

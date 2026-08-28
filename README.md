@@ -91,6 +91,12 @@ Then open <http://localhost:5173>.
 | `restart` | Stop, then start both |
 | `status` | Show PID/port status |
 
+### Electron debug in VS Code
+
+Open the repository in VS Code, select **Electron: Debug** in the Run and Debug panel, and press **F5**. The pre-launch task builds the frontend, publishes a Debug backend, stages it for Electron, and launches `desktop/main.js` with the Node inspector. Electron DevTools open automatically; set breakpoints in `desktop/main.js` and `desktop/preload.js`.
+
+The debug build uses the framework-dependent .NET backend, so the .NET SDK/runtime must be installed locally. Generated files are kept in ignored `backend/wwwroot`, `.publish-debug-backend`, and `desktop/runtime/backend` directories.
+
 The Vite dev server proxies `/api` and `/mock` to the backend, so no CORS issues in development.
 
 ## Docker deployment

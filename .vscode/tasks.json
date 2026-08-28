@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "electron: build debug",
+      "type": "process",
+      "command": "pwsh",
+      "windows": {
+        "command": "${env:SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+      },
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/electron-debug.ps1"
+      ],
+      "options": {
+        "env": {
+          "PATH": "${env:PATH};${env:ProgramFiles}\\nodejs"
+        }
+      },
+      "problemMatcher": []
+    }
+  ]
+}

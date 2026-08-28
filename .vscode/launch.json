@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Electron: Debug",
+      "type": "node",
+      "request": "launch",
+      "preLaunchTask": "electron: build debug",
+      "cwd": "${workspaceFolder}/desktop",
+      "runtimeExecutable": "${workspaceFolder}/desktop/node_modules/electron/dist/electron",
+      "windows": {
+        "runtimeExecutable": "${workspaceFolder}/desktop/node_modules/electron/dist/electron.exe"
+      },
+      "runtimeArgs": [
+        "--inspect=9229",
+        "${workspaceFolder}/desktop/main.js"
+      ],
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_ENVIRONMENT": "Development",
+        "ELECTRON_ENABLE_LOGGING": "true",
+        "NODE_ENV": "development",
+        "REQUESTLOOM_APP_URL": "http://127.0.0.1:5056",
+        "REQUESTLOOM_ELECTRON_DEBUG": "1"
+      },
+      "console": "integratedTerminal",
+      "outputCapture": "std",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ]
+}
