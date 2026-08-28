@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useRequestStore } from '../../stores/requestStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -7,6 +7,7 @@ import { MockServersSidebarPanel } from '../mockserver/MockServersSidebarPanel';
 import { ImportModal } from '../common/ImportModal';
 import { CollectionRunnerModal } from '../common/CollectionRunnerModal';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
+import { AlertModal } from '../common/AlertModal';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { exportImportApi, requestsApi, serviceFilesApi } from '../../services/api';
 import type { ApiRequest } from '../../types';
@@ -21,8 +22,100 @@ const METHOD_COLORS: Record<string, string> = {
   HEAD: 'text-gray-400',
 };
 
-const MENU_ITEM = 'block w-full px-2 py-1 text-left text-[11px] text-gray-200 hover:bg-gray-800 whitespace-nowrap';
-const MENU_DANGER = 'block w-full px-2 py-1 text-left text-[11px] text-rose-300 hover:bg-rose-950/30';
+const MENU_ITEM = 'group flex min-h-8 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] leading-4 text-gray-300 transition-colors hover:bg-gray-800/80 hover:text-gray-100 focus-visible:bg-gray-800/80 focus-visible:outline-none whitespace-nowrap';
+const MENU_DANGER = 'group flex min-h-8 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] leading-4 text-rose-300 transition-colors hover:bg-rose-950/40 hover:text-rose-200 focus-visible:bg-rose-950/40 focus-visible:outline-none whitespace-nowrap';
+const MENU_ICON = 'h-3.5 w-3.5 flex-shrink-0 text-gray-500 transition-colors group-hover:text-gray-300';
+
+type MenuIconName =
+  | 'play'
+  | 'clone'
+  | 'copy'
+  | 'rename'
+  | 'code'
+  | 'folder'
+  | 'info'
+  | 'star'
+  | 'trash'
+  | 'plus'
+  | 'folder-plus'
+  | 'file-code'
+  | 'share'
+  | 'file-text'
+  | 'collapse'
+  | 'chevron-up'
+  | 'chevron-down'
+  | 'settings'
+  | 'terminal';
+
+function MenuIcon({ name, danger = false }: { name: MenuIconName; danger?: boolean }) {
+  const svgProps = {
+    className: danger ? 'h-3.5 w-3.5 flex-shrink-0 text-rose-400 transition-colors group-hover:text-rose-200' : MENU_ICON,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+
+  switch (name) {
+    case 'play':
+      return <svg {...svgProps} fill="currentColor" stroke="none"><path d="M8 5v14l11-7-11-7z" /></svg>;
+    case 'clone':
+      return <svg {...svgProps}><rect x="8" y="8" width="11" height="11" rx="1.5" /><path d="M5 16H4a1 1 0 01-1-1V5a1 1 0 011-1h10a1 1 0 011 1v1" /></svg>;
+    case 'copy':
+      return <svg {...svgProps}><rect x="7" y="5" width="11" height="14" rx="1.5" /><path d="M10 3h7a2 2 0 012 2v11M10 9h5M10 13h5" /></svg>;
+    case 'rename':
+      return <svg {...svgProps}><path d="M4 20l4.2-1 9.9-9.9a2.1 2.1 0 00-3-3L5.2 16 4 20z" /><path d="M13.8 7.2l3 3" /></svg>;
+    case 'code':
+      return <svg {...svgProps}><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 4l-4 16" /></svg>;
+    case 'folder':
+      return <svg {...svgProps}><path d="M3 6.5A1.5 1.5 0 014.5 5H10l2 2h7.5A1.5 1.5 0 0121 8.5v9a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5v-11z" /></svg>;
+    case 'info':
+      return <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M12 10.5v5M12 7.5h.01" /></svg>;
+    case 'star':
+      return <svg {...svgProps}><path d="M12 3.8l2.5 5.1 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8L12 3.8z" /></svg>;
+    case 'trash':
+      return <svg {...svgProps}><path d="M4 7h16M10 11v5M14 11v5M6.5 7l.7 13h9.6l.7-13M9 7V4h6v3" /></svg>;
+    case 'plus':
+      return <svg {...svgProps}><path d="M12 5v14M5 12h14" /></svg>;
+    case 'folder-plus':
+      return <svg {...svgProps}><path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" /><path d="M12 10v5M9.5 12.5h5" /></svg>;
+    case 'file-code':
+      return <svg {...svgProps}><path d="M7 3h7l4 4v14H7a2 2 0 01-2-2V5a2 2 0 012-2zM14 3v5h5" /><path d="M10 13l-2 2 2 2M14 13l2 2-2 2" /></svg>;
+    case 'share':
+      return <svg {...svgProps}><circle cx="6" cy="12" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="18" cy="18" r="2" /><path d="M7.8 11l8.4-4M7.8 13l8.4 4" /></svg>;
+    case 'file-text':
+      return <svg {...svgProps}><path d="M7 3h7l4 4v14H7a2 2 0 01-2-2V5a2 2 0 012-2zM14 3v5h5M9 13h6M9 17h6" /></svg>;
+    case 'collapse':
+      return <svg {...svgProps}><path d="M8 8l4 4 4-4M8 16l4-4 4 4" /></svg>;
+    case 'chevron-up':
+      return <svg {...svgProps}><path d="M6 15l6-6 6 6" /></svg>;
+    case 'chevron-down':
+      return <svg {...svgProps}><path d="M6 9l6 6 6-6" /></svg>;
+    case 'settings':
+      return <svg {...svgProps}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1-1.7 1.7-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6v.1h-2.4v-.1a1.7 1.7 0 00-1-1.6 1.7 1.7 0 00-1.9.3l-.1.1L8 17l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.6-1H6v-2.4h.1a1.7 1.7 0 001.6-1 1.7 1.7 0 00-.3-1.9L7.3 8 9 6.3l.1.1a1.7 1.7 0 001.9.3 1.7 1.7 0 001-1.6V5h2.4v.1a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.3l.1-.1L19 8l-.1.1a1.7 1.7 0 00-.3 1.9 1.7 1.7 0 001.6 1h.1v2.4h-.1a1.7 1.7 0 00-1.6 1z" /></svg>;
+    case 'terminal':
+      return <svg {...svgProps}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M13 15h4" /></svg>;
+  }
+}
+
+interface ContextMenuItemProps {
+  icon: MenuIconName;
+  children: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+}
+
+function ContextMenuItem({ icon, children, onClick, danger = false }: ContextMenuItemProps) {
+  return (
+    <button type="button" role="menuitem" className={danger ? MENU_DANGER : MENU_ITEM} onClick={onClick}>
+      <MenuIcon name={icon} danger={danger} />
+      <span className="truncate">{children}</span>
+    </button>
+  );
+}
 
 export function Sidebar() {
   const {
@@ -63,6 +156,7 @@ export function Sidebar() {
   const [renamingServiceId, setRenamingServiceId] = useState<string | null>(null);
   const [renamingServiceName, setRenamingServiceName] = useState('');
   const [showCodeForRequest, setShowCodeForRequest] = useState<ApiRequest | null>(null);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const addRequestSubmitting = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -212,16 +306,16 @@ export function Sidebar() {
 
   const revealPath = async (targetPath: string) => {
     if (!targetPath) {
-      window.alert('This item is not backed by a local file in the current storage mode.');
+      setAlertMessage('This item is not backed by a local file in the current storage mode.');
       return;
     }
     if (window.desktopShell) {
       const revealed = await window.desktopShell.revealPath(targetPath);
-      if (!revealed) window.alert(`Could not find ${targetPath}`);
+      if (!revealed) setAlertMessage(`Could not find ${targetPath}`);
       return;
     }
     await navigator.clipboard.writeText(targetPath).catch(() => {});
-    window.alert(`Path copied to clipboard:\n${targetPath}`);
+    setAlertMessage(`Path copied to clipboard:\n${targetPath}`);
   };
 
   const handleCopyRequest = async (requestId: string) => {
@@ -230,13 +324,14 @@ export function Sidebar() {
     await navigator.clipboard.writeText(stored.content).catch(() => {});
   };
 
-  const handleCreateExample = async (requestId: string) => {
+  const handleCloneRequest = async (requestId: string) => {
     setContextMenu(null);
-    const original = services.flatMap((service) => service.requests).find((request) => request.id === requestId);
-    if (!original) return;
-    const example = await duplicateRequest(requestId);
-    await updateRequest(example.id, { name: `${original.name} Example` });
-    await selectRequest(example.id);
+    try {
+      const clonedRequest = await duplicateRequest(requestId);
+      await selectRequest(clonedRequest.id);
+    } catch (error) {
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to clone request');
+    }
   };
 
   const handleCreateCollectionAsset = async (serviceId: string, kind: 'folder' | 'js') => {
@@ -248,7 +343,7 @@ export function Sidebar() {
       const result = await serviceFilesApi.create(activeWorkspaceId, serviceId, name.trim(), kind);
       await revealPath(result.path);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Failed to create collection file');
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to create collection file');
     }
   };
 
@@ -419,6 +514,7 @@ export function Sidebar() {
                 <button
                   key={req.id}
                   onClick={() => { setServiceSettingsServiceId(null); selectRequest(req.id); }}
+                  onContextMenu={(e) => handleContextMenu(e, 'request', req.id)}
                   className={`flex w-full items-center gap-2 px-2 py-1 text-left text-xs ${
                     activeRequestId === req.id ? 'bg-gray-800/70 text-gray-100' : 'text-gray-300 hover:bg-gray-900/60'
                   }`}
@@ -636,37 +732,27 @@ export function Sidebar() {
       {contextMenu && (
         <div
           ref={contextMenuRef}
-          className="fixed z-50 w-max min-w-[110px] border border-gray-700 bg-gray-900 py-0.5 shadow-lg"
+          role="menu"
+          aria-label={contextMenu.type === 'request' ? 'Request actions' : 'Collection actions'}
+          className="fixed z-50 max-h-[calc(100vh-1rem)] min-w-[210px] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-gray-700/80 bg-[#1b1b1b] p-1 shadow-[0_16px_36px_rgba(0,0,0,0.55)] ring-1 ring-black/40"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {contextMenu.type === 'request' && (
             <>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void handleRunRequest(contextMenu.id); }}
-              >
-                ▶ Run Request
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void duplicateRequest(contextMenu.id); setContextMenu(null); }}
-              >
+              <ContextMenuItem icon="play" onClick={() => { void handleRunRequest(contextMenu.id); }}>
+                Run Request
+              </ContextMenuItem>
+              <ContextMenuItem icon="clone" onClick={() => { void handleCloneRequest(contextMenu.id); }}>
                 Clone
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void handleCopyRequest(contextMenu.id); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="copy" onClick={() => { void handleCopyRequest(contextMenu.id); }}>
                 Copy
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { startRenameRequest(contextMenu.id); setContextMenu(null); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="rename" onClick={() => { startRenameRequest(contextMenu.id); setContextMenu(null); }}>
                 Rename
-              </button>
-              <button
-                className={MENU_ITEM}
+              </ContextMenuItem>
+              <ContextMenuItem
+                icon="code"
                 onClick={() => {
                   const request = services.flatMap((service) => service.requests).find((row) => row.id === contextMenu.id);
                   setShowCodeForRequest(request ?? null);
@@ -674,15 +760,9 @@ export function Sidebar() {
                 }}
               >
                 Generate Code
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void handleCreateExample(contextMenu.id); }}
-              >
-                Create Example
-              </button>
-              <button
-                className={MENU_ITEM}
+              </ContextMenuItem>
+              <ContextMenuItem
+                icon="folder"
                 onClick={() => {
                   const service = services.find((row) => row.requests.some((request) => request.id === contextMenu.id));
                   setContextMenu(null);
@@ -690,38 +770,33 @@ export function Sidebar() {
                 }}
               >
                 Reveal in File Explorer
-              </button>
-              <div className="my-1 border-t border-gray-800" />
-              <button
-                className={MENU_ITEM}
+              </ContextMenuItem>
+              <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+              <ContextMenuItem
+                icon="info"
                 onClick={() => {
                   setContextMenu(null);
                   const request = services.flatMap((service) => service.requests).find((row) => row.id === contextMenu.id);
                   if (request) {
-                    window.alert(`${request.method} ${request.url || '(no URL)'}\n\nCreated: ${request.createdAt}\nUpdated: ${request.updatedAt}`);
+                    setAlertMessage(`${request.method} ${request.url || '(no URL)'}\n\nCreated: ${request.createdAt}\nUpdated: ${request.updatedAt}`);
                   }
                 }}
               >
                 Info
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void toggleFavorite(contextMenu.id); setContextMenu(null); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="star" onClick={() => { void toggleFavorite(contextMenu.id); setContextMenu(null); }}>
                 Toggle Favorite
-              </button>
-              <button
-                className={MENU_DANGER}
-                onClick={() => { deleteRequest(contextMenu.id); setContextMenu(null); }}
-              >
+              </ContextMenuItem>
+              <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+              <ContextMenuItem icon="trash" danger onClick={() => { deleteRequest(contextMenu.id); setContextMenu(null); }}>
                 Delete
-              </button>
+              </ContextMenuItem>
             </>
           )}
           {contextMenu.type === 'service' && (
             <>
-              <button
-                className={MENU_ITEM}
+              <ContextMenuItem
+                icon="plus"
                 onClick={() => {
                   setCollapsedServices((prev) => { const next = new Set(prev); next.delete(contextMenu.id); return next; });
                   setAddingRequestToService(contextMenu.id);
@@ -730,69 +805,42 @@ export function Sidebar() {
                 }}
               >
                 New Request
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'folder'); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="folder-plus" onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'folder'); }}>
                 New Folder
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'js'); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="file-code" onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'js'); }}>
                 New JS File
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { setShowCollectionRunner(contextMenu.id); setContextMenu(null); }}
-              >
-                ▶ Run
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void duplicateService(activeWorkspaceId, contextMenu.id); setContextMenu(null); }}
-              >
+              </ContextMenuItem>
+              <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+              <ContextMenuItem icon="play" onClick={() => { setShowCollectionRunner(contextMenu.id); setContextMenu(null); }}>
+                Run
+              </ContextMenuItem>
+              <ContextMenuItem icon="clone" onClick={() => { void duplicateService(activeWorkspaceId, contextMenu.id); setContextMenu(null); }}>
                 Clone
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { startRenameService(contextMenu.id); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="rename" onClick={() => { startRenameService(contextMenu.id); }}>
                 Rename
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void handleShareCollection(contextMenu.id); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="share" onClick={() => { void handleShareCollection(contextMenu.id); }}>
                 Share
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { handleGenerateDocs(contextMenu.id); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="file-text" onClick={() => { handleGenerateDocs(contextMenu.id); }}>
                 Generate Docs
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { toggleCollapse(contextMenu.id); setContextMenu(null); }}
-              >
+              </ContextMenuItem>
+              <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+              <ContextMenuItem icon="collapse" onClick={() => { toggleCollapse(contextMenu.id); setContextMenu(null); }}>
                 Collapse
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void moveService(activeWorkspaceId, contextMenu.id, -1); setContextMenu(null); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="chevron-up" onClick={() => { void moveService(activeWorkspaceId, contextMenu.id, -1); setContextMenu(null); }}>
                 Move Up
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { void moveService(activeWorkspaceId, contextMenu.id, 1); setContextMenu(null); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="chevron-down" onClick={() => { void moveService(activeWorkspaceId, contextMenu.id, 1); setContextMenu(null); }}>
                 Move Down
-              </button>
-              <button
-                className={MENU_ITEM}
+              </ContextMenuItem>
+              <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+              <ContextMenuItem
+                icon="folder"
                 onClick={() => {
                   const service = services.find((row) => row.id === contextMenu.id);
                   setContextMenu(null);
@@ -800,22 +848,18 @@ export function Sidebar() {
                 }}
               >
                 Reveal in File Explorer
-              </button>
-              <div className="my-1 border-t border-gray-800" />
-              <button
-                className={MENU_ITEM}
-                onClick={() => { openServiceSettings(contextMenu.id); }}
-              >
+              </ContextMenuItem>
+              <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+              <ContextMenuItem icon="settings" onClick={() => { openServiceSettings(contextMenu.id); }}>
                 Settings
-              </button>
-              <button
-                className={MENU_ITEM}
-                onClick={() => { handleOpenTerminal(contextMenu.id); }}
-              >
+              </ContextMenuItem>
+              <ContextMenuItem icon="terminal" onClick={() => { handleOpenTerminal(contextMenu.id); }}>
                 Open in Terminal
-              </button>
-              <button
-                className={MENU_DANGER}
+              </ContextMenuItem>
+              <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+              <ContextMenuItem
+                icon="trash"
+                danger
                 onClick={() => {
                   if (serviceSettingsServiceId === contextMenu.id) {
                     setServiceSettingsServiceId(null);
@@ -825,7 +869,7 @@ export function Sidebar() {
                 }}
               >
                 Remove
-              </button>
+              </ContextMenuItem>
             </>
           )}
         </div>
@@ -859,6 +903,14 @@ export function Sidebar() {
             value: header.value,
             enabled: header.enabled,
           }))}
+        />
+      )}
+
+      {alertMessage !== null && (
+        <AlertModal
+          title="Notice"
+          message={alertMessage}
+          onClose={() => setAlertMessage(null)}
         />
       )}
     </div>

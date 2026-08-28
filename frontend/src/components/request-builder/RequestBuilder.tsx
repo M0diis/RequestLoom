@@ -16,6 +16,7 @@ import RequestSettingsEditor from './RequestSettingsEditor';
 import { RequestFileViewer } from './RequestFileViewer';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import { DynamicValueReferenceModal } from '../common/DynamicValueReferenceModal';
+import { AlertModal } from '../common/AlertModal';
 import { getDynamicValueSuggestions } from '../../lib/dynamicValues';
 import type {
   HttpMethod,
@@ -189,6 +190,8 @@ export function RequestBuilder() {
   const {
     activeRequest,
     updateRequest,
+    selectRequest,
+    duplicateRequest,
     sendRequest,
     cancelRequest,
     sending,
@@ -200,6 +203,8 @@ export function RequestBuilder() {
 
   const [showSnippets, setShowSnippets] = useState(false);
   const [showDynamicValues, setShowDynamicValues] = useState(false);
+  const [cloneError, setCloneError] = useState<string | null>(null);
+  const [cloneBusy, setCloneBusy] = useState(false);
   const [dynamicValues, setDynamicValues] = useState<DynamicValueDefinition[]>([]);
   const [curlCopied, setCurlCopied] = useState(false);
   const [historyCount, setHistoryCount] = useState(0);
@@ -454,6 +459,20 @@ export function RequestBuilder() {
 
   const handleSend = () => sendRequest(activeWorkspaceId);
 
+  const handleClone = async () => {
+    if (cloneBusy) return;
+    setCloneBusy(true);
+    setCloneError(null);
+    try {
+      const clonedRequest = await duplicateRequest(activeRequest.id);
+      await selectRequest(clonedRequest.id);
+    } catch (error) {
+      setCloneError(error instanceof Error ? error.message : 'Failed to clone request');
+    } finally {
+      setCloneBusy(false);
+    }
+  };
+
   const handleCopyCurl = async () => {
     try {
       const { curl } = await toolsApi.generateCurl({
@@ -572,6 +591,14 @@ export function RequestBuilder() {
                 title="Generate code snippets"
               >
                 Code
+              </button>
+              <button
+                onClick={() => { void handleClone(); }}
+                disabled={cloneBusy}
+                className="border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-[11px] text-gray-300 hover:bg-gray-800 disabled:cursor-default disabled:opacity-50 whitespace-nowrap"
+                title="Clone request"
+              >
+                {cloneBusy ? 'Cloning...' : 'Clone'}
               </button>
               <button
                 onClick={() => setShowDynamicValues(true)}
@@ -706,6 +733,14 @@ export function RequestBuilder() {
         <DynamicValueReferenceModal
           definitions={dynamicValues}
           onClose={() => setShowDynamicValues(false)}
+        />
+      )}
+
+      {cloneError !== null && (
+        <AlertModal
+          title="Clone request"
+          message={cloneError}
+          onClose={() => setCloneError(null)}
         />
       )}
     </div>

@@ -6,6 +6,7 @@ import { CustomDropdown } from './CustomDropdown';
 import { ConfirmModal } from './ConfirmModal';
 import { ExportImportModal } from './ExportImportModal';
 import { SettingsModal } from './SettingsModal';
+import { AlertModal } from './AlertModal';
 
 export function TopBar() {
   const {
@@ -34,6 +35,7 @@ export function TopBar() {
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   const handleTitlebarPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -199,7 +201,7 @@ export function TopBar() {
       await removeWorkspace(workspace.id);
       setDeleteConfirmOpen(false);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Failed to delete workspace');
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to delete workspace');
     } finally {
       setBusy(false);
     }
@@ -216,7 +218,7 @@ export function TopBar() {
     try {
       await activateEnvironment(activeWorkspaceId, environmentId);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Failed to activate environment');
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to activate environment');
     } finally {
       setBusy(false);
     }
@@ -507,6 +509,14 @@ export function TopBar() {
           />
         );
       })()}
+
+      {alertMessage !== null && (
+        <AlertModal
+          title="Notice"
+          message={alertMessage}
+          onClose={() => setAlertMessage(null)}
+        />
+      )}
     </>
   );
 }
