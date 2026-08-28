@@ -24,6 +24,7 @@ export function TopBar() {
     toggleDarkMode,
     responseLayout,
     setResponseLayout,
+    devToolsOpen,
     setDevToolsOpen,
     setActiveDevToolTab,
   } = useUiStore();
@@ -319,11 +320,13 @@ export function TopBar() {
         {/* Dev Tools */}
         <button
           onClick={() => {
-            setActiveDevToolTab('terminal');
-            setDevToolsOpen(true);
+            if (!devToolsOpen) {
+              setActiveDevToolTab('terminal');
+            }
+            setDevToolsOpen(!devToolsOpen);
           }}
           className="flex h-7 w-8 items-center justify-center border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-300 hover:bg-gray-800"
-          title="Open Dev Tools"
+          title={devToolsOpen ? 'Close Dev Tools' : 'Open Dev Tools'}
         >
           <svg className="h-4 w-4" fill="none" viewBox="4 4 16 16" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 7h14v10H5zM8 10l2 2-2 2m4 0h3" />
