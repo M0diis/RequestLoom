@@ -137,6 +137,39 @@ export interface AuthRequest {
   configJson: string;
 }
 
+export interface OAuth2Configuration {
+  authorizationUrl: string;
+  tokenUrl: string;
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  scope: string;
+  redirectUri: string;
+  audience: string;
+  clientAuthenticationMethod: 'client_secret_post' | 'client_secret_basic';
+}
+
+export interface OAuthTokenExchangeResponse {
+  connected: boolean;
+  tokenType: string;
+  expiresAt?: string;
+  hasRefreshToken: boolean;
+}
+
+export interface OAuthTokenStatus {
+  connected: boolean;
+  expiresAt?: string;
+  hasRefreshToken: boolean;
+}
+
+export interface OAuthDiscoveryResponse {
+  issuer: string;
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
+  userinfoEndpoint?: string;
+  scopesSupported: string[];
+}
+
 export interface RequestVariableRequest {
   key: string;
   value: string;

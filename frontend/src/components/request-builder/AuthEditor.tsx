@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { ApiRequest } from '../../types';
 import { AutocompleteInput } from '../common/AutocompleteInput';
+import { OAuth2AuthFields } from '../common/OAuth2AuthFields';
 
 interface Props {
   request: ApiRequest;
@@ -8,7 +9,7 @@ interface Props {
   dynamicSuggestions?: string[];
 }
 
-type RequestAuthOption = 'inherit' | 'none' | 'basic' | 'bearer' | 'apikey';
+type RequestAuthOption = 'inherit' | 'none' | 'basic' | 'bearer' | 'apikey' | 'oauth2';
 
 const AUTH_TYPES: { value: RequestAuthOption; label: string }[] = [
   { value: 'inherit', label: 'Inherit' },
@@ -16,6 +17,7 @@ const AUTH_TYPES: { value: RequestAuthOption; label: string }[] = [
   { value: 'basic', label: 'Basic' },
   { value: 'bearer', label: 'Bearer Token' },
   { value: 'apikey', label: 'API Key' },
+  { value: 'oauth2', label: 'OAuth2 / OIDC' },
 ];
 
 function normalizeAuthType(authType: string | null | undefined): RequestAuthOption {
@@ -24,7 +26,7 @@ function normalizeAuthType(authType: string | null | undefined): RequestAuthOpti
   }
 
   const normalized = authType.toLowerCase();
-  if (normalized === 'inherit' || normalized === 'none' || normalized === 'basic' || normalized === 'bearer' || normalized === 'apikey') {
+  if (normalized === 'inherit' || normalized === 'none' || normalized === 'basic' || normalized === 'bearer' || normalized === 'apikey' || normalized === 'oauth2') {
     return normalized;
   }
 
@@ -61,6 +63,17 @@ export function AuthEditor({ request, onUpdate, dynamicSuggestions = [] }: Props
       basic: { username: '', password: '' },
       bearer: { token: '' },
       apikey: { key: '', value: '', in: 'header' },
+      oauth2: {
+        authorizationUrl: '',
+        tokenUrl: '',
+        issuer: '',
+        clientId: '',
+        clientSecret: '',
+        scope: 'openid profile email',
+        redirectUri: '',
+        audience: '',
+        clientAuthenticationMethod: 'client_secret_post',
+      },
     };
     setConfig(defaultConfigs[type] || {});
     saveAuth(type, defaultConfigs[type] || {});
@@ -159,6 +172,17 @@ export function AuthEditor({ request, onUpdate, dynamicSuggestions = [] }: Props
             </select>
           </div>
         </div>
+      )}
+
+      {authType === 'oauth2' && (
+        <OAuth2AuthFields
+          config={config}
+          onChange={(nextConfig) => {
+            setConfig(nextConfig);
+            saveAuth('oauth2', nextConfig);
+          }}
+          ownerKey={'request:' + request.id}
+        />
       )}
 
       {authType === 'inherit' && (

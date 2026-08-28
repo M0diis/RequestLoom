@@ -22,6 +22,7 @@ public class RequestExecutionService
     private readonly SettingsService _settings;
     private readonly ILogger<RequestExecutionService> _logger;
     private readonly RuntimeVariableStore _runtimeVariableStore;
+    private readonly OAuthTokenService _oauthTokenService;
 
     public RequestExecutionService(
         IHttpClientFactory httpClientFactory,
@@ -31,7 +32,8 @@ public class RequestExecutionService
         IHistoryRepository historyRepo,
         SettingsService settings,
         ILogger<RequestExecutionService> logger,
-        RuntimeVariableStore runtimeVariableStore)
+        RuntimeVariableStore runtimeVariableStore,
+        OAuthTokenService oauthTokenService)
     {
         _httpClientFactory = httpClientFactory;
         _variableService = variableService;
@@ -41,6 +43,7 @@ public class RequestExecutionService
         _settings = settings;
         _logger = logger;
         _runtimeVariableStore = runtimeVariableStore;
+        _oauthTokenService = oauthTokenService;
     }
 
     public async Task<ExecuteResponse> ExecuteAsync(ExecuteRequestPayload payload, CancellationToken cancellationToken)
@@ -215,7 +218,25 @@ public class RequestExecutionService
             // Apply auth
             if (effectiveAuth != null && effectiveAuth.AuthType != "none")
             {
-                ApplyAuth(request, effectiveAuth, resolutionSession);
+                if (IsAuthType(effectiveAuth.AuthType, "oauth2"))
+                {
+                    var oauthConfig = JsonSerializer.Deserialize<OAuth2Configuration>(
+                        resolutionSession.Resolve(effectiveAuth.ConfigJson),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                        ?? throw new InvalidOperationException("OAuth configuration is invalid.");
+                    var oauthOwnerKey = ResolveOAuthOwnerKey(payload);
+                    var oauthToken = await _oauthTokenService.GetAccessTokenAsync(
+                        oauthOwnerKey,
+                        oauthConfig,
+                        cancellationToken);
+                    request.Headers.TryAddWithoutValidation(
+                        "Authorization",
+                        $"{oauthToken.TokenType} {oauthToken.Value}");
+                }
+                else
+                {
+                    ApplyAuth(request, effectiveAuth, resolutionSession);
+                }
                 if (request.RequestUri != null)
                 {
                     resolvedUrl = request.RequestUri.ToString();
@@ -761,6 +782,23 @@ public class RequestExecutionService
     private static bool IsAuthType(string? authType, string expected)
     {
         return string.Equals(authType?.Trim(), expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveOAuthOwnerKey(ExecuteRequestPayload payload)
+    {
+        var requestAuthIsExplicit = payload.Auth != null &&
+            !IsAuthType(payload.Auth.AuthType, "inherit");
+
+        if (requestAuthIsExplicit && !string.IsNullOrWhiteSpace(payload.RequestId))
+            return $"request:{payload.RequestId}";
+
+        if (!string.IsNullOrWhiteSpace(payload.ServiceId))
+            return $"service:{payload.ServiceId}";
+
+        if (!string.IsNullOrWhiteSpace(payload.RequestId))
+            return $"request:{payload.RequestId}";
+
+        throw new InvalidOperationException("OAuth authentication requires a saved request or service.");
     }
 
     private static void ApplyAuth(

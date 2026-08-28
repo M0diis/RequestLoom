@@ -15,6 +15,7 @@ RequestLoom runs three ways:
 - **Request builder** - HTTP methods, headers, query params, JSON/raw/form bodies, and response inspection
 - **Collections** - organize requests and run them sequentially with the collection runner
 - **Environments & variables** - scoped variables with `{{variable}}` interpolation, resolved at execution time
+- **OAuth2 / OIDC** - PKCE authorization-code login, OIDC discovery, in-memory token caching, and automatic refresh
 - **Workspaces** - separate workspaces with their own variables and data
 - **Mock servers** - define routes and canned responses served from `/mock/*`
 - **Scripting** - pre-request and test scripts written in JavaScript (Jint engine)
@@ -202,6 +203,12 @@ Open the gear icon in the top bar to adjust application settings; they are persi
 
 ## API overview
 
+### OAuth2 / OIDC setup
+
+Choose **OAuth2 / OIDC** in request authorization or service default authorization. Use **Discover OIDC** with an issuer, or enter the authorization and token endpoints manually. Register the redirect URI shown in the editor with the identity provider; by default it is `<app-origin>/oauth/callback` (for example `http://localhost:5173/oauth/callback` in development or `http://127.0.0.1:5056/oauth/callback` in the desktop/web app).
+
+RequestLoom uses the authorization-code flow with S256 PKCE. Access and refresh tokens remain in the backend process memory, and access tokens are refreshed automatically before expiry. Restarting the backend or disconnecting the authorization requires signing in again.
+
 The backend exposes a REST API under `/api`:
 
 | Area | Endpoints |
@@ -216,6 +223,7 @@ The backend exposes a REST API under `/api`:
 | Import/Export | `POST /api/import`, `GET /api/export` |
 | History | `GET /api/history` |
 | Settings | `GET/PUT /api/settings`, `DELETE /api/settings/history` |
+| OAuth2 / OIDC | `GET /api/oauth/discover`, `POST /api/oauth/exchange`, `GET /api/oauth/status`, `DELETE /api/oauth/token` |
 | Tools | `POST /api/tools/generate` (Go, C#, Java, PHP, Ruby) |
 
 Mock server routes are served from `/mock/*` before static files, so they work in both dev and production.

@@ -8,6 +8,7 @@ import { useEnvironmentStore } from '../../stores/environmentStore';
 import { CustomDropdown, type DropdownOption } from '../common/CustomDropdown';
 import { AutocompleteInput } from '../common/AutocompleteInput';
 import { DEFAULT_DYNAMIC_VALUE_SUGGESTIONS } from '../../lib/dynamicValues';
+import { OAuth2AuthFields } from '../common/OAuth2AuthFields';
 import type {
   ServiceVariable,
   KeyValueEntry,
@@ -40,6 +41,7 @@ const AUTH_TYPES: { value: AuthType; label: string }[] = [
   { value: 'basic', label: 'Basic' },
   { value: 'bearer', label: 'Bearer Token' },
   { value: 'apikey', label: 'API Key' },
+  { value: 'oauth2', label: 'OAuth2 / OIDC' },
 ];
 
 const API_KEY_TARGET_OPTIONS: DropdownOption[] = [
@@ -112,6 +114,18 @@ function getDefaultAuthConfig(type: AuthType): Record<string, string> {
       return { token: '' };
     case 'apikey':
       return { key: '', value: '', in: 'header' };
+    case 'oauth2':
+      return {
+        authorizationUrl: '',
+        tokenUrl: '',
+        issuer: '',
+        clientId: '',
+        clientSecret: '',
+        scope: 'openid profile email',
+        redirectUri: '',
+        audience: '',
+        clientAuthenticationMethod: 'client_secret_post',
+      };
     default:
       return {};
   }
@@ -526,6 +540,14 @@ export function ServiceSettingsPage({ serviceId }: Props) {
                 />
               </div>
             </div>
+          )}
+
+          {defaultAuthType === 'oauth2' && (
+            <OAuth2AuthFields
+              config={defaultAuthConfig}
+              onChange={setDefaultAuthConfig}
+              ownerKey={'service:' + service.id}
+            />
           )}
 
           {defaultAuthType === 'none' && (

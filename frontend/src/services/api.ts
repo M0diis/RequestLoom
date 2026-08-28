@@ -9,6 +9,7 @@ import type {
   MockServer, CreateMockServerRequest, UpdateMockServerRequest,
   MockServerEndpoint, CreateMockEndpointRequest, UpdateMockEndpointRequest,
   AppSettings, SettingsUpdate, ApiRequestSettings, StoredRequestFile, ServiceFileResponse, JavaScriptRunResponse,
+  OAuth2Configuration, OAuthDiscoveryResponse, OAuthTokenExchangeResponse, OAuthTokenStatus,
 } from '../types';
 
 const api = axios.create({
@@ -111,6 +112,24 @@ export const serviceFilesApi = {
 export const executeApi = {
   send: (payload: ExecuteRequestPayload, signal?: AbortSignal) =>
     api.post<ExecuteResponse>('/execute', payload, { signal }).then(r => r.data),
+};
+
+// OAuth2 / OIDC
+export const oauthApi = {
+  discover: (issuer: string) =>
+    api.get<OAuthDiscoveryResponse>(`/oauth/discover`, { params: { issuer } }).then(r => r.data),
+  exchangeCode: (data: {
+    ownerKey: string;
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+    configuration: OAuth2Configuration;
+  }) =>
+    api.post<OAuthTokenExchangeResponse>(`/oauth/exchange`, data).then(r => r.data),
+  status: (ownerKey: string) =>
+    api.get<OAuthTokenStatus>(`/oauth/status`, { params: { ownerKey } }).then(r => r.data),
+  disconnect: (ownerKey: string) =>
+    api.delete(`/oauth/token`, { params: { ownerKey } }),
 };
 
 // Service Variables

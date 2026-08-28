@@ -67,6 +67,7 @@ else
 // Services
 builder.Services.AddScoped<VariableResolutionService>();
 builder.Services.AddSingleton<RuntimeVariableStore>();
+builder.Services.AddSingleton<OAuthTokenService>();
 builder.Services.AddScoped<RequestExecutionService>();
 builder.Services.AddScoped<SpecificationImportService>();
     builder.Services.AddScoped<CollectionImportService>();
