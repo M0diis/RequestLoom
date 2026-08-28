@@ -9,14 +9,22 @@ namespace RequestLoom.Api.Services;
 /// settings file (requestloom.settings.json), then appsettings Storage:Mode,
 /// finally the default "sqlite". Changing the mode requires a restart.
 /// Other settings are persisted in the same settings file and take effect
-/// immediately.
+/// immediately. Storage mode changes can be applied by restarting the embedded
+/// backend, which the desktop shell exposes as an in-app reload.
 /// </summary>
 public class SettingsService
 {
     public const string SqliteMode = "sqlite";
     public const string JsonMode = "json";
+    public const string JsonSingleFile = "single";
+    public const string JsonPerCollection = "perCollection";
+    public const int DefaultMaxRedirects = 10;
+    public const int MaxAllowedRedirects = 50;
 
     private const string KeyStorageMode = "storageMode";
+    private const string KeyJsonStorageStrategy = "jsonStorageStrategy";
+    private const string KeyFollowRedirects = "followRedirects";
+    private const string KeyMaxRedirects = "maxRedirects";
     private const string KeyRequestTimeoutMs = "requestTimeoutMs";
     private const string KeyIgnoreSslErrors = "ignoreSslErrors";
     private const string KeyMaxResponseBodySizeMb = "maxResponseBodySizeMb";
@@ -62,6 +70,17 @@ public class SettingsService
 
     public bool UseJson => string.Equals(Mode, JsonMode, StringComparison.OrdinalIgnoreCase);
 
+    public string JsonStorageStrategy
+    {
+        get
+        {
+            var configured = GetString(KeyJsonStorageStrategy, JsonSingleFile);
+            return string.Equals(configured, JsonPerCollection, StringComparison.OrdinalIgnoreCase)
+                ? JsonPerCollection
+                : JsonSingleFile;
+        }
+    }
+
     /// <summary>Full path of the JSON data file used in json mode.</summary>
     public string JsonDataPath
     {
@@ -87,6 +106,12 @@ public class SettingsService
 
     /// <summary>Default request timeout in milliseconds. 0 = no timeout.</summary>
     public long RequestTimeoutMs => GetLong(KeyRequestTimeoutMs, 120_000);
+
+    /// <summary>Whether requests follow HTTP redirects by default.</summary>
+    public bool FollowRedirects => GetBool(KeyFollowRedirects, true);
+
+    /// <summary>Maximum number of automatic redirects to follow.</summary>
+    public int MaxRedirects => (int)Math.Clamp(GetLong(KeyMaxRedirects, DefaultMaxRedirects), 1L, (long)MaxAllowedRedirects);
 
     /// <summary>Global default for ignoring TLS/SSL certificate errors.</summary>
     public bool IgnoreSslErrors => GetBool(KeyIgnoreSslErrors, false);
@@ -118,8 +143,11 @@ public class SettingsService
         {
             StorageMode = Mode,
             StoragePath = StoragePath,
+            JsonStorageStrategy = JsonStorageStrategy,
             RestartRequired = false,
             RequestTimeoutMs = RequestTimeoutMs,
+            FollowRedirects = FollowRedirects,
+            MaxRedirects = MaxRedirects,
             IgnoreSslErrors = IgnoreSslErrors,
             MaxResponseBodySizeMb = MaxResponseBodySizeMb,
             SaveHistory = SaveHistory,
@@ -147,8 +175,20 @@ public class SettingsService
             newMode = normalized;
         }
 
+        string? newJsonStorageStrategy = null;
+        if (!string.IsNullOrWhiteSpace(request.JsonStorageStrategy))
+        {
+            var normalizedStrategy = Normalize(request.JsonStorageStrategy);
+            if (normalizedStrategy != JsonSingleFile && normalizedStrategy != JsonPerCollection)
+                throw new ArgumentException($"Invalid JSON storage strategy '{request.JsonStorageStrategy}'. Expected 'single' or 'perCollection'.");
+            newJsonStorageStrategy = normalizedStrategy;
+        }
+
         if (request.RequestTimeoutMs is < 0)
             throw new ArgumentException("Request timeout must be zero or a positive number of milliseconds.");
+
+        if (request.MaxRedirects is < 1 or > MaxAllowedRedirects)
+            throw new ArgumentException($"Maximum redirects must be between 1 and {MaxAllowedRedirects}.");
 
         if (request.MaxResponseBodySizeMb is < 0)
             throw new ArgumentException("Maximum response size must be zero or a positive number of megabytes.");
@@ -161,13 +201,18 @@ public class SettingsService
             !Uri.TryCreate(request.ProxyUrl, UriKind.Absolute, out _))
             throw new ArgumentException("Invalid proxy URL. Expected an absolute URL such as 'http://localhost:8888'.");
 
-        var restartRequired = newMode != null &&
-            !string.Equals(newMode, Mode, StringComparison.OrdinalIgnoreCase);
+        var restartRequired = (newMode != null &&
+            !string.Equals(newMode, Mode, StringComparison.OrdinalIgnoreCase)) ||
+            (newJsonStorageStrategy != null &&
+             !string.Equals(newJsonStorageStrategy, JsonStorageStrategy, StringComparison.OrdinalIgnoreCase));
 
         lock (_lock)
         {
             if (newMode != null) _overrides[KeyStorageMode] = newMode;
+            if (newJsonStorageStrategy != null) _overrides[KeyJsonStorageStrategy] = newJsonStorageStrategy;
             if (request.RequestTimeoutMs.HasValue) _overrides[KeyRequestTimeoutMs] = request.RequestTimeoutMs.Value.ToString(CultureInfo.InvariantCulture);
+            if (request.FollowRedirects.HasValue) _overrides[KeyFollowRedirects] = request.FollowRedirects.Value ? "true" : "false";
+            if (request.MaxRedirects.HasValue) _overrides[KeyMaxRedirects] = request.MaxRedirects.Value.ToString(CultureInfo.InvariantCulture);
             if (request.IgnoreSslErrors.HasValue) _overrides[KeyIgnoreSslErrors] = request.IgnoreSslErrors.Value ? "true" : "false";
             if (request.MaxResponseBodySizeMb.HasValue) _overrides[KeyMaxResponseBodySizeMb] = request.MaxResponseBodySizeMb.Value.ToString(CultureInfo.InvariantCulture);
             if (request.SaveHistory.HasValue) _overrides[KeySaveHistory] = request.SaveHistory.Value ? "true" : "false";
@@ -184,8 +229,11 @@ public class SettingsService
         {
             StorageMode = effectiveMode,
             StoragePath = effectiveMode == JsonMode ? JsonDataPath : DatabasePath,
+            JsonStorageStrategy = JsonStorageStrategy,
             RestartRequired = restartRequired,
             RequestTimeoutMs = RequestTimeoutMs,
+            FollowRedirects = FollowRedirects,
+            MaxRedirects = MaxRedirects,
             IgnoreSslErrors = IgnoreSslErrors,
             MaxResponseBodySizeMb = MaxResponseBodySizeMb,
             SaveHistory = SaveHistory,
@@ -251,8 +299,11 @@ public class AppSettingsDto
 {
     public string StorageMode { get; set; } = SettingsService.SqliteMode;
     public string StoragePath { get; set; } = "";
+    public string JsonStorageStrategy { get; set; } = SettingsService.JsonSingleFile;
     public bool RestartRequired { get; set; }
     public long RequestTimeoutMs { get; set; } = 120_000;
+    public bool FollowRedirects { get; set; } = true;
+    public int MaxRedirects { get; set; } = SettingsService.DefaultMaxRedirects;
     public bool IgnoreSslErrors { get; set; }
     public long MaxResponseBodySizeMb { get; set; }
     public bool SaveHistory { get; set; } = true;
@@ -266,7 +317,10 @@ public class AppSettingsDto
 public class UpdateSettingsRequest
 {
     public string? StorageMode { get; set; }
+    public string? JsonStorageStrategy { get; set; }
     public long? RequestTimeoutMs { get; set; }
+    public bool? FollowRedirects { get; set; }
+    public int? MaxRedirects { get; set; }
     public bool? IgnoreSslErrors { get; set; }
     public long? MaxResponseBodySizeMb { get; set; }
     public bool? SaveHistory { get; set; }

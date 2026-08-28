@@ -6,6 +6,7 @@ public class Service
     public string WorkspaceId { get; set; } = "";
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
+    public string StoragePath { get; set; } = "";
     public int SortOrder { get; set; }
     public string CreatedAt { get; set; } = "";
     public List<KeyValuePair> Headers { get; set; } = [];
@@ -36,8 +37,15 @@ public class CreateServiceRequest
 {
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
+    public string? StoragePath { get; set; }
     public List<KeyValuePairRequest> Headers { get; set; } = [];
     public AuthRequest? Auth { get; set; }
+}
+
+public class CreateServiceFileRequest
+{
+    public string Name { get; set; } = "";
+    public string Kind { get; set; } = "";
 }
 
 public class UpdateServiceRequest

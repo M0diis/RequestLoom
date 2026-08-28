@@ -6,6 +6,10 @@ import { VariablesSidebarPanel } from '../variables/VariablesSidebarPanel';
 import { MockServersSidebarPanel } from '../mockserver/MockServersSidebarPanel';
 import { ImportModal } from '../common/ImportModal';
 import { CollectionRunnerModal } from '../common/CollectionRunnerModal';
+import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { exportImportApi, requestsApi, serviceFilesApi } from '../../services/api';
+import type { ApiRequest } from '../../types';
 
 const METHOD_COLORS: Record<string, string> = {
   GET: 'text-emerald-400',
@@ -26,6 +30,7 @@ export function Sidebar() {
     activeRequestId,
     selectRequest,
     createService,
+    duplicateService,
     createRequest,
     updateRequest,
     deleteService,
@@ -41,8 +46,11 @@ export function Sidebar() {
     setSidebarTab,
     serviceSettingsServiceId,
     setServiceSettingsServiceId,
+    setTerminalCwd,
   } = useUiStore();
+  const { settings } = useSettingsStore();
   const [newServiceName, setNewServiceName] = useState('');
+  const [newServicePath, setNewServicePath] = useState('');
   const [addingService, setAddingService] = useState(false);
   const [addingRequestToService, setAddingRequestToService] = useState<string | null>(null);
   const [newRequestName, setNewRequestName] = useState('');
@@ -52,6 +60,9 @@ export function Sidebar() {
   const [showCollectionRunner, setShowCollectionRunner] = useState<string | null>(null);
   const [renamingRequestId, setRenamingRequestId] = useState<string | null>(null);
   const [renamingRequestName, setRenamingRequestName] = useState('');
+  const [renamingServiceId, setRenamingServiceId] = useState<string | null>(null);
+  const [renamingServiceName, setRenamingServiceName] = useState('');
+  const [showCodeForRequest, setShowCodeForRequest] = useState<ApiRequest | null>(null);
   const addRequestSubmitting = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -80,9 +91,27 @@ export function Sidebar() {
 
   const handleAddService = async () => {
     if (!newServiceName.trim()) return;
-    await createService(activeWorkspaceId, newServiceName.trim());
+    await createService(
+      activeWorkspaceId,
+      newServiceName.trim(),
+      settings?.storageMode === 'json' && settings.jsonStorageStrategy === 'perCollection'
+        ? newServicePath.trim() || undefined
+        : undefined,
+    );
     setNewServiceName('');
+    setNewServicePath('');
     setAddingService(false);
+  };
+
+  const chooseCollectionFolder = async () => {
+    if (window.desktopShell) {
+      const selected = await window.desktopShell.selectDirectory();
+      if (selected) setNewServicePath(selected);
+      return;
+    }
+
+    const selected = window.prompt('Collection folder path');
+    if (selected) setNewServicePath(selected);
   };
 
   const handleAddRequest = async (serviceId: string) => {
@@ -137,6 +166,29 @@ export function Sidebar() {
     cancelRenameRequest();
   };
 
+  const startRenameService = (serviceId: string) => {
+    const service = services.find((row) => row.id === serviceId);
+    if (!service) return;
+    setRenamingServiceId(serviceId);
+    setRenamingServiceName(service.name);
+    setContextMenu(null);
+  };
+
+  const commitRenameService = async (serviceId: string, candidateName: string) => {
+    const service = services.find((row) => row.id === serviceId);
+    const nextName = candidateName.trim();
+    if (service && nextName && nextName !== service.name) {
+      await useRequestStore.getState().updateService(
+        activeWorkspaceId,
+        serviceId,
+        nextName,
+        service.description,
+      );
+    }
+    setRenamingServiceId(null);
+    setRenamingServiceName('');
+  };
+
   const handleContextMenu = (e: React.MouseEvent, type: 'service' | 'request', id: string) => {
     e.preventDefault();
     setContextMenu({ type, id, x: e.clientX, y: e.clientY });
@@ -156,6 +208,75 @@ export function Sidebar() {
     }
     await store.selectRequest(requestId);
     await store.sendRequest(activeWorkspaceId);
+  };
+
+  const revealPath = async (targetPath: string) => {
+    if (!targetPath) {
+      window.alert('This item is not backed by a local file in the current storage mode.');
+      return;
+    }
+    if (window.desktopShell) {
+      const revealed = await window.desktopShell.revealPath(targetPath);
+      if (!revealed) window.alert(`Could not find ${targetPath}`);
+      return;
+    }
+    await navigator.clipboard.writeText(targetPath).catch(() => {});
+    window.alert(`Path copied to clipboard:\n${targetPath}`);
+  };
+
+  const handleCopyRequest = async (requestId: string) => {
+    setContextMenu(null);
+    const stored = await requestsApi.getFile(requestId);
+    await navigator.clipboard.writeText(stored.content).catch(() => {});
+  };
+
+  const handleCreateExample = async (requestId: string) => {
+    setContextMenu(null);
+    const original = services.flatMap((service) => service.requests).find((request) => request.id === requestId);
+    if (!original) return;
+    const example = await duplicateRequest(requestId);
+    await updateRequest(example.id, { name: `${original.name} Example` });
+    await selectRequest(example.id);
+  };
+
+  const handleCreateCollectionAsset = async (serviceId: string, kind: 'folder' | 'js') => {
+    setContextMenu(null);
+    const label = kind === 'folder' ? 'Folder name' : 'JavaScript file name';
+    const name = window.prompt(label);
+    if (!name?.trim()) return;
+    try {
+      const result = await serviceFilesApi.create(activeWorkspaceId, serviceId, name.trim(), kind);
+      await revealPath(result.path);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to create collection file');
+    }
+  };
+
+  const handleShareCollection = async (serviceId: string) => {
+    setContextMenu(null);
+    const data = await exportImportApi.exportService(serviceId);
+    await navigator.clipboard.writeText(JSON.stringify(data, null, 2)).catch(() => {});
+  };
+
+  const handleGenerateDocs = (serviceId: string) => {
+    setContextMenu(null);
+    const service = services.find((row) => row.id === serviceId);
+    if (!service) return;
+    const markdown = [
+      `# ${service.name}`,
+      '',
+      service.description || 'Request collection',
+      '',
+      ...service.requests.map((request) => `- **${request.method} ${request.name}** — ${request.url || '(no URL)'}`),
+    ].join('\n');
+    void navigator.clipboard.writeText(markdown).catch(() => {});
+  };
+
+  const handleOpenTerminal = (serviceId: string) => {
+    const service = services.find((row) => row.id === serviceId);
+    if (!service) return;
+    setContextMenu(null);
+    setTerminalCwd(service.storagePath || settings?.storagePath || '');
   };
 
   useEffect(() => {
@@ -240,21 +361,44 @@ export function Sidebar() {
           {/* Add service */}
           <div className="border-b border-gray-800/80 px-3 py-2">
             {addingService ? (
-              <input
-                autoFocus
-                className="w-full border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
-                placeholder="Service name"
-                value={newServiceName}
-                onChange={(e) => setNewServiceName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleAddService();
-                  if (e.key === 'Escape') setAddingService(false);
-                }}
-                onBlur={() => setTimeout(() => setAddingService(false), 150)}
-              />
+              <div className="space-y-1.5">
+                <input
+                  autoFocus
+                  className="w-full border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
+                  placeholder="Collection name"
+                  value={newServiceName}
+                  onChange={(e) => setNewServiceName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleAddService();
+                    if (e.key === 'Escape') setAddingService(false);
+                  }}
+                />
+                {settings?.storageMode === 'json' && settings.jsonStorageStrategy === 'perCollection' && (
+                  <div className="flex gap-1">
+                    <input
+                      className="min-w-0 flex-1 border border-gray-700 bg-gray-900 px-2 py-1 text-[10px] text-gray-300 outline-none focus:border-gray-400"
+                      placeholder="Collection folder (optional)"
+                      value={newServicePath}
+                      onChange={(e) => setNewServicePath(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { void chooseCollectionFolder(); }}
+                      className="border border-gray-700 px-1.5 text-[10px] text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+                      title="Choose collection folder"
+                    >
+                      …
+                    </button>
+                  </div>
+                )}
+                <div className="flex justify-end gap-1">
+                  <button type="button" onClick={() => setAddingService(false)} className="px-1.5 py-0.5 text-[10px] text-gray-500 hover:text-gray-200">Cancel</button>
+                  <button type="button" onClick={() => { void handleAddService(); }} className="border border-gray-700 px-1.5 py-0.5 text-[10px] text-gray-300 hover:bg-gray-800">Create</button>
+                </div>
+              </div>
             ) : (
               <button
-                onClick={() => setAddingService(true)}
+                onClick={() => { setAddingService(true); setNewServicePath(''); }}
                 title="Add service"
                 className="flex w-full items-center gap-1.5 py-1 text-xs font-semibold text-gray-400 hover:text-gray-200"
               >
@@ -301,7 +445,25 @@ export function Sidebar() {
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
-                <span className="truncate flex-1">{service.name}</span>
+                {renamingServiceId === service.id ? (
+                  <input
+                    autoFocus
+                    value={renamingServiceName}
+                    onChange={(event) => setRenamingServiceName(event.target.value)}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') void commitRenameService(service.id, event.currentTarget.value);
+                      if (event.key === 'Escape') {
+                        setRenamingServiceId(null);
+                        setRenamingServiceName('');
+                      }
+                    }}
+                    onBlur={(event) => { void commitRenameService(service.id, event.currentTarget.value); }}
+                    className="min-w-0 flex-1 border border-gray-600 bg-gray-900 px-1 py-0.5 text-xs text-gray-100 outline-none"
+                  />
+                ) : (
+                  <span className="truncate flex-1">{service.name}</span>
+                )}
                 {!compact && <span className="mr-1 text-[10px] text-gray-500">{service.requests.length}</span>}
                 <button
                   onClick={(e) => {
@@ -344,6 +506,18 @@ export function Sidebar() {
                     </svg>
                   </button>
                 )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const bounds = e.currentTarget.getBoundingClientRect();
+                    setContextMenu({ type: 'service', id: service.id, x: bounds.right, y: bounds.bottom });
+                  }}
+                  className="p-0.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                  title="Collection menu"
+                  aria-label={`Open ${service.name} menu`}
+                >
+                  <span className="text-sm leading-none">⋯</span>
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -475,19 +649,64 @@ export function Sidebar() {
               </button>
               <button
                 className={MENU_ITEM}
+                onClick={() => { void duplicateRequest(contextMenu.id); setContextMenu(null); }}
+              >
+                Clone
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { void handleCopyRequest(contextMenu.id); }}
+              >
+                Copy
+              </button>
+              <button
+                className={MENU_ITEM}
                 onClick={() => { startRenameRequest(contextMenu.id); setContextMenu(null); }}
               >
                 Rename
               </button>
               <button
                 className={MENU_ITEM}
-                onClick={() => { duplicateRequest(contextMenu.id); setContextMenu(null); }}
+                onClick={() => {
+                  const request = services.flatMap((service) => service.requests).find((row) => row.id === contextMenu.id);
+                  setShowCodeForRequest(request ?? null);
+                  setContextMenu(null);
+                }}
               >
-                Duplicate
+                Generate Code
               </button>
               <button
                 className={MENU_ITEM}
-                onClick={() => { toggleFavorite(contextMenu.id); setContextMenu(null); }}
+                onClick={() => { void handleCreateExample(contextMenu.id); }}
+              >
+                Create Example
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => {
+                  const service = services.find((row) => row.requests.some((request) => request.id === contextMenu.id));
+                  setContextMenu(null);
+                  void revealPath(service?.storagePath || (settings?.storageMode === 'json' ? settings.storagePath : ''));
+                }}
+              >
+                Reveal in File Explorer
+              </button>
+              <div className="my-1 border-t border-gray-800" />
+              <button
+                className={MENU_ITEM}
+                onClick={() => {
+                  setContextMenu(null);
+                  const request = services.flatMap((service) => service.requests).find((row) => row.id === contextMenu.id);
+                  if (request) {
+                    window.alert(`${request.method} ${request.url || '(no URL)'}\n\nCreated: ${request.createdAt}\nUpdated: ${request.updatedAt}`);
+                  }
+                }}
+              >
+                Info
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { void toggleFavorite(contextMenu.id); setContextMenu(null); }}
               >
                 Toggle Favorite
               </button>
@@ -503,33 +722,97 @@ export function Sidebar() {
             <>
               <button
                 className={MENU_ITEM}
-                onClick={() => { setShowCollectionRunner(contextMenu.id); setContextMenu(null); }}
+                onClick={() => {
+                  setCollapsedServices((prev) => { const next = new Set(prev); next.delete(contextMenu.id); return next; });
+                  setAddingRequestToService(contextMenu.id);
+                  setNewRequestName('');
+                  setContextMenu(null);
+                }}
               >
-                ▶ Run Collection
+                New Request
               </button>
               <button
                 className={MENU_ITEM}
-                onClick={() => {
-                  void moveService(activeWorkspaceId, contextMenu.id, -1);
-                  setContextMenu(null);
-                }}
+                onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'folder'); }}
+              >
+                New Folder
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'js'); }}
+              >
+                New JS File
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { setShowCollectionRunner(contextMenu.id); setContextMenu(null); }}
+              >
+                ▶ Run
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { void duplicateService(activeWorkspaceId, contextMenu.id); setContextMenu(null); }}
+              >
+                Clone
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { startRenameService(contextMenu.id); }}
+              >
+                Rename
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { void handleShareCollection(contextMenu.id); }}
+              >
+                Share
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { handleGenerateDocs(contextMenu.id); }}
+              >
+                Generate Docs
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { toggleCollapse(contextMenu.id); setContextMenu(null); }}
+              >
+                Collapse
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { void moveService(activeWorkspaceId, contextMenu.id, -1); setContextMenu(null); }}
               >
                 Move Up
               </button>
               <button
                 className={MENU_ITEM}
-                onClick={() => {
-                  void moveService(activeWorkspaceId, contextMenu.id, 1);
-                  setContextMenu(null);
-                }}
+                onClick={() => { void moveService(activeWorkspaceId, contextMenu.id, 1); setContextMenu(null); }}
               >
                 Move Down
               </button>
               <button
                 className={MENU_ITEM}
+                onClick={() => {
+                  const service = services.find((row) => row.id === contextMenu.id);
+                  setContextMenu(null);
+                  if (service) void revealPath(service.storagePath);
+                }}
+              >
+                Reveal in File Explorer
+              </button>
+              <div className="my-1 border-t border-gray-800" />
+              <button
+                className={MENU_ITEM}
                 onClick={() => { openServiceSettings(contextMenu.id); }}
               >
-                Edit Service Settings
+                Settings
+              </button>
+              <button
+                className={MENU_ITEM}
+                onClick={() => { handleOpenTerminal(contextMenu.id); }}
+              >
+                Open in Terminal
               </button>
               <button
                 className={MENU_DANGER}
@@ -541,7 +824,7 @@ export function Sidebar() {
                   setContextMenu(null);
                 }}
               >
-                Delete Service
+                Remove
               </button>
             </>
           )}
@@ -561,6 +844,21 @@ export function Sidebar() {
         <CollectionRunnerModal
           onClose={() => setShowCollectionRunner(null)}
           serviceId={showCollectionRunner}
+        />
+      )}
+
+      {showCodeForRequest && (
+        <CodeSnippetsModal
+          onClose={() => setShowCodeForRequest(null)}
+          method={showCodeForRequest.method}
+          url={showCodeForRequest.url}
+          body={showCodeForRequest.body}
+          bodyType={showCodeForRequest.bodyType}
+          headers={showCodeForRequest.headers.map((header) => ({
+            key: header.key,
+            value: header.value,
+            enabled: header.enabled,
+          }))}
         />
       )}
     </div>

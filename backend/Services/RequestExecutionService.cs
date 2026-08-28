@@ -137,53 +137,66 @@ public class RequestExecutionService
             var requestSettings = !string.IsNullOrWhiteSpace(payload.RequestId)
                 ? await _requestRepo.GetSettingsAsync(payload.RequestId)
                 : null;
-            var followRedirects = requestSettings?.FollowRedirects ?? true;
+            var followRedirects = requestSettings?.FollowRedirects ?? _settings.FollowRedirects;
+            var maxRedirects = Math.Clamp(
+                requestSettings?.MaxRedirects is > 0 ? requestSettings.MaxRedirects : _settings.MaxRedirects,
+                1,
+                SettingsService.MaxAllowedRedirects);
             var ignoreSsl = payload.IgnoreSslErrors
                 || _settings.IgnoreSslErrors
                 || (requestSettings?.IgnoreSslErrors ?? false);
             var useProxy = false;
             Uri? proxyUri = null;
-            if (_settings.ProxyEnabled && Uri.TryCreate(_settings.ProxyUrl, UriKind.Absolute, out var parsedProxyUri))
+            var proxyUsername = "";
+            var proxyPassword = "";
+            var proxyMode = requestSettings?.ProxyMode?.Trim().ToLowerInvariant() ?? "inherit";
+            if (proxyMode == "custom")
+            {
+                if (Uri.TryCreate(requestSettings?.ProxyUrl, UriKind.Absolute, out var customProxyUri))
+                {
+                    useProxy = true;
+                    proxyUri = customProxyUri;
+                    proxyUsername = requestSettings?.ProxyUsername ?? "";
+                    proxyPassword = requestSettings?.ProxyPassword ?? "";
+                }
+            }
+            else if (proxyMode != "disabled" && _settings.ProxyEnabled &&
+                Uri.TryCreate(_settings.ProxyUrl, UriKind.Absolute, out var parsedProxyUri))
             {
                 useProxy = true;
                 proxyUri = parsedProxyUri;
+                proxyUsername = _settings.ProxyUsername;
+                proxyPassword = _settings.ProxyPassword;
             }
 
-            HttpClient client;
-            if (ignoreSsl || payload.Mtls != null || useProxy || !followRedirects)
+            var handler = new HttpClientHandler
             {
-                var handler = new HttpClientHandler
-                {
-                    AllowAutoRedirect = followRedirects
-                };
+                AllowAutoRedirect = followRedirects,
+                MaxAutomaticRedirections = maxRedirects,
+            };
 
-                if (ignoreSsl)
-                {
-                    handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
-                }
-
-                if (payload.Mtls != null)
-                {
-                    var cert = X509Certificate2.CreateFromPemFile(payload.Mtls.CertPath, payload.Mtls.KeyPath);
-                    handler.ClientCertificates.Add(cert);
-                }
-
-                if (useProxy)
-                {
-                    handler.UseProxy = true;
-                    handler.Proxy = new WebProxy(proxyUri);
-                    if (!string.IsNullOrWhiteSpace(_settings.ProxyUsername))
-                    {
-                        handler.Proxy.Credentials = new NetworkCredential(_settings.ProxyUsername, _settings.ProxyPassword);
-                    }
-                }
-
-                client = new HttpClient(handler);
-            }
-            else
+            if (ignoreSsl)
             {
-                client = _httpClientFactory.CreateClient();
+                handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
             }
+
+            if (payload.Mtls != null)
+            {
+                var cert = X509Certificate2.CreateFromPemFile(payload.Mtls.CertPath, payload.Mtls.KeyPath);
+                handler.ClientCertificates.Add(cert);
+            }
+
+            if (useProxy && proxyUri != null)
+            {
+                handler.UseProxy = true;
+                handler.Proxy = new WebProxy(proxyUri);
+                if (!string.IsNullOrWhiteSpace(proxyUsername))
+                {
+                    handler.Proxy.Credentials = new NetworkCredential(proxyUsername, proxyPassword);
+                }
+            }
+
+            using var client = new HttpClient(handler);
 
             client.Timeout = requestSettings?.TimeoutSeconds is > 0
                 ? TimeSpan.FromSeconds(requestSettings.TimeoutSeconds.Value)

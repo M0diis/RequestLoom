@@ -10,6 +10,8 @@ namespace RequestLoom.Api.Services;
 /// </summary>
 public partial class ToolsService
 {
+    private const string DefaultGeneratedUrl = "https://example.com";
+
     public CurlParseResult ParseCurl(string curlCommand)
     {
         var result = new CurlParseResult();
@@ -124,13 +126,14 @@ public partial class ToolsService
     {
         var sb = new StringBuilder();
         sb.Append("curl");
+        var url = string.IsNullOrWhiteSpace(payload.Url) ? DefaultGeneratedUrl : payload.Url;
 
         // Method
         if (!string.Equals(payload.Method, "GET", StringComparison.OrdinalIgnoreCase))
             sb.Append($" -X {payload.Method}");
 
         // URL
-        sb.Append($" '{EscapeBash(payload.Url)}'");
+        sb.Append($" '{EscapeBash(url)}'");
 
         // Headers
         foreach (var h in payload.Headers.Where(h => h.Enabled && !string.IsNullOrWhiteSpace(h.Key)))
@@ -159,7 +162,7 @@ public partial class ToolsService
 
         var body = payload.Body;
         var method = payload.Method.ToUpperInvariant();
-        var url = payload.Url;
+        var url = string.IsNullOrWhiteSpace(payload.Url) ? DefaultGeneratedUrl : payload.Url;
         var contentType = headersList
             .FirstOrDefault(h => h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))?.Value ?? "";
 

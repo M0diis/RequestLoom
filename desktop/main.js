@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -12,6 +12,9 @@ const RETRY_INTERVAL_MS = 500;
 
 let backendProcess = null;
 let shuttingDown = false;
+let reloadingBackend = false;
+let terminalSequence = 0;
+const terminalSessions = new Map();
 
 function getAppRoot() {
   return app.isPackaged ? path.join(process.resourcesPath, 'app') : __dirname;
@@ -38,29 +41,7 @@ function appendLog(message) {
   }
 }
 
-let activeDrag = null;
-
 function registerWindowControlHandlers() {
-  ipcMain.handle('window:start-drag', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win) return;
-    const [winX, winY] = win.getPosition();
-    const { x: startX, y: startY } = screen.getCursorScreenPoint();
-    activeDrag = { win, winX, winY, startX, startY };
-  });
-
-  ipcMain.on('window:drag-move', () => {
-    if (!activeDrag) return;
-    const { win, winX, winY, startX, startY } = activeDrag;
-    if (win.isDestroyed()) { activeDrag = null; return; }
-    const { x, y } = screen.getCursorScreenPoint();
-    win.setPosition(Math.round(winX + (x - startX)), Math.round(winY + (y - startY)));
-  });
-
-  ipcMain.handle('window:stop-drag', () => {
-    activeDrag = null;
-  });
-
   ipcMain.handle('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     win?.minimize();
@@ -89,6 +70,104 @@ function registerWindowControlHandlers() {
   ipcMain.handle('window:is-maximized', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     return win?.isMaximized() ?? false;
+  });
+}
+
+function registerDesktopUtilityHandlers() {
+  ipcMain.handle('app:reload', async (event) => {
+    if (reloadingBackend) return false;
+
+    const win = BrowserWindow.fromWebContents(event.sender);
+    reloadingBackend = true;
+    try {
+      const previousProcess = backendProcess;
+      if (previousProcess) {
+        stopBackend();
+        await waitForProcessExit(previousProcess);
+      }
+
+      if (win && !win.isDestroyed()) {
+        await win.loadFile(path.join(__dirname, 'loading.html'));
+      }
+      startBackend();
+      await waitForBackendReady(APP_URL, STARTUP_TIMEOUT_MS);
+      if (win && !win.isDestroyed()) {
+        await win.loadURL(APP_URL);
+      }
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      appendLog(`Application reload failed: ${message}`);
+      dialog.showErrorBox('Failed To Reload RequestLoom', message);
+      return false;
+    } finally {
+      reloadingBackend = false;
+    }
+  });
+
+  ipcMain.handle('shell:select-directory', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Choose collection folder',
+    });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+
+  ipcMain.handle('shell:reveal-path', (_event, targetPath) => {
+    if (typeof targetPath !== 'string' || !targetPath.trim()) return false;
+    const resolved = path.resolve(targetPath);
+    if (!fs.existsSync(resolved)) return false;
+    shell.showItemInFolder(resolved);
+    return true;
+  });
+
+  ipcMain.handle('terminal:start', (event, cwd) => {
+    const requestedCwd = typeof cwd === 'string' ? cwd.trim() : '';
+    let terminalCwd = process.cwd();
+    if (requestedCwd && fs.existsSync(requestedCwd)) {
+      const stats = fs.statSync(requestedCwd);
+      terminalCwd = stats.isDirectory() ? requestedCwd : path.dirname(requestedCwd);
+    }
+    const terminalId = String(++terminalSequence);
+    const shellPath = process.platform === 'win32'
+      ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+      : (process.env.SHELL || '/bin/sh');
+    const shellArgs = process.platform === 'win32' ? ['-NoLogo', '-NoProfile'] : [];
+    const child = spawn(shellPath, shellArgs, {
+      cwd: terminalCwd,
+      env: { ...process.env, TERM: process.env.TERM || 'xterm-256color' },
+      windowsHide: true,
+      stdio: 'pipe',
+    });
+
+    terminalSessions.set(terminalId, { child, sender: event.sender });
+    const send = (channel, value) => {
+      if (!event.sender.isDestroyed()) event.sender.send(channel, terminalId, value);
+    };
+
+    child.stdout.on('data', (chunk) => send('terminal:data', String(chunk)));
+    child.stderr.on('data', (chunk) => send('terminal:data', String(chunk)));
+    child.on('error', (error) => send('terminal:error', error.message));
+    child.on('exit', (code) => {
+      terminalSessions.delete(terminalId);
+      send('terminal:exit', code ?? 0);
+    });
+
+    return terminalId;
+  });
+
+  ipcMain.on('terminal:write', (_event, terminalId, input) => {
+    const session = terminalSessions.get(String(terminalId));
+    if (!session || typeof input !== 'string' || !session.child.stdin.writable) return;
+    session.child.stdin.write(input);
+  });
+
+  ipcMain.handle('terminal:kill', (_event, terminalId) => {
+    const session = terminalSessions.get(String(terminalId));
+    if (!session) return false;
+    terminalSessions.delete(String(terminalId));
+    session.child.kill();
+    return true;
   });
 }
 
@@ -140,6 +219,23 @@ function waitForBackendReady(baseUrl, timeoutMs) {
   });
 }
 
+function waitForProcessExit(process, timeoutMs = 10000) {
+  if (!process || process.exitCode !== null) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    process.once('exit', finish);
+    process.once('error', finish);
+    setTimeout(finish, timeoutMs);
+  });
+}
+
 function startBackend() {
   const backendDir = getBackendDir();
   const exePath = getBackendExecutablePath();
@@ -150,7 +246,7 @@ function startBackend() {
 
   appendLog(`Starting backend executable: ${exePath}`);
 
-  backendProcess = spawn(exePath, [], {
+  const child = spawn(exePath, [], {
     cwd: backendDir,
     env: {
       ...process.env,
@@ -159,19 +255,21 @@ function startBackend() {
     windowsHide: true,
     stdio: 'pipe',
   });
+  backendProcess = child;
 
-  backendProcess.stdout.on('data', (chunk) => {
+  child.stdout.on('data', (chunk) => {
     appendLog(`[stdout] ${String(chunk).trimEnd()}`);
   });
 
-  backendProcess.stderr.on('data', (chunk) => {
+  child.stderr.on('data', (chunk) => {
     appendLog(`[stderr] ${String(chunk).trimEnd()}`);
   });
 
-  backendProcess.on('exit', (code, signal) => {
+  child.on('exit', (code, signal) => {
     appendLog(`Backend exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
+    if (backendProcess === child) backendProcess = null;
 
-    if (shuttingDown) {
+    if (shuttingDown || reloadingBackend) {
       return;
     }
 
@@ -183,7 +281,7 @@ function startBackend() {
     app.quit();
   });
 
-  backendProcess.on('error', (err) => {
+  child.on('error', (err) => {
     appendLog(`Backend process error: ${err.message}`);
   });
 }
@@ -248,6 +346,7 @@ app.on('before-quit', () => {
 
 app.whenReady().then(async () => {
   registerWindowControlHandlers();
+  registerDesktopUtilityHandlers();
   const mainWindow = createMainWindow();
 
   try {

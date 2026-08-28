@@ -36,7 +36,7 @@ public class ServiceRepository : IServiceRepository
         return row == null ? null : await MapAsync(row, includeRequests: false);
     }
 
-    public async Task<Service> CreateAsync(string workspaceId, string name, string description, List<KeyValuePairRequest> headers, AuthRequest? auth)
+    public async Task<Service> CreateAsync(string workspaceId, string name, string description, List<KeyValuePairRequest> headers, AuthRequest? auth, string? storagePath = null)
     {
         var maxSort = await _db.Services
             .Where(s => s.WorkspaceId == workspaceId)

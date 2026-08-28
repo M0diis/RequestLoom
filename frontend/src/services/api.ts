@@ -8,7 +8,7 @@ import type {
   CurlParseResult, CodeSnippet, CollectionRunResult,
   MockServer, CreateMockServerRequest, UpdateMockServerRequest,
   MockServerEndpoint, CreateMockEndpointRequest, UpdateMockEndpointRequest,
-  AppSettings, SettingsUpdate, ApiRequestSettings,
+  AppSettings, SettingsUpdate, ApiRequestSettings, StoredRequestFile,
 } from '../types';
 
 const api = axios.create({
@@ -52,8 +52,9 @@ export const servicesApi = {
     description: string = '',
     headers: KeyValuePairRequest[] = [],
     auth: AuthRequest | null = null,
+    storagePath?: string,
   ) =>
-    api.post<Service>(`/workspaces/${workspaceId}/services`, { name, description, headers, auth }).then(r => r.data),
+    api.post<Service>(`/workspaces/${workspaceId}/services`, { name, description, headers, auth, storagePath }).then(r => r.data),
   update: (
     workspaceId: string,
     id: string,
@@ -81,9 +82,15 @@ export const requestsApi = {
   moveToService: (id: string, newServiceId: string) =>
     api.post(`/requests/${id}/move/${newServiceId}`),
   delete: (id: string) => api.delete(`/requests/${id}`),
+  getFile: (id: string) => api.get<StoredRequestFile>(`/requests/${id}/file`).then(r => r.data),
   getSettings: (id: string) => api.get<ApiRequestSettings>(`/requests/${id}/settings`).then(r => r.data),
   saveSettings: (id: string, data: ApiRequestSettings) =>
     api.put<ApiRequestSettings>(`/requests/${id}/settings`, data).then(r => r.data),
+};
+
+export const serviceFilesApi = {
+  create: (workspaceId: string, serviceId: string, name: string, kind: 'folder' | 'js') =>
+    api.post<{ path: string }>(`/workspaces/${workspaceId}/services/${serviceId}/files`, { name, kind }).then(r => r.data),
 };
 
 // Execute

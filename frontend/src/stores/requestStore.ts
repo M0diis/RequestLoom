@@ -9,7 +9,7 @@ import type {
   KeyValuePairRequest,
   AuthRequest,
 } from '../types';
-import { servicesApi, requestsApi, executeApi } from '../services/api';
+import { servicesApi, requestsApi, executeApi, serviceVariablesApi } from '../services/api';
 
 const requestSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const requestSaveVersions = new Map<string, number>();
@@ -65,7 +65,8 @@ interface RequestState {
   dirtyRequests: Set<string>;
 
   loadServices: (workspaceId: string) => Promise<void>;
-  createService: (workspaceId: string, name: string) => Promise<Service>;
+  createService: (workspaceId: string, name: string, storagePath?: string) => Promise<Service>;
+  duplicateService: (workspaceId: string, id: string) => Promise<Service>;
   updateService: (
     workspaceId: string,
     id: string,
@@ -81,7 +82,7 @@ interface RequestState {
   closeRequest: (id: string) => void;
   createRequest: (serviceId: string, name: string, method: string) => Promise<ApiRequest>;
   updateRequest: (id: string, data: Partial<ApiRequest>) => Promise<void>;
-  duplicateRequest: (id: string) => Promise<void>;
+  duplicateRequest: (id: string) => Promise<ApiRequest>;
   deleteRequest: (id: string) => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
 
@@ -142,11 +143,53 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     });
   },
 
-  createService: async (workspaceId, name) => {
-    const service = await servicesApi.create(workspaceId, name);
+  createService: async (workspaceId, name, storagePath) => {
+    const service = await servicesApi.create(workspaceId, name, '', [], null, storagePath);
     service.requests = [];
     set((s) => ({ services: [...s.services, service] }));
     return service;
+  },
+
+  duplicateService: async (workspaceId, id) => {
+    const source = get().services.find((service) => service.id === id);
+    if (!source) throw new Error('Collection not found');
+
+    const created = await servicesApi.create(
+      workspaceId,
+      `${source.name} (copy)`,
+      source.description,
+      source.headers.map((header) => ({ key: header.key, value: header.value, enabled: header.enabled })),
+      source.auth ? { authType: source.auth.authType, configJson: source.auth.configJson } : null,
+    );
+
+    for (const request of source.requests) {
+      const createdRequest = await requestsApi.create(created.id, {
+        name: request.name,
+        method: request.method,
+        url: request.url,
+      });
+      await requestsApi.update(createdRequest.id, buildUpdatePayload({
+        ...request,
+        ...createdRequest,
+        id: createdRequest.id,
+        serviceId: created.id,
+        name: request.name,
+      }));
+    }
+
+    const variables = await serviceVariablesApi.getAll(source.id);
+    for (const variable of variables) {
+      await serviceVariablesApi.upsert(created.id, {
+        environmentId: variable.environmentId,
+        key: variable.key,
+        value: variable.value,
+        isSecret: variable.isSecret,
+        enabled: variable.enabled,
+      });
+    }
+
+    await get().loadServices(workspaceId);
+    return get().services.find((service) => service.id === created.id) ?? { ...created, requests: [] };
   },
 
   updateService: async (workspaceId, id, name, description, headers, auth) => {
@@ -360,6 +403,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
           : svc
       ),
     }));
+    return duplicated;
   },
 
   deleteRequest: async (id) => {

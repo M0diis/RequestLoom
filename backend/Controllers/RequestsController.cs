@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
+using RequestLoom.Api.Data;
 using RequestLoom.Api.Data.Repositories;
 using RequestLoom.Api.Models;
+using RequestLoom.Api.Services;
 
 namespace RequestLoom.Api.Controllers;
 
@@ -9,10 +11,14 @@ namespace RequestLoom.Api.Controllers;
 public class RequestsController : ControllerBase
 {
     private readonly IRequestRepository _repo;
+    private readonly JsonDataStore _jsonStore;
+    private readonly SettingsService _settings;
 
-    public RequestsController(IRequestRepository repo)
+    public RequestsController(IRequestRepository repo, JsonDataStore jsonStore, SettingsService settings)
     {
         _repo = repo;
+        _jsonStore = jsonStore;
+        _settings = settings;
     }
 
     [HttpGet("{id}")]
@@ -75,7 +81,12 @@ public class RequestsController : ControllerBase
         if (request == null) return NotFound();
 
         var settings = await _repo.GetSettingsAsync(id);
-        return Ok(settings ?? new ApiRequestSettings { RequestId = id });
+        return Ok(settings ?? new ApiRequestSettings
+        {
+            RequestId = id,
+            FollowRedirects = _settings.FollowRedirects,
+            MaxRedirects = _settings.MaxRedirects,
+        });
     }
 
     [HttpPut("{id}/settings")]
@@ -95,5 +106,26 @@ public class RequestsController : ControllerBase
         var deleted = await _repo.DeleteAsync(id);
         if (!deleted) return NotFound();
         return NoContent();
+    }
+
+    [HttpGet("{id}/file")]
+    public async Task<IActionResult> GetStoredFile(string id)
+    {
+        var request = await _repo.GetByIdAsync(id);
+        if (request == null) return NotFound();
+
+        if (_jsonStore.IsJsonStorage)
+        {
+            var stored = _jsonStore.GetRequestFile(id);
+            if (stored != null) return Ok(stored);
+        }
+
+        return Ok(new StoredRequestFile
+        {
+            RequestId = id,
+            FilePath = "",
+            Content = System.Text.Json.JsonSerializer.Serialize(request, new System.Text.Json.JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }),
+            IsJsonStorage = false,
+        });
     }
 }

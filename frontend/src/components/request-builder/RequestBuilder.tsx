@@ -13,6 +13,7 @@ import { AuthEditor } from './AuthEditor';
 import { RequestScriptEditor } from './RequestScriptEditor';
 import { RequestHistoryTab } from './RequestHistoryTab';
 import RequestSettingsEditor from './RequestSettingsEditor';
+import { RequestFileViewer } from './RequestFileViewer';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import type {
   HttpMethod,
@@ -492,6 +493,7 @@ export function RequestBuilder() {
     { id: 'tests' as const, label: 'Tests' },
     { id: 'runs' as const, label: 'History', count: historyCount },
     { id: 'settings' as const, label: 'Settings' },
+    { id: 'file' as const, label: 'File' },
   ];
 
   return (
@@ -641,6 +643,9 @@ export function RequestBuilder() {
         )}
         {activeRequestTab === 'settings' && (
           <RequestSettingsEditor requestId={activeRequest.id} />
+        )}
+        {activeRequestTab === 'file' && (
+          <RequestFileViewer requestId={activeRequest.id} />
         )}
       </div>
 

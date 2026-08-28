@@ -40,8 +40,8 @@ public class ToolsController : ControllerBase
     [HttpPost("curl/generate")]
     public IActionResult GenerateCurl([FromBody] ExecuteRequestPayload payload)
     {
-        if (payload == null || string.IsNullOrWhiteSpace(payload.Url))
-            return BadRequest(new { error = "Request payload with URL is required" });
+        if (payload == null)
+            return BadRequest(new { error = "Request payload is required" });
 
         var curl = _tools.GenerateCurl(payload);
         return Ok(new { curl });
@@ -51,8 +51,8 @@ public class ToolsController : ControllerBase
     [HttpPost("snippets")]
     public IActionResult GenerateSnippets([FromBody] SnippetRequest req)
     {
-        if (req == null || string.IsNullOrWhiteSpace(req.Url))
-            return BadRequest(new { error = "Request payload with URL is required" });
+        if (req == null)
+            return BadRequest(new { error = "Request payload is required" });
 
         var payload = new ExecuteRequestPayload
         {

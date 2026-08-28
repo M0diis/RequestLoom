@@ -268,8 +268,13 @@ public class RequestRepository : IRequestRepository
         }
 
         row.FollowRedirects = settings.FollowRedirects;
+        row.MaxRedirects = Math.Clamp(settings.MaxRedirects, 1, 50);
         row.IgnoreSslErrors = settings.IgnoreSslErrors;
         row.TimeoutSeconds = settings.TimeoutSeconds is > 0 ? settings.TimeoutSeconds : null;
+        row.ProxyMode = NormalizeProxyMode(settings.ProxyMode);
+        row.ProxyUrl = settings.ProxyUrl?.Trim() ?? "";
+        row.ProxyUsername = settings.ProxyUsername ?? "";
+        row.ProxyPassword = settings.ProxyPassword ?? "";
 
         await _db.SaveChangesAsync();
 
@@ -282,10 +287,22 @@ public class RequestRepository : IRequestRepository
         {
             RequestId = row.RequestId,
             FollowRedirects = row.FollowRedirects,
+            MaxRedirects = row.MaxRedirects is > 0 ? row.MaxRedirects : 10,
             IgnoreSslErrors = row.IgnoreSslErrors,
             TimeoutSeconds = row.TimeoutSeconds,
+            ProxyMode = NormalizeProxyMode(row.ProxyMode),
+            ProxyUrl = row.ProxyUrl ?? "",
+            ProxyUsername = row.ProxyUsername ?? "",
+            ProxyPassword = row.ProxyPassword ?? "",
         };
     }
+
+    private static string NormalizeProxyMode(string? mode) => mode?.Trim().ToLowerInvariant() switch
+    {
+        "custom" => "custom",
+        "disabled" => "disabled",
+        _ => "inherit",
+    };
 
     private async Task CopyChildrenAsync(string sourceRequestId, string targetRequestId)
     {
@@ -339,8 +356,13 @@ public class RequestRepository : IRequestRepository
                 Id = Guid.NewGuid().ToString("N"),
                 RequestId = targetRequestId,
                 FollowRedirects = settings.FollowRedirects,
+                MaxRedirects = settings.MaxRedirects,
                 IgnoreSslErrors = settings.IgnoreSslErrors,
                 TimeoutSeconds = settings.TimeoutSeconds,
+                ProxyMode = settings.ProxyMode,
+                ProxyUrl = settings.ProxyUrl,
+                ProxyUsername = settings.ProxyUsername,
+                ProxyPassword = settings.ProxyPassword,
             });
         }
     }

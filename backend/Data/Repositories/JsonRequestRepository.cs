@@ -182,8 +182,13 @@ public class JsonRequestRepository : IRequestRepository
                 {
                     RequestId = copy.Id,
                     FollowRedirects = originalSettings.FollowRedirects,
+                    MaxRedirects = originalSettings.MaxRedirects,
                     IgnoreSslErrors = originalSettings.IgnoreSslErrors,
                     TimeoutSeconds = originalSettings.TimeoutSeconds,
+                    ProxyMode = originalSettings.ProxyMode,
+                    ProxyUrl = originalSettings.ProxyUrl,
+                    ProxyUsername = originalSettings.ProxyUsername,
+                    ProxyPassword = originalSettings.ProxyPassword,
                 });
             }
 
@@ -277,8 +282,18 @@ public class JsonRequestRepository : IRequestRepository
             }
 
             existing.FollowRedirects = settings.FollowRedirects;
+            existing.MaxRedirects = Math.Clamp(settings.MaxRedirects, 1, 50);
             existing.IgnoreSslErrors = settings.IgnoreSslErrors;
             existing.TimeoutSeconds = settings.TimeoutSeconds is > 0 ? settings.TimeoutSeconds : null;
+            existing.ProxyMode = settings.ProxyMode?.Trim().ToLowerInvariant() switch
+            {
+                "custom" => "custom",
+                "disabled" => "disabled",
+                _ => "inherit",
+            };
+            existing.ProxyUrl = settings.ProxyUrl?.Trim() ?? "";
+            existing.ProxyUsername = settings.ProxyUsername ?? "";
+            existing.ProxyPassword = settings.ProxyPassword ?? "";
             saved = existing;
         });
 
@@ -291,8 +306,18 @@ public class JsonRequestRepository : IRequestRepository
         {
             RequestId = settings.RequestId,
             FollowRedirects = settings.FollowRedirects,
+            MaxRedirects = settings.MaxRedirects is > 0 ? settings.MaxRedirects : 10,
             IgnoreSslErrors = settings.IgnoreSslErrors,
             TimeoutSeconds = settings.TimeoutSeconds,
+            ProxyMode = settings.ProxyMode?.Trim().ToLowerInvariant() switch
+            {
+                "custom" => "custom",
+                "disabled" => "disabled",
+                _ => "inherit",
+            },
+            ProxyUrl = settings.ProxyUrl ?? "",
+            ProxyUsername = settings.ProxyUsername ?? "",
+            ProxyPassword = settings.ProxyPassword ?? "",
         };
     }
 

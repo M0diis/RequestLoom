@@ -13,6 +13,7 @@ import { useRequestStore } from './stores/requestStore';
 import { useMockServerStore } from './stores/mockServerStore';
 import { useUiStore } from './stores/uiStore';
 import { useSettingsStore } from './stores/settingsStore';
+import { DevToolsPanel } from './components/common/DevToolsPanel';
 
 function App() {
   const { activeWorkspaceId, load: loadWorkspaces } = useWorkspaceStore();
@@ -171,6 +172,7 @@ function App() {
           <div className={`${showMockDetail ? 'flex' : 'hidden'} flex-1 overflow-hidden flex-col`}>
             <MockEndpointDetail />
           </div>
+          <DevToolsPanel />
         </>
       )}
     />

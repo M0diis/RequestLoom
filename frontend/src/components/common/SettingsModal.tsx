@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import type { StorageMode, SettingsUpdate } from '../../types';
+import type { JsonStorageStrategy, StorageMode, SettingsUpdate } from '../../types';
 
 interface Props {
   onClose: () => void;
@@ -31,6 +31,19 @@ const MODE_OPTIONS: { value: StorageMode; label: string; description: string }[]
   },
 ];
 
+const JSON_STRATEGY_OPTIONS: { value: JsonStorageStrategy; label: string; description: string }[] = [
+  {
+    value: 'single',
+    label: 'Single JSON file',
+    description: 'Keep all workspace data and requests in one readable JSON file.',
+  },
+  {
+    value: 'perCollection',
+    label: 'JSON per collection',
+    description: 'Keep each collection and its requests in its own JSON file.',
+  },
+];
+
 type TabId = 'general' | 'requests' | 'response' | 'shortcuts' | 'data';
 
 const TABS: { id: TabId; label: string }[] = [
@@ -54,7 +67,10 @@ export function SettingsModal({ onClose }: Props) {
   const { settings, loading, load, update, generateExamples, clearAllData } = useSettingsStore();
   const [activeTab, setActiveTab] = useState<TabId>('general');
   const [selectedMode, setSelectedMode] = useState<StorageMode>('sqlite');
+  const [selectedJsonStrategy, setSelectedJsonStrategy] = useState<JsonStorageStrategy>('single');
   const [timeoutSec, setTimeoutSec] = useState('120');
+  const [followRedirects, setFollowRedirects] = useState(true);
+  const [maxRedirects, setMaxRedirects] = useState('10');
   const [maxSizeMb, setMaxSizeMb] = useState('0');
   const [ignoreSsl, setIgnoreSsl] = useState(false);
   const [responseFormat, setResponseFormat] = useState<'pretty' | 'raw'>('pretty');
@@ -77,7 +93,10 @@ export function SettingsModal({ onClose }: Props) {
   useEffect(() => {
     if (!settings) return;
     setSelectedMode(settings.storageMode);
+    setSelectedJsonStrategy(settings.jsonStorageStrategy);
     setTimeoutSec(String(Math.round(settings.requestTimeoutMs / 1000)));
+    setFollowRedirects(settings.followRedirects);
+    setMaxRedirects(String(settings.maxRedirects));
     setMaxSizeMb(String(settings.maxResponseBodySizeMb));
     setIgnoreSsl(settings.ignoreSslErrors);
     setResponseFormat(settings.responseFormat === 'raw' ? 'raw' : 'pretty');
@@ -91,6 +110,7 @@ export function SettingsModal({ onClose }: Props) {
     if (!settings) return;
 
     const timeout = Number(timeoutSec);
+    const redirectLimit = Number(maxRedirects);
     const maxSize = Number(maxSizeMb);
     if (!Number.isFinite(timeout) || timeout < 0) {
       setError('Timeout must be zero or a positive number of seconds.');
@@ -98,6 +118,10 @@ export function SettingsModal({ onClose }: Props) {
     }
     if (!Number.isFinite(maxSize) || maxSize < 0) {
       setError('Max response size must be zero or a positive number of megabytes.');
+      return;
+    }
+    if (!Number.isInteger(redirectLimit) || redirectLimit < 1 || redirectLimit > 50) {
+      setError('Max redirects must be a whole number between 1 and 50.');
       return;
     }
     if (proxyEnabled && proxyUrl.trim() !== '') {
@@ -111,7 +135,10 @@ export function SettingsModal({ onClose }: Props) {
 
     const patch: SettingsUpdate = {
       storageMode: selectedMode,
+      jsonStorageStrategy: selectedJsonStrategy,
       requestTimeoutMs: Math.round(timeout * 1000),
+      followRedirects,
+      maxRedirects: redirectLimit,
       ignoreSslErrors: ignoreSsl,
       maxResponseBodySizeMb: Math.round(maxSize),
       responseFormat,
@@ -133,7 +160,26 @@ export function SettingsModal({ onClose }: Props) {
     }
   };
 
-  const modeChanged = settings != null && selectedMode !== settings.storageMode;
+  const handleReloadApp = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (window.desktopShell) {
+        const reloaded = await window.desktopShell.reloadApp();
+        if (!reloaded) throw new Error('The app could not be reloaded.');
+      } else {
+        window.location.reload();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reload the app');
+      setBusy(false);
+    }
+  };
+
+  const modeChanged = settings != null && (
+    selectedMode !== settings.storageMode ||
+    selectedJsonStrategy !== settings.jsonStorageStrategy
+  );
 
   return (
     <div
@@ -197,6 +243,36 @@ export function SettingsModal({ onClose }: Props) {
                     ))}
                   </div>
 
+                  {selectedMode === 'json' && (
+                    <div className="mt-3 space-y-2">
+                      <label className={SECTION_LABEL}>JSON layout</label>
+                      {JSON_STRATEGY_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => {
+                            setSelectedJsonStrategy(option.value);
+                            setSaved(null);
+                          }}
+                          disabled={busy}
+                          className={`w-full border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+                            selectedJsonStrategy === option.value
+                              ? 'border-[#ff6c37]/60 bg-[#ff6c37]/10'
+                              : 'border-gray-700 bg-gray-900 hover:bg-gray-800'
+                          }`}
+                        >
+                          <span className={`block text-xs font-semibold ${selectedJsonStrategy === option.value ? 'text-[#ffbca3]' : 'text-gray-200'}`}>
+                            {option.label}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] text-gray-500">{option.description}</span>
+                        </button>
+                      ))}
+                      <p className="text-[11px] text-gray-500">
+                        New collections will ask for a folder when this is enabled.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="mt-3 rounded border border-gray-800 bg-gray-900/50 px-3 py-2">
                     <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Data location</span>
                     <span className="mt-0.5 block break-all font-mono text-[11px] text-gray-400">
@@ -206,7 +282,7 @@ export function SettingsModal({ onClose }: Props) {
 
                   {modeChanged && !saved && (
                     <p className="mt-3 rounded border border-amber-900/60 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
-                      Changing the storage mode takes effect after restarting the app.
+                      Storage changes take effect after restarting the app.
                     </p>
                   )}
                 </section>
@@ -216,7 +292,20 @@ export function SettingsModal({ onClose }: Props) {
                 <>
                   <section>
                     <label className={SECTION_LABEL}>Requests</label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={followRedirects}
+                        onChange={(e) => {
+                          setFollowRedirects(e.target.checked);
+                          setSaved(null);
+                        }}
+                        disabled={busy}
+                        className={UNCHECKED_CHECKBOX}
+                      />
+                      Follow redirects by default
+                    </label>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[11px] text-gray-400" htmlFor="settings-timeout">
                           Timeout (seconds)
@@ -237,6 +326,26 @@ export function SettingsModal({ onClose }: Props) {
                         />
                       </div>
                       <div>
+                        <label className="block text-[11px] text-gray-400" htmlFor="settings-max-redirects">
+                          Max redirects
+                        </label>
+                        <input
+                          id="settings-max-redirects"
+                          type="number"
+                          min={1}
+                          max={50}
+                          step={1}
+                          value={maxRedirects}
+                          onChange={(e) => {
+                            setMaxRedirects(e.target.value);
+                            setSaved(null);
+                          }}
+                          disabled={busy || !followRedirects}
+                          className={`${INPUT} disabled:opacity-50`}
+                          title="Maximum automatic redirects per request"
+                        />
+                      </div>
+                      <div className="col-span-2">
                         <label className="block text-[11px] text-gray-400" htmlFor="settings-max-size">
                           Max response size (MB)
                         </label>
@@ -257,7 +366,7 @@ export function SettingsModal({ onClose }: Props) {
                       </div>
                     </div>
                     <p className="mt-1 text-[11px] text-gray-500">
-                      0 disables the limit. Larger responses are truncated.
+                      Max redirects is 1–50. Max response size 0 disables the limit; larger responses are truncated.
                     </p>
 
                     <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-gray-300">
@@ -525,10 +634,17 @@ export function SettingsModal({ onClose }: Props) {
               )}
 
               {saved && (
-                <p className="rounded border border-emerald-900/60 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
-                  Settings saved.
-                  {saved.restartRequired ? ' Restart the app to apply the storage mode change.' : ''}
-                </p>
+                <div className="flex items-center gap-3 rounded border border-emerald-900/60 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
+                  <span className="min-w-0 flex-1">
+                    Settings saved.
+                    {saved.restartRequired ? ' Reload the app to apply the storage mode change.' : ''}
+                  </span>
+                  {saved.restartRequired ? (
+                    <button type="button" onClick={() => void handleReloadApp()} className={BTN_PRIMARY} disabled={busy}>
+                      Reload now
+                    </button>
+                  ) : null}
+                </div>
               )}
 
               {error && (

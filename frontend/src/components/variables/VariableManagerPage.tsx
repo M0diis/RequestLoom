@@ -104,7 +104,7 @@ export function VariableManagerPage() {
   const [showNewEnvInput, setShowNewEnvInput] = useState(false);
 
   const envOptions = useMemo(
-    () => [{ value: '', label: 'All envs' }, ...environments.map((e) => ({ value: e.id, label: e.name }))],
+    () => [{ value: '', label: 'All' }, ...environments.map((e) => ({ value: e.id, label: e.name }))],
     [environments]
   );
 

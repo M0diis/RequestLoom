@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+export type DevToolTab = 'console' | 'network' | 'performance' | 'terminal';
+
 interface UiState {
   darkMode: boolean;
   sidebarWidth: number;
@@ -7,22 +9,30 @@ interface UiState {
   serviceSettingsServiceId: string | null;
   variableServiceFilterId: string;
   variableSearchQuery: string;
-  activeRequestTab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings';
+  activeRequestTab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings' | 'file';
   activeResponseTab: 'body' | 'headers' | 'info' | 'scripts' | 'tests';
   responseViewMode: 'pretty' | 'raw';
   responseLayout: 'right' | 'bottom';
   requestPanelSize: number;
+  terminalOpen: boolean;
+  terminalCwd: string;
+  devToolsOpen: boolean;
+  activeDevToolTab: DevToolTab;
   toggleDarkMode: () => void;
   setSidebarWidth: (width: number) => void;
   setSidebarTab: (tab: 'services' | 'history' | 'variables' | 'mockservers') => void;
   setServiceSettingsServiceId: (serviceId: string | null) => void;
   setVariableServiceFilterId: (serviceId: string) => void;
   setVariableSearchQuery: (query: string) => void;
-  setActiveRequestTab: (tab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings') => void;
+  setActiveRequestTab: (tab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings' | 'file') => void;
   setActiveResponseTab: (tab: 'body' | 'headers' | 'info' | 'scripts' | 'tests') => void;
   setResponseViewMode: (mode: 'pretty' | 'raw') => void;
   setResponseLayout: (layout: 'right' | 'bottom') => void;
   setRequestPanelSize: (size: number) => void;
+  setTerminalOpen: (open: boolean) => void;
+  setTerminalCwd: (cwd: string) => void;
+  setDevToolsOpen: (open: boolean) => void;
+  setActiveDevToolTab: (tab: DevToolTab) => void;
 }
 
 const getInitialDarkMode = () => {
@@ -43,6 +53,10 @@ export const useUiStore = create<UiState>((set) => ({
   responseViewMode: 'pretty',
   responseLayout: 'bottom',
   requestPanelSize: 50,
+  terminalOpen: false,
+  terminalCwd: '',
+  devToolsOpen: false,
+  activeDevToolTab: 'terminal',
 
   toggleDarkMode: () => set((state) => {
     const next = !state.darkMode;
@@ -59,4 +73,8 @@ export const useUiStore = create<UiState>((set) => ({
   setResponseViewMode: (mode) => set({ responseViewMode: mode }),
   setResponseLayout: (layout) => set({ responseLayout: layout }),
   setRequestPanelSize: (size) => set({ requestPanelSize: size }),
+  setTerminalOpen: (open) => set({ terminalOpen: open, devToolsOpen: open }),
+  setTerminalCwd: (cwd) => set({ terminalCwd: cwd, terminalOpen: true, devToolsOpen: true, activeDevToolTab: 'terminal' }),
+  setDevToolsOpen: (open) => set({ devToolsOpen: open, terminalOpen: open }),
+  setActiveDevToolTab: (tab) => set({ activeDevToolTab: tab }),
 }));

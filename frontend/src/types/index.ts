@@ -29,6 +29,7 @@ export interface Service {
   workspaceId: string;
   name: string;
   description: string;
+  storagePath: string;
   sortOrder: number;
   createdAt: string;
   headers: KeyValueEntry[];
@@ -402,8 +403,11 @@ export type StorageMode = 'sqlite' | 'json';
 export interface AppSettings {
   storageMode: StorageMode;
   storagePath: string;
+  jsonStorageStrategy: JsonStorageStrategy;
   restartRequired: boolean;
   requestTimeoutMs: number;
+  followRedirects: boolean;
+  maxRedirects: number;
   ignoreSslErrors: boolean;
   maxResponseBodySizeMb: number;
   saveHistory: boolean;
@@ -414,11 +418,16 @@ export interface AppSettings {
   proxyPassword: string;
 }
 
+export type JsonStorageStrategy = 'single' | 'perCollection';
+
 export type SettingsUpdate = Partial<
   Pick<
     AppSettings,
     | 'storageMode'
+    | 'jsonStorageStrategy'
     | 'requestTimeoutMs'
+    | 'followRedirects'
+    | 'maxRedirects'
     | 'ignoreSslErrors'
     | 'maxResponseBodySizeMb'
     | 'saveHistory'
@@ -433,6 +442,20 @@ export type SettingsUpdate = Partial<
 export interface ApiRequestSettings {
   requestId: string;
   followRedirects: boolean;
+  maxRedirects: number;
   ignoreSslErrors: boolean;
   timeoutSeconds: number | null;
+  proxyMode: RequestProxyMode;
+  proxyUrl: string;
+  proxyUsername: string;
+  proxyPassword: string;
+}
+
+export type RequestProxyMode = 'inherit' | 'custom' | 'disabled';
+
+export interface StoredRequestFile {
+  requestId: string;
+  filePath: string;
+  content: string;
+  isJsonStorage: boolean;
 }

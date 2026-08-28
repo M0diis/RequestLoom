@@ -50,7 +50,7 @@ public class JsonServiceRepository : IServiceRepository
         return Task.FromResult(result);
     }
 
-    public Task<Service> CreateAsync(string workspaceId, string name, string description, List<KeyValuePairRequest> headers, AuthRequest? auth)
+    public Task<Service> CreateAsync(string workspaceId, string name, string description, List<KeyValuePairRequest> headers, AuthRequest? auth, string? storagePath = null)
     {
         Service? created = null;
         _store.Mutate(doc =>
@@ -60,12 +60,14 @@ public class JsonServiceRepository : IServiceRepository
                 .Select(s => (int?)s.SortOrder)
                 .Max() ?? -1;
 
+            var serviceId = Guid.NewGuid().ToString("N");
             var service = new Service
             {
-                Id = Guid.NewGuid().ToString("N"),
+                Id = serviceId,
                 WorkspaceId = workspaceId,
                 Name = name,
                 Description = description,
+                StoragePath = _store.ResolveCollectionPath(serviceId, name, storagePath),
                 SortOrder = maxOrder + 1,
                 CreatedAt = JsonDataStore.Now()
             };
@@ -192,6 +194,7 @@ public class JsonServiceRepository : IServiceRepository
             WorkspaceId = service.WorkspaceId,
             Name = service.Name,
             Description = service.Description,
+            StoragePath = service.StoragePath,
             SortOrder = service.SortOrder,
             CreatedAt = service.CreatedAt
         };

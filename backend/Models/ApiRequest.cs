@@ -117,6 +117,11 @@ public class ApiRequestSettings
 {
     public string RequestId { get; set; } = "";
     public bool FollowRedirects { get; set; } = true;
+    public int MaxRedirects { get; set; } = 10;
     public bool IgnoreSslErrors { get; set; }
     public int? TimeoutSeconds { get; set; }
+    public string ProxyMode { get; set; } = "inherit";
+    public string ProxyUrl { get; set; } = "";
+    public string ProxyUsername { get; set; } = "";
+    public string ProxyPassword { get; set; } = "";
 }

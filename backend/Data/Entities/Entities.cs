@@ -100,8 +100,13 @@ public class RequestSettingsRow
     [Key, Column("id")] public string Id { get; set; } = "";
     [Column("request_id")] public string RequestId { get; set; } = "";
     [Column("follow_redirects")] public bool FollowRedirects { get; set; } = true;
+    [Column("max_redirects")] public int MaxRedirects { get; set; } = 10;
     [Column("ignore_ssl_errors")] public bool IgnoreSslErrors { get; set; }
     [Column("timeout_seconds")] public int? TimeoutSeconds { get; set; }
+    [Column("proxy_mode")] public string ProxyMode { get; set; } = "inherit";
+    [Column("proxy_url")] public string ProxyUrl { get; set; } = "";
+    [Column("proxy_username")] public string ProxyUsername { get; set; } = "";
+    [Column("proxy_password")] public string ProxyPassword { get; set; } = "";
 }
 
 [Table("request_auth")]

@@ -48,3 +48,6 @@ backend/*.db
 backend/*.db-shm
 backend/*.db-wal
 backend/requestloom*.json
+
+# Graphify
+graphify-out/

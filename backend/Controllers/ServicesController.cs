@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using RequestLoom.Api.Data;
 using RequestLoom.Api.Data.Repositories;
 using RequestLoom.Api.Models;
 
@@ -9,10 +10,12 @@ namespace RequestLoom.Api.Controllers;
 public class ServicesController : ControllerBase
 {
     private readonly IServiceRepository _repo;
+    private readonly JsonDataStore _jsonStore;
 
-    public ServicesController(IServiceRepository repo)
+    public ServicesController(IServiceRepository repo, JsonDataStore jsonStore)
     {
         _repo = repo;
+        _jsonStore = jsonStore;
     }
 
     [HttpGet]
@@ -41,7 +44,8 @@ public class ServicesController : ControllerBase
             request.Name.Trim(),
             request.Description,
             request.Headers ?? [],
-            request.Auth);
+            request.Auth,
+            request.StoragePath);
         return CreatedAtAction(nameof(GetById), new { workspaceId, id = service.Id }, service);
     }
 
@@ -74,5 +78,30 @@ public class ServicesController : ControllerBase
         var deleted = await _repo.DeleteAsync(id);
         if (!deleted) return NotFound();
         return NoContent();
+    }
+
+    [HttpPost("{id}/files")]
+    public async Task<IActionResult> CreateFile(string id, [FromBody] CreateServiceFileRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest("File name is required");
+
+        try
+        {
+            var path = _jsonStore.CreateServiceFile(id, request.Name, request.Kind);
+            return Ok(new { path });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 }

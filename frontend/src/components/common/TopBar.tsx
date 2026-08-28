@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useEnvironmentStore } from '../../stores/environmentStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -19,7 +19,14 @@ export function TopBar() {
     environments,
     activate: activateEnvironment,
   } = useEnvironmentStore();
-  const { darkMode, toggleDarkMode, responseLayout, setResponseLayout } = useUiStore();
+  const {
+    darkMode,
+    toggleDarkMode,
+    responseLayout,
+    setResponseLayout,
+    setDevToolsOpen,
+    setActiveDevToolTab,
+  } = useUiStore();
   const desktopShell = window.desktopShell;
   const [busy, setBusy] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -27,26 +34,6 @@ export function TopBar() {
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
-
-  const handleTitlebarPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || !desktopShell) return;
-    if ((e.target as HTMLElement).closest('.titlebar-no-drag')) return;
-
-    void desktopShell.startDrag();
-
-    const handleMove = () => {
-      desktopShell.moveDrag();
-    };
-
-    const handleUp = () => {
-      void desktopShell.stopDrag();
-      document.removeEventListener('pointermove', handleMove);
-      document.removeEventListener('pointerup', handleUp);
-    };
-
-    document.addEventListener('pointermove', handleMove);
-    document.addEventListener('pointerup', handleUp);
-  }, [desktopShell]);
 
   useEffect(() => {
     if (!desktopShell) {
@@ -195,8 +182,7 @@ export function TopBar() {
   return (
     <>
       <div
-        className={`relative z-30 flex h-11 flex-shrink-0 items-center gap-3 overflow-x-auto overflow-y-hidden border-b border-gray-800 bg-[#1a1a1a] px-3 max-lg:gap-2 max-lg:px-2 scrollbar-slim-x ${desktopShell ? 'select-none' : ''}`}
-        onPointerDown={desktopShell ? handleTitlebarPointerDown : undefined}
+        className={`relative z-30 flex h-11 flex-shrink-0 items-center gap-3 overflow-x-auto overflow-y-hidden border-b border-gray-800 bg-[#1a1a1a] px-3 max-lg:gap-2 max-lg:px-2 scrollbar-slim-x ${desktopShell ? 'titlebar-drag select-none' : ''}`}
       >
       <div className="relative z-20 flex items-center gap-2 max-lg:gap-1.5">
         <CustomDropdown
@@ -286,6 +272,21 @@ export function TopBar() {
             </svg>
           </button>
         </div>
+
+        {/* Dev Tools */}
+        <button
+          onClick={() => {
+            setActiveDevToolTab('terminal');
+            setDevToolsOpen(true);
+          }}
+          className="flex items-center gap-1.5 border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-300 hover:bg-gray-800"
+          title="Open Dev Tools"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 7h14v10H5zM8 10l2 2-2 2m4 0h3" />
+          </svg>
+          <span className="max-md:hidden">Dev Tools</span>
+        </button>
 
         {/* Dark mode toggle */}
         <button
