@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld('desktopShell', {
   maximizeToggle: () => ipcRenderer.invoke('window:maximize-toggle'),
   close: () => ipcRenderer.invoke('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  startDrag: () => ipcRenderer.invoke('window:start-drag'),
+  moveDrag: () => ipcRenderer.send('window:drag-move'),
+  stopDrag: () => ipcRenderer.invoke('window:stop-drag'),
   reloadApp: () => ipcRenderer.invoke('app:reload'),
   onMaximizeChanged: (callback) => {
     const handler = (_event, isMaximized) => {

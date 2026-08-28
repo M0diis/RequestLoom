@@ -10,6 +10,7 @@ import type {
   AuthRequest,
 } from '../types';
 import { servicesApi, requestsApi, executeApi, serviceVariablesApi } from '../services/api';
+import { useDevToolsStore } from './devToolsStore';
 
 const requestSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const requestSaveVersions = new Map<string, number>();
@@ -446,6 +447,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     if (!activeRequest) return;
 
     const abortController = new AbortController();
+    const startedAt = new Date().toISOString();
+    const startedAtMs = performance.now();
     set((s) => ({ sending: true, abortController, responses: { ...s.responses, [activeRequest.id]: null } }));
 
     try {
@@ -476,11 +479,23 @@ export const useRequestStore = create<RequestState>((set, get) => ({
           [activeRequest.id]: response.scriptVariables ?? {},
         },
       }));
+      useDevToolsStore.getState().recordNetworkEntry({
+        requestId: activeRequest.id,
+        method: activeRequest.method,
+        url: activeRequest.url,
+        status: response.statusCode,
+        statusText: response.statusText || (response.statusCode ? 'Response' : 'Error'),
+        durationMs: response.responseTimeMs || performance.now() - startedAtMs,
+        sizeBytes: response.responseSizeBytes,
+        startedAt,
+        error: response.error,
+      });
       window.dispatchEvent(new CustomEvent('history:updated'));
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'CanceledError') {
         set({ sending: false, abortController: null });
       } else {
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
         set((s) => ({
           responses: {
             ...s.responses,
@@ -492,7 +507,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
               contentType: '',
               responseTimeMs: 0,
               responseSizeBytes: 0,
-              error: err instanceof Error ? err.message : 'Unknown error',
+              error: errorMessage,
               isSoapFault: false,
               scriptVariables: {},
               scriptLogs: [],
@@ -502,6 +517,17 @@ export const useRequestStore = create<RequestState>((set, get) => ({
           sending: false,
           abortController: null,
         }));
+        useDevToolsStore.getState().recordNetworkEntry({
+          requestId: activeRequest.id,
+          method: activeRequest.method,
+          url: activeRequest.url,
+          status: 0,
+          statusText: 'Error',
+          durationMs: performance.now() - startedAtMs,
+          sizeBytes: 0,
+          startedAt,
+          error: errorMessage,
+        });
       }
     }
   },

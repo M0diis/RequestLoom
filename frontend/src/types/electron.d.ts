@@ -6,6 +6,9 @@ declare global {
     maximizeToggle: () => Promise<boolean>;
     close: () => Promise<void>;
     isMaximized: () => Promise<boolean>;
+    startDrag: () => Promise<boolean>;
+    moveDrag: () => void;
+    stopDrag: () => Promise<void>;
     reloadApp: () => Promise<boolean>;
     onMaximizeChanged: (callback: (isMaximized: boolean) => void) => () => void;
     selectDirectory: () => Promise<string | null>;

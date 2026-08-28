@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -15,6 +15,7 @@ let shuttingDown = false;
 let reloadingBackend = false;
 let terminalSequence = 0;
 const terminalSessions = new Map();
+let activeDrag = null;
 
 function getAppRoot() {
   return app.isPackaged ? path.join(process.resourcesPath, 'app') : __dirname;
@@ -41,7 +42,55 @@ function appendLog(message) {
   }
 }
 
+function stopActiveDrag() {
+  if (!activeDrag) return;
+
+  const { win, wasResizable } = activeDrag;
+  activeDrag = null;
+
+  if (!win.isDestroyed() && win.isResizable() !== wasResizable) {
+    win.setResizable(wasResizable);
+  }
+}
+
 function registerWindowControlHandlers() {
+  ipcMain.handle('window:start-drag', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || win.isMaximized()) return false;
+
+    stopActiveDrag();
+
+    const [winX, winY] = win.getPosition();
+    const { x: startX, y: startY } = screen.getCursorScreenPoint();
+    const wasResizable = win.isResizable();
+    activeDrag = { win, winX, winY, startX, startY, wasResizable };
+
+    // Disable edge hit-testing for the short manual drag so moving the window
+    // cannot also begin a native resize operation.
+    if (wasResizable) {
+      win.setResizable(false);
+    }
+
+    return true;
+  });
+
+  ipcMain.on('window:drag-move', () => {
+    if (!activeDrag) return;
+
+    const { win, winX, winY, startX, startY } = activeDrag;
+    if (win.isDestroyed()) {
+      activeDrag = null;
+      return;
+    }
+
+    const { x, y } = screen.getCursorScreenPoint();
+    win.setPosition(Math.round(winX + (x - startX)), Math.round(winY + (y - startY)));
+  });
+
+  ipcMain.handle('window:stop-drag', () => {
+    stopActiveDrag();
+  });
+
   ipcMain.handle('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     win?.minimize();
@@ -124,29 +173,52 @@ function registerDesktopUtilityHandlers() {
   ipcMain.handle('terminal:start', (event, cwd) => {
     const requestedCwd = typeof cwd === 'string' ? cwd.trim() : '';
     let terminalCwd = process.cwd();
-    if (requestedCwd && fs.existsSync(requestedCwd)) {
-      const stats = fs.statSync(requestedCwd);
-      terminalCwd = stats.isDirectory() ? requestedCwd : path.dirname(requestedCwd);
+    if (requestedCwd) {
+      try {
+        if (fs.existsSync(requestedCwd)) {
+          const stats = fs.statSync(requestedCwd);
+          terminalCwd = stats.isDirectory() ? requestedCwd : path.dirname(requestedCwd);
+        }
+      } catch (error) {
+        appendLog(`Invalid terminal working directory, using app directory: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     const terminalId = String(++terminalSequence);
     const shellPath = process.platform === 'win32'
       ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
       : (process.env.SHELL || '/bin/sh');
     const shellArgs = process.platform === 'win32' ? ['-NoLogo', '-NoProfile'] : [];
-    const child = spawn(shellPath, shellArgs, {
-      cwd: terminalCwd,
-      env: { ...process.env, TERM: process.env.TERM || 'xterm-256color' },
-      windowsHide: true,
-      stdio: 'pipe',
-    });
+
+    let child;
+    try {
+      child = spawn(shellPath, shellArgs, {
+        cwd: terminalCwd,
+        env: { ...process.env, TERM: process.env.TERM || 'xterm-256color' },
+        windowsHide: true,
+        stdio: 'pipe',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      appendLog(`Terminal start failed: ${message}`);
+      throw new Error(`Unable to start PowerShell: ${message}`);
+    }
 
     terminalSessions.set(terminalId, { child, sender: event.sender });
     const send = (channel, value) => {
-      if (!event.sender.isDestroyed()) event.sender.send(channel, terminalId, value);
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send(channel, terminalId, value);
+      } catch (error) {
+        appendLog(`Terminal event delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     };
 
     child.stdout.on('data', (chunk) => send('terminal:data', String(chunk)));
     child.stderr.on('data', (chunk) => send('terminal:data', String(chunk)));
+    child.stdin.on('error', (error) => {
+      // The shell can close before the renderer receives its exit event. Never
+      // let an asynchronous EPIPE from a late keypress crash Electron.
+      appendLog(`Terminal input stream closed: ${error instanceof Error ? error.message : String(error)}`);
+    });
     child.on('error', (error) => send('terminal:error', error.message));
     child.on('exit', (code) => {
       terminalSessions.delete(terminalId);
@@ -158,15 +230,23 @@ function registerDesktopUtilityHandlers() {
 
   ipcMain.on('terminal:write', (_event, terminalId, input) => {
     const session = terminalSessions.get(String(terminalId));
-    if (!session || typeof input !== 'string' || !session.child.stdin.writable) return;
-    session.child.stdin.write(input);
+    if (!session || typeof input !== 'string') return;
+    const stdin = session.child?.stdin;
+    if (stdin?.writable && !stdin.destroyed && !stdin.writableEnded) {
+      try {
+        // xterm.js uses DEL for Backspace; redirected PowerShell input expects BS.
+        stdin.write(input.replace(/\x7f/g, '\x08'));
+      } catch (error) {
+        appendLog(`Terminal write failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   });
 
   ipcMain.handle('terminal:kill', (_event, terminalId) => {
     const session = terminalSessions.get(String(terminalId));
     if (!session) return false;
     terminalSessions.delete(String(terminalId));
-    session.child.kill();
+    session.child?.kill();
     return true;
   });
 }
@@ -300,6 +380,17 @@ function stopBackend() {
   }
 }
 
+function stopTerminalSessions() {
+  for (const session of terminalSessions.values()) {
+    try {
+      session.child?.kill();
+    } catch (err) {
+      appendLog(`Error while stopping terminal: ${err.message}`);
+    }
+  }
+  terminalSessions.clear();
+}
+
 function createMainWindow() {
   const windowOptions = {
     width: 1480,
@@ -323,6 +414,7 @@ function createMainWindow() {
 
   const win = new BrowserWindow(windowOptions);
 
+  win.on('closed', stopActiveDrag);
   win.on('maximize', () => broadcastMaximizedState(win));
   win.on('unmaximize', () => broadcastMaximizedState(win));
 
@@ -341,6 +433,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   shuttingDown = true;
+  stopActiveDrag();
+  stopTerminalSessions();
   stopBackend();
 });
 

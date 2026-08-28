@@ -58,15 +58,14 @@ body {
   flex-direction: column;
 }
 
-.titlebar-drag {
-  -webkit-app-region: drag !important;
-  app-region: drag;
-}
-
 .titlebar-no-drag,
 .titlebar-no-drag * {
   -webkit-app-region: no-drag !important;
   app-region: no-drag;
+}
+
+.xterm-container .xterm {
+  height: 100%;
 }
 
 .dark {

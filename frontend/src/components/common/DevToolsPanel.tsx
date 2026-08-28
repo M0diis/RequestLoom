@@ -1,4 +1,6 @@
 import { TerminalPanel } from './TerminalPanel';
+import { NetworkPanel } from './NetworkPanel';
+import { PerformancePanel } from './PerformancePanel';
 import { useUiStore, type DevToolTab } from '../../stores/uiStore';
 
 const TABS: { id: DevToolTab; label: string }[] = [
@@ -8,16 +10,14 @@ const TABS: { id: DevToolTab; label: string }[] = [
   { id: 'terminal', label: 'Terminal' },
 ];
 
-function DevToolPlaceholder({ tab }: { tab: Exclude<DevToolTab, 'terminal'> }) {
+function ConsolePanel() {
   const messages = {
     console: 'Console output will appear here.',
-    network: 'Network activity will appear here.',
-    performance: 'Performance metrics will appear here.',
   };
 
   return (
     <div className="flex h-full items-center justify-center bg-[#0b0b0b] font-mono text-xs text-gray-600">
-      {messages[tab]}
+      {messages.console}
     </div>
   );
 }
@@ -63,7 +63,9 @@ export function DevToolsPanel() {
         <div className={activeDevToolTab === 'terminal' ? 'h-full' : 'hidden'}>
           <TerminalPanel />
         </div>
-        {activeDevToolTab !== 'terminal' ? <DevToolPlaceholder tab={activeDevToolTab} /> : null}
+        {activeDevToolTab === 'console' ? <ConsolePanel /> : null}
+        {activeDevToolTab === 'network' ? <NetworkPanel /> : null}
+        {activeDevToolTab === 'performance' ? <PerformancePanel /> : null}
       </div>
     </section>
   );
