@@ -51,7 +51,7 @@ export default function CookieJarPanel({ workspaceId }: CookieJarPanelProps) {
         <div>
           <h3 className="text-sm font-medium text-gray-200">Persistent cookie jar</h3>
           <p className="mt-1 text-[11px] text-gray-500">
-            Response cookies are reused automatically for this workspace and survive backend restarts until cleared.
+            Response cookies can be reused for this workspace and survive backend restarts. Toggle persistence in Settings → Requests.
           </p>
         </div>
         <button

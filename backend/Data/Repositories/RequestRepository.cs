@@ -44,6 +44,7 @@ public class RequestRepository : IRequestRepository
             PreRequestScript = "",
             PostRequestScript = "",
             TestScript = "",
+            Notes = "",
             SortOrder = maxSort + 1,
             IsFavorite = false,
             CreatedAt = now,
@@ -71,6 +72,7 @@ public class RequestRepository : IRequestRepository
         row.PreRequestScript = request.PreRequestScript ?? "";
         row.PostRequestScript = request.PostRequestScript ?? "";
         row.TestScript = request.TestScript ?? "";
+        row.Notes = request.Notes ?? "";
         row.UpdatedAt = DateTime.UtcNow.ToString("o");
 
         await _db.RequestHeaders.Where(h => h.RequestId == id).ExecuteDeleteAsync();
@@ -174,6 +176,7 @@ public class RequestRepository : IRequestRepository
             PreRequestScript = row.PreRequestScript,
             PostRequestScript = row.PostRequestScript,
             TestScript = row.TestScript,
+            Notes = row.Notes,
             SortOrder = maxSort + 1,
             IsFavorite = false,
             CreatedAt = now,
@@ -447,6 +450,7 @@ public class RequestRepository : IRequestRepository
             PreRequestScript = row.PreRequestScript,
             PostRequestScript = row.PostRequestScript,
             TestScript = row.TestScript,
+            Notes = row.Notes,
             SortOrder = row.SortOrder,
             IsFavorite = row.IsFavorite,
             CreatedAt = row.CreatedAt,

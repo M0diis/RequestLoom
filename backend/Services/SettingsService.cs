@@ -29,6 +29,7 @@ public class SettingsService
     private const string KeyIgnoreSslErrors = "ignoreSslErrors";
     private const string KeyMaxResponseBodySizeMb = "maxResponseBodySizeMb";
     private const string KeySaveHistory = "saveHistory";
+    private const string KeyPersistCookies = "persistCookies";
     private const string KeyResponseFormat = "responseFormat";
     private const string KeyProxyEnabled = "proxyEnabled";
     private const string KeyProxyUrl = "proxyUrl";
@@ -122,6 +123,9 @@ public class SettingsService
     /// <summary>Whether executed requests are recorded in history.</summary>
     public bool SaveHistory => GetBool(KeySaveHistory, true);
 
+    /// <summary>Whether response cookies are reused and persisted between requests.</summary>
+    public bool PersistCookies => GetBool(KeyPersistCookies, true);
+
     /// <summary>Default response body view format: "pretty" | "raw".</summary>
     public string ResponseFormat => GetString(KeyResponseFormat, "pretty");
 
@@ -151,6 +155,7 @@ public class SettingsService
             IgnoreSslErrors = IgnoreSslErrors,
             MaxResponseBodySizeMb = MaxResponseBodySizeMb,
             SaveHistory = SaveHistory,
+            PersistCookies = PersistCookies,
             ResponseFormat = ResponseFormat,
             ProxyEnabled = ProxyEnabled,
             ProxyUrl = ProxyUrl,
@@ -216,6 +221,7 @@ public class SettingsService
             if (request.IgnoreSslErrors.HasValue) _overrides[KeyIgnoreSslErrors] = request.IgnoreSslErrors.Value ? "true" : "false";
             if (request.MaxResponseBodySizeMb.HasValue) _overrides[KeyMaxResponseBodySizeMb] = request.MaxResponseBodySizeMb.Value.ToString(CultureInfo.InvariantCulture);
             if (request.SaveHistory.HasValue) _overrides[KeySaveHistory] = request.SaveHistory.Value ? "true" : "false";
+            if (request.PersistCookies.HasValue) _overrides[KeyPersistCookies] = request.PersistCookies.Value ? "true" : "false";
             if (request.ResponseFormat is not null) _overrides[KeyResponseFormat] = Normalize(request.ResponseFormat);
             if (request.ProxyEnabled.HasValue) _overrides[KeyProxyEnabled] = request.ProxyEnabled.Value ? "true" : "false";
             if (request.ProxyUrl is not null) _overrides[KeyProxyUrl] = request.ProxyUrl.Trim();
@@ -237,6 +243,7 @@ public class SettingsService
             IgnoreSslErrors = IgnoreSslErrors,
             MaxResponseBodySizeMb = MaxResponseBodySizeMb,
             SaveHistory = SaveHistory,
+            PersistCookies = PersistCookies,
             ResponseFormat = ResponseFormat,
             ProxyEnabled = ProxyEnabled,
             ProxyUrl = ProxyUrl,
@@ -315,6 +322,7 @@ public class AppSettingsDto
     public bool IgnoreSslErrors { get; set; }
     public long MaxResponseBodySizeMb { get; set; }
     public bool SaveHistory { get; set; } = true;
+    public bool PersistCookies { get; set; } = true;
     public string ResponseFormat { get; set; } = "pretty";
     public bool ProxyEnabled { get; set; }
     public string ProxyUrl { get; set; } = "";
@@ -332,6 +340,7 @@ public class UpdateSettingsRequest
     public bool? IgnoreSslErrors { get; set; }
     public long? MaxResponseBodySizeMb { get; set; }
     public bool? SaveHistory { get; set; }
+    public bool? PersistCookies { get; set; }
     public string? ResponseFormat { get; set; }
     public bool? ProxyEnabled { get; set; }
     public string? ProxyUrl { get; set; }

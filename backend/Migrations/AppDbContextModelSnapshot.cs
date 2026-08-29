@@ -54,6 +54,11 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("name");
 
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("notes");
+
                     b.Property<string>("PostRequestScript")
                         .IsRequired()
                         .HasColumnType("TEXT")

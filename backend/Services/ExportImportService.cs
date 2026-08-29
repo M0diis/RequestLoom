@@ -283,6 +283,7 @@ public class ExportImportService
             BodyType = req.BodyType,
             PreRequestScript = req.PreRequestScript ?? "",
             PostRequestScript = req.PostRequestScript ?? "",
+            Notes = req.Notes ?? "",
             SortOrder = req.SortOrder,
             IsFavorite = req.IsFavorite,
             FolderName = req.FolderId != null && folderNames != null && folderNames.TryGetValue(req.FolderId, out var folderName)
@@ -517,6 +518,7 @@ public class ExportImportService
                 BodyType = req.BodyType,
                 PreRequestScript = req.PreRequestScript,
                 PostRequestScript = req.PostRequestScript,
+                Notes = req.Notes,
                 TestScript = "",
                 SortOrder = req.SortOrder,
                 IsFavorite = req.IsFavorite,
@@ -803,6 +805,7 @@ public class ExportImportService
                     BodyType = req.BodyType,
                     PreRequestScript = req.PreRequestScript,
                     PostRequestScript = req.PostRequestScript,
+                    Notes = req.Notes,
                     TestScript = "",
                     SortOrder = req.SortOrder,
                     IsFavorite = req.IsFavorite,

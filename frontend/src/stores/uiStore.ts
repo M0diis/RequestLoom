@@ -9,7 +9,7 @@ interface UiState {
   serviceSettingsServiceId: string | null;
   variableServiceFilterId: string;
   variableSearchQuery: string;
-  activeRequestTab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings' | 'cookies' | 'file';
+  activeRequestTab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings' | 'cookies' | 'file' | 'notes';
   activeResponseTab: 'body' | 'headers' | 'info' | 'scripts' | 'tests';
   responseViewMode: 'pretty' | 'raw';
   responseLayout: 'right' | 'bottom';
@@ -24,7 +24,7 @@ interface UiState {
   setServiceSettingsServiceId: (serviceId: string | null) => void;
   setVariableServiceFilterId: (serviceId: string) => void;
   setVariableSearchQuery: (query: string) => void;
-  setActiveRequestTab: (tab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings' | 'cookies' | 'file') => void;
+  setActiveRequestTab: (tab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings' | 'cookies' | 'file' | 'notes') => void;
   setActiveResponseTab: (tab: 'body' | 'headers' | 'info' | 'scripts' | 'tests') => void;
   setResponseViewMode: (mode: 'pretty' | 'raw') => void;
   setResponseLayout: (layout: 'right' | 'bottom') => void;

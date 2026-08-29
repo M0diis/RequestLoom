@@ -75,6 +75,7 @@ export interface ApiRequest {
   preRequestScript: string;
   postRequestScript: string;
   testScript: string;
+  notes: string;
   sortOrder: number;
   isFavorite: boolean;
   createdAt: string;
@@ -212,6 +213,7 @@ export interface UpdateApiRequestPayload {
   preRequestScript: string;
   postRequestScript: string;
   testScript: string;
+  notes: string;
   headers: KeyValuePairRequest[];
   params: KeyValuePairRequest[];
   variables: RequestVariableRequest[];
@@ -413,6 +415,7 @@ export interface RequestExport {
   bodyType: string;
   preRequestScript: string;
   postRequestScript: string;
+  notes: string;
   sortOrder: number;
   isFavorite: boolean;
   folderName?: string | null;
@@ -499,6 +502,7 @@ export interface AppSettings {
   ignoreSslErrors: boolean;
   maxResponseBodySizeMb: number;
   saveHistory: boolean;
+  persistCookies: boolean;
   responseFormat: 'pretty' | 'raw';
   proxyEnabled: boolean;
   proxyUrl: string;
@@ -519,6 +523,7 @@ export type SettingsUpdate = Partial<
     | 'ignoreSslErrors'
     | 'maxResponseBodySizeMb'
     | 'saveHistory'
+    | 'persistCookies'
     | 'responseFormat'
     | 'proxyEnabled'
     | 'proxyUrl'

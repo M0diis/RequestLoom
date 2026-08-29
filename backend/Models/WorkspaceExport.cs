@@ -66,6 +66,7 @@ public class RequestExport
     public string BodyType { get; set; } = "none";
     public string PreRequestScript { get; set; } = "";
     public string PostRequestScript { get; set; } = "";
+    public string Notes { get; set; } = "";
     public int SortOrder { get; set; }
     public bool IsFavorite { get; set; }
     public string? FolderName { get; set; }

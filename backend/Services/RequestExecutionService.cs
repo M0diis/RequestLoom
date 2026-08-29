@@ -271,7 +271,7 @@ public class RequestExecutionService
                 }
             }
 
-            if (request.RequestUri != null && !request.Headers.Contains("Cookie"))
+            if (_settings.PersistCookies && request.RequestUri != null && !request.Headers.Contains("Cookie"))
             {
                 var cookieHeader = _cookieJar.GetCookieHeader(workspaceId, request.RequestUri);
                 if (!string.IsNullOrWhiteSpace(cookieHeader))
@@ -325,7 +325,7 @@ public class RequestExecutionService
 
             // Execute
             var response = await client.SendAsync(request, cancellationToken);
-            if (request.RequestUri != null &&
+            if (_settings.PersistCookies && request.RequestUri != null &&
                 response.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders))
             {
                 var responseUri = response.RequestMessage?.RequestUri ?? request.RequestUri;

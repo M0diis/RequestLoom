@@ -302,6 +302,7 @@ public sealed class StorageMigrationService
             PreRequestScript = request.PreRequestScript,
             PostRequestScript = request.PostRequestScript,
             TestScript = request.TestScript,
+            Notes = request.Notes,
             SortOrder = request.SortOrder,
             IsFavorite = request.IsFavorite,
             CreatedAt = request.CreatedAt,
@@ -450,7 +451,7 @@ public sealed class StorageMigrationService
             {
                 Id = request.Id, ServiceId = request.ServiceId, FolderId = request.FolderId, Name = request.Name, Method = request.Method,
                 Url = request.Url, Body = request.Body, BodyType = request.BodyType, PreRequestScript = request.PreRequestScript,
-                PostRequestScript = request.PostRequestScript, TestScript = request.TestScript, SortOrder = request.SortOrder,
+                 PostRequestScript = request.PostRequestScript, TestScript = request.TestScript, Notes = request.Notes, SortOrder = request.SortOrder,
                 IsFavorite = request.IsFavorite, CreatedAt = request.CreatedAt, UpdatedAt = request.UpdatedAt,
                 Headers = requestHeaders.Where(header => header.RequestId == request.Id).Select(header => new ModelKeyValuePair
                 {

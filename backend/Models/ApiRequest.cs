@@ -13,6 +13,7 @@ public class ApiRequest
     public string PreRequestScript { get; set; } = "";
     public string PostRequestScript { get; set; } = "";
     public string TestScript { get; set; } = "";
+    public string Notes { get; set; } = "";
     public int SortOrder { get; set; }
     public bool IsFavorite { get; set; }
     public string CreatedAt { get; set; } = "";
@@ -100,6 +101,7 @@ public class UpdateApiRequestRequest
     public string PreRequestScript { get; set; } = "";
     public string PostRequestScript { get; set; } = "";
     public string TestScript { get; set; } = "";
+    public string Notes { get; set; } = "";
     public List<KeyValuePairRequest> Headers { get; set; } = [];
     public List<KeyValuePairRequest> Params { get; set; } = [];
     public List<RequestVariableRequest> Variables { get; set; } = [];

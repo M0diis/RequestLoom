@@ -15,6 +15,7 @@ import { RequestHistoryTab } from './RequestHistoryTab';
 import RequestSettingsEditor from './RequestSettingsEditor';
 import CookieJarPanel from './CookieJarPanel';
 import { RequestFileViewer } from './RequestFileViewer';
+import { RequestNotesEditor } from './RequestNotesEditor';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import { DynamicValueReferenceModal } from '../common/DynamicValueReferenceModal';
 import { AlertModal } from '../common/AlertModal';
@@ -534,6 +535,7 @@ export function RequestBuilder() {
     { id: 'tests' as const, label: 'Tests' },
     { id: 'runs' as const, label: 'History', count: historyCount },
     { id: 'settings' as const, label: 'Settings' },
+    { id: 'notes' as const, label: 'Notes' },
     { id: 'cookies' as const, label: 'Cookies' },
     { id: 'file' as const, label: 'File' },
   ];
@@ -709,6 +711,12 @@ export function RequestBuilder() {
         )}
         {activeRequestTab === 'settings' && (
           <RequestSettingsEditor requestId={activeRequest.id} workspaceId={activeWorkspaceId} />
+        )}
+        {activeRequestTab === 'notes' && (
+          <RequestNotesEditor
+            notes={activeRequest.notes}
+            onChange={(notes) => { void updateRequest(activeRequest.id, { notes }); }}
+          />
         )}
         {activeRequestTab === 'cookies' && (
           <CookieJarPanel workspaceId={activeWorkspaceId} />

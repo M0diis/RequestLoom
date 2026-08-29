@@ -74,6 +74,7 @@ export function SettingsModal({ onClose }: Props) {
   const [maxRedirects, setMaxRedirects] = useState('10');
   const [maxSizeMb, setMaxSizeMb] = useState('0');
   const [ignoreSsl, setIgnoreSsl] = useState(false);
+  const [persistCookies, setPersistCookies] = useState(true);
   const [responseFormat, setResponseFormat] = useState<'pretty' | 'raw'>('pretty');
   const [proxyEnabled, setProxyEnabled] = useState(false);
   const [proxyUrl, setProxyUrl] = useState('');
@@ -101,6 +102,7 @@ export function SettingsModal({ onClose }: Props) {
     setMaxRedirects(String(settings.maxRedirects));
     setMaxSizeMb(String(settings.maxResponseBodySizeMb));
     setIgnoreSsl(settings.ignoreSslErrors);
+    setPersistCookies(settings.persistCookies);
     setResponseFormat(settings.responseFormat === 'raw' ? 'raw' : 'pretty');
     setProxyEnabled(settings.proxyEnabled);
     setProxyUrl(settings.proxyUrl);
@@ -142,6 +144,7 @@ export function SettingsModal({ onClose }: Props) {
       followRedirects,
       maxRedirects: redirectLimit,
       ignoreSslErrors: ignoreSsl,
+      persistCookies,
       maxResponseBodySizeMb: Math.round(maxSize),
       responseFormat,
       proxyEnabled,
@@ -405,6 +408,24 @@ export function SettingsModal({ onClose }: Props) {
                         className={UNCHECKED_CHECKBOX}
                       />
                       Ignore TLS/SSL certificate errors
+                    </label>
+                    <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={persistCookies}
+                        onChange={(e) => {
+                          setPersistCookies(e.target.checked);
+                          setSaved(null);
+                        }}
+                        disabled={busy}
+                        className={`${UNCHECKED_CHECKBOX} mt-0.5 shrink-0`}
+                      />
+                      <span>
+                        <span className="block">Reuse and save response cookies</span>
+                        <span className="mt-0.5 block text-[11px] text-gray-500">
+                          When disabled, requests will not read from or add to the persistent cookie jar. Existing cookies remain until cleared.
+                        </span>
+                      </span>
                     </label>
                   </section>
 

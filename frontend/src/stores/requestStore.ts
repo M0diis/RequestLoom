@@ -26,6 +26,7 @@ function buildUpdatePayload(request: ApiRequest): UpdateApiRequestPayload {
     preRequestScript: request.preRequestScript,
     postRequestScript: request.postRequestScript,
     testScript: request.testScript,
+    notes: request.notes,
     headers: request.headers.map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
     params: request.params.map((p) => ({ key: p.key, value: p.value, enabled: p.enabled })),
     variables: request.variables.map((v) => ({ key: v.key, value: v.value, enabled: v.enabled })),

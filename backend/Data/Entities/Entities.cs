@@ -59,6 +59,7 @@ public class ApiRequestRow
     [Column("pre_request_script")] public string PreRequestScript { get; set; } = "";
     [Column("post_request_script")] public string PostRequestScript { get; set; } = "";
     [Column("test_script")] public string TestScript { get; set; } = "";
+    [Column("notes")] public string Notes { get; set; } = "";
     [Column("sort_order")] public int SortOrder { get; set; }
     [Column("is_favorite")] public bool IsFavorite { get; set; }
     [Column("created_at")] public string CreatedAt { get; set; } = "";

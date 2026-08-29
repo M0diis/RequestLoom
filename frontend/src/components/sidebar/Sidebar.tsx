@@ -646,10 +646,10 @@ export function Sidebar() {
     };
   }, [contextMenu]);
 
-  const renderRequest = (request: ApiRequest, indentation = 'pl-8') => {
+  const renderRequest = (request: ApiRequest, indentation = 'pl-4') => {
     if (renamingRequestId === request.id) {
       return (
-        <div key={request.id} className={`${indentation} pr-3 py-1.5`}>
+        <div key={request.id} className={`${indentation} pr-3 py-1`}>
           <input
             autoFocus
             value={renamingRequestName}
@@ -701,7 +701,7 @@ export function Sidebar() {
         <button
           onClick={() => { setServiceSettingsServiceId(null); setActiveScriptFile(null); void selectRequest(request.id); }}
           onContextMenu={(event) => handleContextMenu(event, 'request', request.id)}
-          className={`flex w-full items-center gap-2 py-1.5 pr-3 text-left text-xs active:cursor-grabbing ${
+          className={`flex w-full items-center gap-2 py-1 pr-3 text-left text-xs active:cursor-grabbing ${
             activeRequestId === request.id ? 'text-gray-100' : 'text-gray-400'
           }`}
         >
@@ -864,7 +864,7 @@ export function Sidebar() {
             <div key={service.id} className="border-b border-gray-900/70">
               <div
                 draggable
-                className={`group flex cursor-pointer items-center px-3 py-2 text-xs font-semibold text-gray-200 transition-colors hover:bg-gray-900/60 ${
+                className={`group flex cursor-grab items-center px-3 py-1.5 text-xs font-semibold text-gray-200 transition-colors hover:bg-gray-900/60 active:cursor-grabbing ${
                   dragOverServiceOrderId === service.id
                     ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
                     : dragOverServiceId === service.id
@@ -916,13 +916,6 @@ export function Sidebar() {
                   else handleDropOnService(event, service.id);
                 }}
               >
-                <span
-                  aria-hidden="true"
-                  className="mr-1.5 w-3 cursor-grab select-none text-[13px] leading-none text-gray-600 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-hover:text-gray-400 active:cursor-grabbing"
-                  title="Drag to reorder services"
-                >
-                  ⠿
-                </span>
                 <svg
                   className={`mr-1.5 h-3 w-3 text-gray-500 transition-transform ${collapsedServices.has(service.id) ? '' : 'rotate-90'}`}
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -1014,7 +1007,7 @@ export function Sidebar() {
                   <div key={folder.id}>
                     <div
                       draggable
-                      className={`group flex cursor-pointer items-center gap-1.5 px-6 py-1.5 text-xs text-gray-300 transition-colors hover:bg-gray-900/60 ${
+                      className={`group flex cursor-pointer items-center gap-1.5 px-6 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-900/60 ${
                         dragOverFolderOrderId === folder.id
                           ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
                           : dragOverFolderId === folder.id
@@ -1115,9 +1108,9 @@ export function Sidebar() {
                         </button>
                       )}
                     </div>
-                    {!folderCollapsed && folderRequests.map((request) => renderRequest(request, 'pl-10'))}
+                    {!folderCollapsed && folderRequests.map((request) => renderRequest(request, 'pl-8'))}
                     {!folderCollapsed && addingRequestToFolder?.serviceId === service.id && addingRequestToFolder.folderId === folder.id && (
-                      <div className="pl-10 pr-3 py-1">
+                      <div className="pl-18 pr-3 py-1">
                         <input
                           autoFocus
                           className="w-full border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
@@ -1153,7 +1146,7 @@ export function Sidebar() {
                     type="button"
                     onClick={() => handleOpenScriptFile(service.id, file)}
                     onContextMenu={(event) => handleContextMenu(event, 'script', file.key)}
-                    className="flex w-full items-center gap-2 px-8 py-1.5 text-left text-xs text-gray-400 hover:bg-gray-900/50 hover:text-gray-200"
+                    className="flex w-full items-center gap-2 px-8 py-1 text-left text-xs text-gray-400 hover:bg-gray-900/50 hover:text-gray-200"
                   >
                     <svg className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
                       <path d="M7 3h7l4 4v14H7a2 2 0 01-2-2V5a2 2 0 012-2zM14 3v5h5" />

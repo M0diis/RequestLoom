@@ -73,6 +73,7 @@ public class JsonRequestRepository : IRequestRepository
             request.PreRequestScript = req.PreRequestScript ?? "";
             request.PostRequestScript = req.PostRequestScript ?? "";
             request.TestScript = req.TestScript ?? "";
+            request.Notes = req.Notes ?? "";
             request.UpdatedAt = JsonDataStore.Now();
 
             request.Headers = req.Headers
@@ -154,6 +155,7 @@ public class JsonRequestRepository : IRequestRepository
                 PreRequestScript = original.PreRequestScript ?? "",
                 PostRequestScript = original.PostRequestScript ?? "",
                 TestScript = original.TestScript ?? "",
+                Notes = original.Notes ?? "",
                 SortOrder = maxOrder + 1,
                 IsFavorite = false,
                 CreatedAt = JsonDataStore.Now(),
@@ -414,6 +416,7 @@ public class JsonRequestRepository : IRequestRepository
             PreRequestScript = request.PreRequestScript,
             PostRequestScript = request.PostRequestScript,
             TestScript = request.TestScript,
+            Notes = request.Notes,
             SortOrder = request.SortOrder,
             IsFavorite = request.IsFavorite,
             CreatedAt = request.CreatedAt,
