@@ -4,6 +4,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useUiStore } from '../../stores/uiStore';
 import { VariablesSidebarPanel } from '../variables/VariablesSidebarPanel';
 import { MockServersSidebarPanel } from '../mockserver/MockServersSidebarPanel';
+import { DocumentationSidebar } from '../documentation/DocumentationSidebar';
 import { ImportModal } from '../common/ImportModal';
 import { CollectionRunnerModal } from '../common/CollectionRunnerModal';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
@@ -1207,6 +1208,10 @@ export function Sidebar() {
 
       {sidebarTab === 'mockservers' && (
         <MockServersSidebarPanel />
+      )}
+
+      {sidebarTab === 'docs' && (
+        <DocumentationSidebar />
       )}
 
       {/* Context menu */}

@@ -16,6 +16,7 @@ import { useSettingsStore } from './stores/settingsStore';
 import { useScriptFileStore } from './stores/scriptFileStore';
 import { DevToolsPanel } from './components/common/DevToolsPanel';
 import { JavaScriptFileEditor } from './components/script-files/JavaScriptFileEditor';
+import { DocumentationPage } from './components/documentation/DocumentationPage';
 
 function App() {
   const { activeWorkspaceId, load: loadWorkspaces } = useWorkspaceStore();
@@ -26,11 +27,13 @@ function App() {
   const { load: loadSettings } = useSettingsStore();
   const {
     sidebarTab,
+    docsSection,
     serviceSettingsServiceId,
     responseLayout,
     requestPanelSize,
     setRequestPanelSize,
     setSidebarTab,
+    setDocsSection,
     responseViewMode,
     setResponseViewMode,
     setResponseLayout,
@@ -79,6 +82,10 @@ function App() {
             setSidebarTab('mockservers');
             e.preventDefault();
             return;
+          case '4':
+            setSidebarTab('docs');
+            e.preventDefault();
+            return;
           case 'l':
             setResponseLayout(responseLayout === 'right' ? 'bottom' : 'right');
             e.preventDefault();
@@ -106,6 +113,7 @@ function App() {
     responseLayout,
     responseViewMode,
     setSidebarTab,
+    setDocsSection,
     setResponseLayout,
     setResponseViewMode,
   ]);
@@ -143,8 +151,9 @@ function App() {
   const showServiceSettings = Boolean(serviceSettingsServiceId);
   const showVariables = !showServiceSettings && sidebarTab === 'variables';
   const showMockDetail = !showServiceSettings && sidebarTab === 'mockservers';
+  const showDocumentation = !showServiceSettings && sidebarTab === 'docs';
   const showScriptWorkspace = !showServiceSettings && sidebarTab === 'services' && Boolean(activeFileKey);
-  const showRequestWorkspace = !showServiceSettings && sidebarTab !== 'variables' && sidebarTab !== 'mockservers' && !showScriptWorkspace;
+  const showRequestWorkspace = !showServiceSettings && sidebarTab !== 'variables' && sidebarTab !== 'mockservers' && sidebarTab !== 'docs' && !showScriptWorkspace;
   // The request tab bar only belongs to the Services view.
   const showRequestTabs = !showServiceSettings && sidebarTab === 'services';
 
@@ -187,6 +196,9 @@ function App() {
 
           <div className={`${showMockDetail ? 'flex' : 'hidden'} flex-1 overflow-hidden flex-col`}>
             <MockEndpointDetail />
+          </div>
+          <div className={`${showDocumentation ? 'flex' : 'hidden'} flex-1 overflow-hidden flex-col`}>
+            <DocumentationPage section={docsSection} onSectionChange={setDocsSection} />
           </div>
           <DevToolsPanel />
         </>

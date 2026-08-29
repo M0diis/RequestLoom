@@ -190,6 +190,10 @@ button {
   transform: translate(-50%, -50%);
 }
 
+.docs-reference-scroll {
+  max-height: clamp(280px, 55vh, 520px);
+}
+
 .panel-divider:hover::before,
 .panel-divider:active::before {
   background: color-mix(in srgb, var(--accent) 72%, #ffffff 28%);
@@ -201,6 +205,7 @@ button {
 }
 
 /* Status code colors */
+.status-1xx { @apply text-gray-400; }
 .status-2xx { @apply text-emerald-300; }
 .status-3xx { @apply text-sky-300; }
 .status-4xx { @apply text-amber-300; }

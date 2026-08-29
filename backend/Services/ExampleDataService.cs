@@ -60,6 +60,22 @@ public class ExampleDataService
     /// </summary>
     public async Task<string> GenerateExamplesAsync()
     {
+        var existingSandbox = (await _workspaceRepo.GetAllAsync())
+            .Where(workspace => string.Equals(workspace.Name, "Sandbox", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(workspace => workspace.CreatedAt)
+            .FirstOrDefault();
+
+        if (existingSandbox != null)
+        {
+            var services = await _serviceRepo.GetByWorkspaceAsync(existingSandbox.Id);
+            var mockServers = await _mockRepo.GetByWorkspaceAsync(existingSandbox.Id);
+            if (services.Count() >= 3 && mockServers.Count() >= 3)
+            {
+                _logger.LogInformation("Sandbox example data already exists: workspace={WorkspaceId}", existingSandbox.Id);
+                return existingSandbox.Id;
+            }
+        }
+
         _logger.LogInformation("Generating example data in Sandbox workspace...");
 
         // 1. Create workspace (repository auto-seeds DEV / STG / PRD environments)
@@ -103,14 +119,14 @@ public class ExampleDataService
 
     private async Task<Service> CreateUsersExample(string workspaceId, string devEnvId, string stgEnvId, string prdEnvId)
     {
-        var mockSlug = "sandbox-users";
+        var mockSlug = await GetAvailableMockSlugAsync("sandbox-users");
         // Mock servers are accessed via the app's /mock/{slug} middleware, not a separate port
         var baseUrl = $"http://localhost:5173/mock/{mockSlug}";
 
         // Mock server
         var mockServer = await _mockRepo.CreateAsync(workspaceId,
             "Sandbox Users Mock",
-            "Mock server for the Users API example. Returns realistic user data. Accessed at /mock/sandbox-users",
+            $"Mock server for the Users API example. Returns realistic user data. Accessed at /mock/{mockSlug}",
             mockSlug, 0);
 
         // Mock endpoints — static list and create, dynamic for parameterized ones
@@ -333,13 +349,13 @@ test('Response contains updated user', () => {
 
     private async Task<Service> CreatePostsExample(string workspaceId, string devEnvId)
     {
-        var mockSlug = "sandbox-posts";
+        var mockSlug = await GetAvailableMockSlugAsync("sandbox-posts");
         var baseUrl = $"http://localhost:5173/mock/{mockSlug}";
 
         // Mock server
         var mockServer = await _mockRepo.CreateAsync(workspaceId,
             "Sandbox Posts Mock",
-            "Mock server for the Posts API example. Simulates a blog post service with pagination. Accessed at /mock/sandbox-posts",
+            $"Mock server for the Posts API example. Simulates a blog post service with pagination. Accessed at /mock/{mockSlug}",
             mockSlug, 0);
 
         var postsJson = JsonSerializer.Serialize(new[]
@@ -480,13 +496,13 @@ test('Post has comments', () => {
 
     private async Task<Service> CreateAuthExample(string workspaceId, string devEnvId)
     {
-        var mockSlug = "sandbox-auth";
+        var mockSlug = await GetAvailableMockSlugAsync("sandbox-auth");
         var baseUrl = $"http://localhost:5173/mock/{mockSlug}";
 
         // Mock server
         var mockServer = await _mockRepo.CreateAsync(workspaceId,
             "Sandbox Auth Mock",
-            "Mock server for the Auth API example. Simulates login, registration, and profile endpoints with token responses. Accessed at /mock/sandbox-auth",
+            $"Mock server for the Auth API example. Simulates login, registration, and profile endpoints with token responses. Accessed at /mock/{mockSlug}",
             mockSlug, 0);
 
         var loginResponse = JsonSerializer.Serialize(new
@@ -613,6 +629,18 @@ test('Returns access token', () => {
         });
 
         return service;
+    }
+
+    private async Task<string> GetAvailableMockSlugAsync(string preferredSlug)
+    {
+        var normalizedSlug = preferredSlug.Trim().ToLowerInvariant();
+        if (await _mockRepo.GetBySlugAsync(normalizedSlug) == null)
+        {
+            return normalizedSlug;
+        }
+
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        return $"{normalizedSlug}-{suffix}";
     }
 
     /// <summary>

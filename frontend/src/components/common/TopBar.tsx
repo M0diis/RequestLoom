@@ -23,6 +23,9 @@ export function TopBar() {
   const {
     darkMode,
     toggleDarkMode,
+    sidebarTab,
+    setSidebarTab,
+    setServiceSettingsServiceId,
     responseLayout,
     setResponseLayout,
     devToolsOpen,
@@ -321,6 +324,20 @@ export function TopBar() {
           </button>
         </div>
 
+        {/* Documentation */}
+        <button
+          onClick={() => {
+            setServiceSettingsServiceId(null);
+            setSidebarTab('docs');
+          }}
+          className={`flex h-7 items-center gap-1.5 border px-2 py-1.5 text-[11px] transition-colors ${sidebarTab === 'docs' ? 'border-[#8d4b32] bg-[#2b1710] text-[#ffbca3]' : 'border-gray-700 bg-gray-900 text-gray-300 hover:bg-gray-800'}`}
+          title="Open Documentation"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="2 1 22 18" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 4.5A2.5 2.5 0 018.5 2H19v17H8.5A2.5 2.5 0 016 16.5v-12zM6 4.5v15M10 6h5M10 10h5M10 14h3" />
+          </svg>
+        </button>
+
         {/* Dev Tools */}
         <button
           onClick={() => {
@@ -340,7 +357,7 @@ export function TopBar() {
         {/* Dark mode toggle */}
         <button
           onClick={toggleDarkMode}
-          className="p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+            className="flex h-7 w-8 items-center justify-center border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-300 hover:bg-gray-800"
           title="Toggle dark mode"
         >
           {darkMode ? (
@@ -357,7 +374,7 @@ export function TopBar() {
         {/* Settings */}
         <button
           onClick={() => setSettingsModalOpen(true)}
-          className="p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+          className="flex h-7 w-8 items-center justify-center border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-300 hover:bg-gray-800"
           title="Settings"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 
 export type DevToolTab = 'console' | 'network' | 'performance' | 'terminal';
+export type DocumentationSection = 'overview' | 'http' | 'requestloom' | 'automation';
 
 interface UiState {
   darkMode: boolean;
   sidebarWidth: number;
-  sidebarTab: 'services' | 'history' | 'variables' | 'mockservers';
+  sidebarTab: 'services' | 'history' | 'variables' | 'mockservers' | 'docs';
+  docsSection: DocumentationSection;
   serviceSettingsServiceId: string | null;
   variableServiceFilterId: string;
   variableSearchQuery: string;
@@ -20,7 +22,8 @@ interface UiState {
   activeDevToolTab: DevToolTab;
   toggleDarkMode: () => void;
   setSidebarWidth: (width: number) => void;
-  setSidebarTab: (tab: 'services' | 'history' | 'variables' | 'mockservers') => void;
+  setSidebarTab: (tab: 'services' | 'history' | 'variables' | 'mockservers' | 'docs') => void;
+  setDocsSection: (section: DocumentationSection) => void;
   setServiceSettingsServiceId: (serviceId: string | null) => void;
   setVariableServiceFilterId: (serviceId: string) => void;
   setVariableSearchQuery: (query: string) => void;
@@ -45,6 +48,7 @@ export const useUiStore = create<UiState>((set) => ({
   darkMode: getInitialDarkMode(),
   sidebarWidth: 280,
   sidebarTab: 'services',
+  docsSection: 'overview',
   serviceSettingsServiceId: null,
   variableServiceFilterId: '',
   variableSearchQuery: '',
@@ -65,6 +69,7 @@ export const useUiStore = create<UiState>((set) => ({
   }),
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
   setSidebarTab: (tab) => set({ sidebarTab: tab }),
+  setDocsSection: (section) => set({ docsSection: section }),
   setServiceSettingsServiceId: (serviceId) => set({ serviceSettingsServiceId: serviceId }),
   setVariableServiceFilterId: (serviceId) => set({ variableServiceFilterId: serviceId }),
   setVariableSearchQuery: (query) => set({ variableSearchQuery: query }),
