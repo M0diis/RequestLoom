@@ -165,7 +165,11 @@ public partial class ToolsService
         sb.Append($" '{EscapeBash(url)}'");
 
         // Headers
-        foreach (var h in payload.Headers.Where(h => h.Enabled && !string.IsNullOrWhiteSpace(h.Key)))
+        foreach (var h in payload.Headers.Where(h =>
+                     h.Enabled &&
+                     !string.IsNullOrWhiteSpace(h.Key) &&
+                     !(IsMultipartBodyType(payload.BodyType) &&
+                       h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))))
         {
             sb.Append($" \\\n  -H '{EscapeBash(h.Key)}: {EscapeBash(h.Value ?? "")}'");
         }
@@ -173,13 +177,62 @@ public partial class ToolsService
         // Body
         if (!string.IsNullOrWhiteSpace(payload.Body))
         {
-            var escapedBody = EscapeBash(payload.Body);
-            sb.Append($" \\\n  -d '{escapedBody}'");
+            if (IsMultipartBodyType(payload.BodyType))
+            {
+                AppendMultipartCurlFields(sb, payload.Body);
+            }
+            else
+            {
+                var escapedBody = EscapeBash(payload.Body);
+                sb.Append($" \\\n  -d '{escapedBody}'");
+            }
         }
 
         sb.Append('\n');
         return sb.ToString();
     }
+
+    private static void AppendMultipartCurlFields(StringBuilder sb, string body)
+    {
+        MultipartFormBody? multipart;
+        try
+        {
+            multipart = JsonSerializer.Deserialize<MultipartFormBody>(body, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            });
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        if (multipart == null) return;
+        foreach (var field in multipart.Fields.Where(field => field.Enabled && !string.IsNullOrWhiteSpace(field.Name)))
+        {
+            var specification = field.Name + "=";
+            if (string.Equals(field.Kind, "file", StringComparison.OrdinalIgnoreCase))
+            {
+                specification += "@" + field.FilePath;
+                if (!string.IsNullOrWhiteSpace(field.ContentType))
+                    specification += ";type=" + field.ContentType;
+                if (!string.IsNullOrWhiteSpace(field.FileName))
+                    specification += ";filename=" + field.FileName;
+            }
+            else
+            {
+                specification += field.Value ?? "";
+            }
+
+            sb.Append($" \\\n  -F '{EscapeBash(specification)}'");
+        }
+    }
+
+    private static bool IsMultipartBodyType(string? bodyType) =>
+        string.Equals(bodyType, "multipart", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(bodyType, "multipart/form-data", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(bodyType, "formdata", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(bodyType, "form-data", StringComparison.OrdinalIgnoreCase);
 
     private static List<CodeSnippet> GenerateSnippetsMaterialized(ExecuteRequestPayload payload, string? language = null)
     {

@@ -12,6 +12,8 @@ RequestLoom runs three ways:
 
 ## Features
 
+- Multipart uploads - multipart/form-data fields with server-backed file uploads
+- Cookie/session jar - workspace-scoped cookies persisted across requests and backend restarts
 - **Request builder** - HTTP methods, headers, query params, JSON/raw/form bodies, and response inspection
 - **Collections** - organize requests and run them sequentially with the collection runner
 - **Environments & variables** - scoped variables with `{{variable}}` interpolation, resolved at execution time
@@ -181,6 +183,7 @@ In Docker, `Database__Path` is set to `/data/RequestLoom.db` so data survives co
 
 ## Storage
 
+Uploaded multipart files are stored in the request-uploads/ directory beside the configured data file. Include this directory in deployment backups when requests reference uploaded files.
 RequestLoom supports two storage backends, switchable from the gear icon in the top bar (Settings):
 
 - **SQLite (default)** - all data lives in a single `RequestLoom.db` database file
@@ -213,6 +216,8 @@ The backend exposes a REST API under `/api`:
 
 | Area | Endpoints |
 | --- | --- |
+| Cookies | GET/DELETE /api/workspaces/{workspaceId}/cookies |
+| Request uploads | POST /api/requests/{requestId}/uploads |
 | Requests | `GET/POST/PUT/DELETE /api/requests` |
 | Execution | `POST /api/execute` |
 | Collections | `POST /api/collections/run` |

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { requestsApi } from '../../services/api';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { ApiRequestSettings, RequestProxyMode } from '../../types';
+import CookieJarPanel from './CookieJarPanel';
 
 interface RequestSettingsEditorProps {
   requestId: string;
+  workspaceId: string;
 }
 
 const SECTION_LABEL = 'mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-500';
@@ -15,7 +17,7 @@ const MAX_REDIRECTS = 50;
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-export default function RequestSettingsEditor({ requestId }: RequestSettingsEditorProps) {
+export default function RequestSettingsEditor({ requestId, workspaceId }: RequestSettingsEditorProps) {
   const globalSettings = useSettingsStore((s) => s.settings);
 
   const [followRedirects, setFollowRedirects] = useState(true);
@@ -268,6 +270,8 @@ export default function RequestSettingsEditor({ requestId }: RequestSettingsEdit
         />
         <p className="mt-1 text-[11px] text-gray-500">{globalHint}</p>
       </section>
+
+      <CookieJarPanel workspaceId={workspaceId} />
 
       <div className="flex items-center justify-end gap-2 text-[11px]">
         {saveStatus === 'saving' && <span className="text-gray-500">Saving…</span>}

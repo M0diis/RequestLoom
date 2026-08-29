@@ -54,6 +54,7 @@ public class SpecificationImportService
                 "json" => "{}",
                 "xml" => "<root></root>",
                 "form" => "",
+                "multipart" => "{\"fields\":[]}",
                 "text" => "",
                 _ => null,
             };
@@ -79,6 +80,10 @@ public class SpecificationImportService
             if (operation.BodyType == "form")
             {
                 headers.Add(new KeyValuePairRequest { Key = "Content-Type", Value = "application/x-www-form-urlencoded", Enabled = true });
+            }
+            if (operation.BodyType == "multipart")
+            {
+                headers.Add(new KeyValuePairRequest { Key = "Content-Type", Value = "multipart/form-data", Enabled = true });
             }
 
             if (headers.Count > 0)
@@ -412,7 +417,15 @@ public class SpecificationImportService
             }
         }
 
-        if (hasFormParameter) return "form";
+        if (hasFormParameter)
+        {
+            var hasFileParameter = parameterNodes
+                .OfType<JsonObject>()
+                .Any(parameter =>
+                    string.Equals(ReadString(parameter, "in"), "formData", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(ReadString(parameter, "type"), "file", StringComparison.OrdinalIgnoreCase));
+            return hasFileParameter ? "multipart" : "form";
+        }
 
         var operationConsumes = ReadStringArray(operationObj["consumes"]);
         var consumes = operationConsumes.Count > 0 ? operationConsumes : globalConsumes;
@@ -435,7 +448,8 @@ public class SpecificationImportService
 
         if (types.Any(t => t.Contains("json"))) return "json";
         if (types.Any(t => t.Contains("xml"))) return "xml";
-        if (types.Any(t => t.Contains("x-www-form-urlencoded") || t.Contains("multipart/form-data"))) return "form";
+        if (types.Any(t => t.Contains("multipart/form-data"))) return "multipart";
+        if (types.Any(t => t.Contains("x-www-form-urlencoded"))) return "form";
         if (types.Count > 0) return "text";
 
         return "none";

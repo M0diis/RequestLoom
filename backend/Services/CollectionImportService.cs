@@ -218,8 +218,8 @@ public class CollectionImportService
                     bodyType = "form";
                     break;
                 case "formdata":
-                    bodyText = BuildFormBody(bodyObj["formdata"], warnings, name);
-                    bodyType = "form";
+                    bodyText = BuildMultipartBody(bodyObj["formdata"], warnings, name);
+                    bodyType = "multipart";
                     break;
                 case "graphql":
                     bodyText = bodyObj["graphql"]?["query"]?.GetValue<string>() ?? "";
@@ -341,6 +341,50 @@ public class CollectionImportService
         }
 
         return string.Join('&', parts);
+    }
+
+    private static string BuildMultipartBody(JsonNode? node, List<string> warnings, string requestName)
+    {
+        var fields = new List<MultipartFormField>();
+        if (node is not JsonArray array)
+        {
+            return JsonSerializer.Serialize(new MultipartFormBody(), new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            });
+        }
+
+        foreach (var entryNode in array)
+        {
+            if (entryNode is not JsonObject entry) continue;
+            var key = entry["key"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(key)) continue;
+
+            if (entry["disabled"] is JsonValue disabledValue &&
+                disabledValue.TryGetValue<bool>(out var disabled) && disabled)
+            {
+                continue;
+            }
+
+            if (string.Equals(entry["type"]?.GetValue<string>(), "file", StringComparison.OrdinalIgnoreCase))
+            {
+                warnings.Add($"Skipped file form field '{key}' for '{requestName}' because its local path was not uploaded.");
+                continue;
+            }
+
+            fields.Add(new MultipartFormField
+            {
+                Name = key.Trim(),
+                Kind = "text",
+                Value = entry["value"]?.GetValue<string>() ?? "",
+                Enabled = true,
+            });
+        }
+
+        return JsonSerializer.Serialize(new MultipartFormBody { Fields = fields }, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        });
     }
 
     private static AuthRequest? MapPostmanAuth(JsonNode? authNode, List<string> warnings, string requestName)
@@ -662,7 +706,8 @@ public class CollectionImportService
         var lower = contentType.ToLowerInvariant();
         if (lower.Contains("json")) return "json";
         if (lower.Contains("xml")) return "xml";
-        if (lower.Contains("x-www-form-urlencoded") || lower.Contains("multipart/form-data")) return "form";
+        if (lower.Contains("x-www-form-urlencoded")) return "form";
+        if (lower.Contains("multipart/form-data")) return "multipart";
         return "text";
     }
 }

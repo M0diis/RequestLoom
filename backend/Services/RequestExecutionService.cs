@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
@@ -23,6 +24,8 @@ public class RequestExecutionService
     private readonly ILogger<RequestExecutionService> _logger;
     private readonly RuntimeVariableStore _runtimeVariableStore;
     private readonly OAuthTokenService _oauthTokenService;
+    private readonly CookieJarService _cookieJar;
+    private readonly RequestUploadService _uploadService;
 
     public RequestExecutionService(
         IHttpClientFactory httpClientFactory,
@@ -33,7 +36,9 @@ public class RequestExecutionService
         SettingsService settings,
         ILogger<RequestExecutionService> logger,
         RuntimeVariableStore runtimeVariableStore,
-        OAuthTokenService oauthTokenService)
+        OAuthTokenService oauthTokenService,
+        CookieJarService cookieJar,
+        RequestUploadService uploadService)
     {
         _httpClientFactory = httpClientFactory;
         _variableService = variableService;
@@ -44,6 +49,8 @@ public class RequestExecutionService
         _logger = logger;
         _runtimeVariableStore = runtimeVariableStore;
         _oauthTokenService = oauthTokenService;
+        _cookieJar = cookieJar;
+        _uploadService = uploadService;
     }
 
     public async Task<ExecuteResponse> ExecuteAsync(ExecuteRequestPayload payload, CancellationToken cancellationToken)
@@ -264,22 +271,66 @@ public class RequestExecutionService
                 }
             }
 
+            if (request.RequestUri != null && !request.Headers.Contains("Cookie"))
+            {
+                var cookieHeader = _cookieJar.GetCookieHeader(workspaceId, request.RequestUri);
+                if (!string.IsNullOrWhiteSpace(cookieHeader))
+                {
+                    request.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+                    resolvedHeaders.Add(new KeyValuePairRequest
+                    {
+                        Key = "Cookie",
+                        Value = cookieHeader,
+                        Enabled = true,
+                    });
+                }
+            }
+
             // Apply body
             if (resolvedBody != null && httpMethod != HttpMethod.Get && httpMethod != HttpMethod.Head)
             {
-                var contentType = requestState.BodyType switch
+                if (IsMultipartBodyType(requestState.BodyType))
                 {
-                    "json" => "application/json",
-                    "xml" => "text/xml",
-                    "text" => "text/plain",
-                    "form" => "application/x-www-form-urlencoded",
-                    _ => "text/plain"
-                };
-                request.Content = new StringContent(resolvedBody, Encoding.UTF8, contentType);
+                    request.Content = await BuildMultipartContentAsync(
+                        requestState.Body ?? "",
+                        resolutionSession,
+                        cancellationToken);
+                    request.Headers.Remove("Content-Type");
+                    resolvedHeaders.RemoveAll(header =>
+                        string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase));
+                    var multipartContentType = request.Content.Headers.ContentType?.ToString();
+                    if (!string.IsNullOrWhiteSpace(multipartContentType))
+                    {
+                        resolvedHeaders.Add(new KeyValuePairRequest
+                        {
+                            Key = "Content-Type",
+                            Value = multipartContentType,
+                            Enabled = true,
+                        });
+                    }
+                }
+                else
+                {
+                    var contentType = requestState.BodyType switch
+                    {
+                        "json" => "application/json",
+                        "xml" => "text/xml",
+                        "text" => "text/plain",
+                        "form" => "application/x-www-form-urlencoded",
+                        _ => "text/plain"
+                    };
+                    request.Content = new StringContent(resolvedBody, Encoding.UTF8, contentType);
+                }
             }
 
             // Execute
             var response = await client.SendAsync(request, cancellationToken);
+            if (request.RequestUri != null &&
+                response.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders))
+            {
+                var responseUri = response.RequestMessage?.RequestUri ?? request.RequestUri;
+                _cookieJar.StoreResponseCookies(workspaceId, responseUri, setCookieHeaders);
+            }
             stopwatch.Stop();
 
             var maxBodyBytes = _settings.MaxResponseBodySizeMb * 1024 * 1024;
@@ -656,6 +707,75 @@ public class RequestExecutionService
             Enabled = entry.Enabled
         }).ToList();
     }
+
+    private async Task<HttpContent> BuildMultipartContentAsync(
+        string body,
+        TemplateResolutionSession resolutionSession,
+        CancellationToken cancellationToken)
+    {
+        MultipartFormBody? multipart;
+        try
+        {
+            multipart = JsonSerializer.Deserialize<MultipartFormBody>(body, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            });
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Multipart body is not valid JSON: {ex.Message}", ex);
+        }
+
+        if (multipart == null)
+            throw new InvalidOperationException("Multipart body is invalid.");
+
+        var content = new MultipartFormDataContent();
+        try
+        {
+            foreach (var field in multipart.Fields.Where(field => field.Enabled))
+            {
+                var name = resolutionSession.Resolve(field.Name).Trim();
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                if (string.Equals(field.Kind, "file", StringComparison.OrdinalIgnoreCase))
+                {
+                    var path = _uploadService.ResolvePath(resolutionSession.Resolve(field.FilePath));
+                    if (!File.Exists(path))
+                        throw new InvalidOperationException($"Multipart file was not found: {field.FileName}");
+
+                    var fileContent = new StreamContent(File.OpenRead(path));
+                    if (MediaTypeHeaderValue.TryParse(field.ContentType, out var mediaType))
+                    {
+                        fileContent.Headers.ContentType = mediaType;
+                    }
+
+                    var fileName = resolutionSession.Resolve(field.FileName).Trim();
+                    if (string.IsNullOrWhiteSpace(fileName)) fileName = Path.GetFileName(path);
+                    content.Add(fileContent, name, fileName);
+                }
+                else
+                {
+                    var valueContent = new StringContent(resolutionSession.Resolve(field.Value), Encoding.UTF8);
+                    content.Add(valueContent, name);
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.CompletedTask;
+            return content;
+        }
+        catch
+        {
+            content.Dispose();
+            throw;
+        }
+    }
+
+    private static bool IsMultipartBodyType(string? bodyType) =>
+        string.Equals(bodyType, "multipart", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(bodyType, "multipart/form-data", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(bodyType, "formdata", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(bodyType, "form-data", StringComparison.OrdinalIgnoreCase);
 
     private static void RefreshAvailableVariables(
         Dictionary<string, string> availableVariables,

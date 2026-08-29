@@ -9,6 +9,7 @@ import type {
   MockServer, CreateMockServerRequest, UpdateMockServerRequest,
   MockServerEndpoint, CreateMockEndpointRequest, UpdateMockEndpointRequest,
   AppSettings, SettingsUpdate, ApiRequestSettings, StoredRequestFile, ServiceFileResponse, JavaScriptRunResponse,
+  CookieJarEntry, RequestFileUploadResponse,
   OAuth2Configuration, OAuthDiscoveryResponse, OAuthTokenExchangeResponse, OAuthTokenStatus,
 } from '../types';
 
@@ -73,6 +74,11 @@ export const servicesApi = {
 
 // Requests
 export const requestsApi = {
+  upload: (id: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return api.post<RequestFileUploadResponse>('/requests/' + id + '/uploads', form).then(r => r.data);
+  },
   getById: (id: string) => api.get<ApiRequest>(`/requests/${id}`).then(r => r.data),
   create: (serviceId: string, data: { name: string; method: string; url: string }) =>
     api.post<ApiRequest>(`/requests/service/${serviceId}`, data).then(r => r.data),
@@ -130,6 +136,13 @@ export const oauthApi = {
     api.get<OAuthTokenStatus>(`/oauth/status`, { params: { ownerKey } }).then(r => r.data),
   disconnect: (ownerKey: string) =>
     api.delete(`/oauth/token`, { params: { ownerKey } }),
+};
+
+export const cookiesApi = {
+  list: (workspaceId: string) =>
+    api.get<CookieJarEntry[]>('/workspaces/' + workspaceId + '/cookies').then(r => r.data),
+  clear: (workspaceId: string) =>
+    api.delete('/workspaces/' + workspaceId + '/cookies'),
 };
 
 // Service Variables

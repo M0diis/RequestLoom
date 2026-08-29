@@ -1,9 +1,12 @@
 import type { BodyType } from '../../types';
 import { CodeEditor } from '../common/CodeEditor';
+import { MultipartFormEditor } from './MultipartFormEditor';
+import { createEmptyMultipartBody } from './multipartUtils';
 
 interface Props {
   body: string | null;
   bodyType: BodyType;
+  requestId: string;
   onChange: (body: string | null, bodyType: BodyType) => void;
   dynamicSuggestions?: string[];
 }
@@ -14,6 +17,7 @@ const BODY_TYPES: { value: BodyType; label: string }[] = [
   { value: 'xml', label: 'XML' },
   { value: 'text', label: 'Text' },
   { value: 'form', label: 'Form URL Encoded' },
+  { value: 'multipart', label: 'Multipart' },
 ];
 
 const LANGUAGE_MAP: Record<string, string> = {
@@ -23,7 +27,19 @@ const LANGUAGE_MAP: Record<string, string> = {
   form: 'plaintext',
 };
 
-export function BodyEditor({ body, bodyType, onChange, dynamicSuggestions = [] }: Props) {
+export function BodyEditor({ body, bodyType, requestId, onChange, dynamicSuggestions = [] }: Props) {
+  const changeBodyType = (nextType: BodyType) => {
+    if (nextType === 'none') {
+      onChange(null, nextType);
+      return;
+    }
+
+    const nextBody = nextType === 'multipart' && bodyType !== 'multipart'
+      ? createEmptyMultipartBody()
+      : body ?? '';
+    onChange(nextBody, nextType);
+  };
+
   if (bodyType === 'none') {
     return (
       <div>
@@ -31,7 +47,7 @@ export function BodyEditor({ body, bodyType, onChange, dynamicSuggestions = [] }
           {BODY_TYPES.map((bt) => (
             <button
               key={bt.value}
-              onClick={() => onChange(bt.value === 'none' ? null : body ?? '', bt.value)}
+              onClick={() => changeBodyType(bt.value)}
               className={`border px-3 py-1 text-xs font-medium ${
                 bodyType === bt.value
                   ? 'border-gray-600 bg-gray-700 text-gray-100'
@@ -50,10 +66,10 @@ export function BodyEditor({ body, bodyType, onChange, dynamicSuggestions = [] }
   return (
     <div className="flex flex-col h-full">
       <div className="flex gap-2 mb-3">
-        {BODY_TYPES.map((bt) => (
-          <button
-            key={bt.value}
-            onClick={() => onChange(bt.value === 'none' ? null : body ?? '', bt.value)}
+          {BODY_TYPES.map((bt) => (
+            <button
+              key={bt.value}
+              onClick={() => changeBodyType(bt.value)}
             className={`border px-3 py-1 text-xs font-medium ${
               bodyType === bt.value
                 ? 'border-gray-600 bg-gray-700 text-gray-100'
@@ -65,14 +81,22 @@ export function BodyEditor({ body, bodyType, onChange, dynamicSuggestions = [] }
         ))}
       </div>
 
-      <div className="flex-1 min-h-[200px] overflow-hidden border border-gray-700 bg-gray-900">
-        <CodeEditor
-          language={LANGUAGE_MAP[bodyType] || 'plaintext'}
-          value={body ?? ''}
+      {bodyType === 'multipart' ? (
+        <MultipartFormEditor
+          body={body}
+          requestId={requestId}
           onChange={(value) => onChange(value, bodyType)}
-          dynamicSuggestions={dynamicSuggestions}
         />
-      </div>
+      ) : (
+        <div className="flex-1 min-h-[200px] overflow-hidden border border-gray-700 bg-gray-900">
+          <CodeEditor
+            language={LANGUAGE_MAP[bodyType] || 'plaintext'}
+            value={body ?? ''}
+            onChange={(value) => onChange(value, bodyType)}
+            dynamicSuggestions={dynamicSuggestions}
+          />
+        </div>
+      )}
     </div>
   );
 }

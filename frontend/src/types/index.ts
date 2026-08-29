@@ -126,6 +126,23 @@ export interface ExecuteRequestPayload {
   mtls?: MtlsConfig | null;
 }
 
+export interface RequestFileUploadResponse {
+  filePath: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+}
+
+export interface MultipartFormField {
+  name: string;
+  kind: 'text' | 'file';
+  value: string;
+  filePath: string;
+  fileName: string;
+  contentType: string;
+  enabled: boolean;
+}
+
 export interface KeyValuePairRequest {
   key: string;
   value: string;
@@ -255,8 +272,17 @@ export interface HistoryEntry {
 }
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' | 'HEAD';
-export type BodyType = 'none' | 'json' | 'xml' | 'text' | 'form';
+export type BodyType = 'none' | 'json' | 'xml' | 'text' | 'form' | 'multipart';
 export type AuthType = 'none' | 'basic' | 'bearer' | 'apikey' | 'oauth2' | 'mtls';
+
+export interface CookieJarEntry {
+  name: string;
+  domain: string;
+  path: string;
+  expiresAt?: string;
+  secure: boolean;
+  httpOnly: boolean;
+}
 
 // Mock Server types
 

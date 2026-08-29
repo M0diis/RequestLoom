@@ -13,6 +13,7 @@ import { AuthEditor } from './AuthEditor';
 import { RequestScriptEditor } from './RequestScriptEditor';
 import { RequestHistoryTab } from './RequestHistoryTab';
 import RequestSettingsEditor from './RequestSettingsEditor';
+import CookieJarPanel from './CookieJarPanel';
 import { RequestFileViewer } from './RequestFileViewer';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import { DynamicValueReferenceModal } from '../common/DynamicValueReferenceModal';
@@ -533,6 +534,7 @@ export function RequestBuilder() {
     { id: 'tests' as const, label: 'Tests' },
     { id: 'runs' as const, label: 'History', count: historyCount },
     { id: 'settings' as const, label: 'Settings' },
+    { id: 'cookies' as const, label: 'Cookies' },
     { id: 'file' as const, label: 'File' },
   ];
 
@@ -685,6 +687,7 @@ export function RequestBuilder() {
           <BodyEditor
             body={activeRequest.body}
             bodyType={activeRequest.bodyType}
+            requestId={activeRequest.id}
             onChange={handleBodyChange}
             dynamicSuggestions={dynamicSuggestions}
           />
@@ -705,7 +708,10 @@ export function RequestBuilder() {
           <RequestHistoryTab workspaceId={activeWorkspaceId} requestId={activeRequest.id} />
         )}
         {activeRequestTab === 'settings' && (
-          <RequestSettingsEditor requestId={activeRequest.id} />
+          <RequestSettingsEditor requestId={activeRequest.id} workspaceId={activeWorkspaceId} />
+        )}
+        {activeRequestTab === 'cookies' && (
+          <CookieJarPanel workspaceId={activeWorkspaceId} />
         )}
         {activeRequestTab === 'file' && (
           <RequestFileViewer requestId={activeRequest.id} />

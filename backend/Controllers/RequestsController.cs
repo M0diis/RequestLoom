@@ -13,12 +13,18 @@ public class RequestsController : ControllerBase
     private readonly IRequestRepository _repo;
     private readonly JsonDataStore _jsonStore;
     private readonly SettingsService _settings;
+    private readonly RequestUploadService _uploadService;
 
-    public RequestsController(IRequestRepository repo, JsonDataStore jsonStore, SettingsService settings)
+    public RequestsController(
+        IRequestRepository repo,
+        JsonDataStore jsonStore,
+        SettingsService settings,
+        RequestUploadService uploadService)
     {
         _repo = repo;
         _jsonStore = jsonStore;
         _settings = settings;
+        _uploadService = uploadService;
     }
 
     [HttpGet("{id}")]
@@ -127,5 +133,27 @@ public class RequestsController : ControllerBase
             Content = System.Text.Json.JsonSerializer.Serialize(request, new System.Text.Json.JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }),
             IsJsonStorage = false,
         });
+    }
+
+    [HttpPost("{id}/uploads")]
+    [RequestSizeLimit(100_000_000)]
+    public async Task<IActionResult> Upload(
+        string id,
+        [FromForm] IFormFile? file,
+        CancellationToken cancellationToken)
+    {
+        var request = await _repo.GetByIdAsync(id);
+        if (request == null) return NotFound();
+        if (file == null || file.Length == 0) return BadRequest("A non-empty file is required.");
+
+        await using var content = file.OpenReadStream();
+        var uploaded = await _uploadService.SaveAsync(
+            id,
+            content,
+            file.FileName,
+            file.ContentType,
+            file.Length,
+            cancellationToken);
+        return Ok(uploaded);
     }
 }
