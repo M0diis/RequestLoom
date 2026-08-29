@@ -82,6 +82,7 @@ interface RequestState {
   createFolder: (workspaceId: string, serviceId: string, name: string) => Promise<RequestFolder>;
   updateFolder: (workspaceId: string, serviceId: string, folderId: string, name: string) => Promise<void>;
   deleteFolder: (workspaceId: string, serviceId: string, folderId: string) => Promise<void>;
+  reorderFolders: (workspaceId: string, serviceId: string, folderIds: string[]) => Promise<void>;
 
   selectRequest: (id: string) => Promise<void>;
   closeRequest: (id: string) => void;
@@ -349,6 +350,34 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         : service),
       activeRequest: s.activeRequest?.folderId === folderId ? { ...s.activeRequest, folderId: null } : s.activeRequest,
     }));
+  },
+
+  reorderFolders: async (workspaceId, serviceId, folderIds) => {
+    const service = get().services.find((item) => item.id === serviceId);
+    if (!service) return;
+
+    const knownFolderIds = new Set(service.folders.map((folder) => folder.id));
+    const orderedIds = [
+      ...folderIds.filter((folderId) => knownFolderIds.has(folderId)),
+      ...service.folders
+        .map((folder) => folder.id)
+        .filter((folderId) => !folderIds.includes(folderId)),
+    ];
+    const nextFolders = orderedIds.map((folderId, index) => {
+      const folder = service.folders.find((item) => item.id === folderId);
+      return folder ? { ...folder, sortOrder: index } : null;
+    }).filter((folder): folder is RequestFolder => folder !== null);
+
+    set((s) => ({
+      services: s.services.map((item) => item.id === serviceId ? { ...item, folders: nextFolders } : item),
+    }));
+
+    try {
+      await servicesApi.reorderFolders(workspaceId, serviceId, orderedIds);
+    } catch (error) {
+      await get().loadServices(workspaceId);
+      throw error;
+    }
   },
 
   createRequest: async (serviceId, name, method, folderId = null) => {

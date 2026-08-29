@@ -139,6 +139,7 @@ export function Sidebar() {
     createFolder,
     updateFolder,
     deleteFolder,
+    reorderFolders,
     moveRequestToFolder,
     reorderRequest,
   } = useRequestStore();
@@ -191,8 +192,10 @@ export function Sidebar() {
   const [scriptToDelete, setScriptToDelete] = useState<ScriptFileEntry | null>(null);
   const [deletingScript, setDeletingScript] = useState(false);
   const [draggingRequestId, setDraggingRequestId] = useState<string | null>(null);
+  const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null);
   const [dragOverRequestId, setDragOverRequestId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [dragOverFolderOrderId, setDragOverFolderOrderId] = useState<string | null>(null);
   const [dragOverServiceId, setDragOverServiceId] = useState<string | null>(null);
   const addRequestSubmitting = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -387,13 +390,18 @@ export function Sidebar() {
 
   const clearDragState = () => {
     setDraggingRequestId(null);
+    setDraggingFolderId(null);
     setDragOverRequestId(null);
     setDragOverFolderId(null);
+    setDragOverFolderOrderId(null);
     setDragOverServiceId(null);
   };
 
   const getDraggedRequestId = (event: React.DragEvent) =>
     event.dataTransfer.getData('text/plain') || draggingRequestId;
+
+  const getDraggedFolderId = (event: React.DragEvent) =>
+    event.dataTransfer.getData('application/x-requestloom-folder') || draggingFolderId;
 
   const handleDropOnRequest = (event: React.DragEvent, target: ApiRequest) => {
     event.preventDefault();
@@ -418,6 +426,36 @@ export function Sidebar() {
 
     void reorderRequest(requestId, folderId, null)
       .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
+      .finally(clearDragState);
+  };
+
+  const handleDropOnFolderOrder = (event: React.DragEvent, serviceId: string, targetFolderId: string) => {
+    event.preventDefault();
+    const sourceFolderId = getDraggedFolderId(event);
+    if (!sourceFolderId || sourceFolderId === targetFolderId) {
+      clearDragState();
+      return;
+    }
+
+    const service = services.find((item) => item.id === serviceId);
+    if (!service || !service.folders.some((folder) => folder.id === sourceFolderId)) {
+      clearDragState();
+      return;
+    }
+
+    const nextFolderIds = service.folders.map((folder) => folder.id).filter((id) => id !== sourceFolderId);
+    const targetIndex = nextFolderIds.indexOf(targetFolderId);
+    if (targetIndex < 0) {
+      clearDragState();
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const insertIndex = targetIndex + (event.clientY >= bounds.top + bounds.height / 2 ? 1 : 0);
+    nextFolderIds.splice(insertIndex, 0, sourceFolderId);
+
+    void reorderFolders(activeWorkspaceId, serviceId, nextFolderIds)
+      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to reorder folders'))
       .finally(clearDragState);
   };
 
@@ -929,17 +967,43 @@ export function Sidebar() {
                 return (
                   <div key={folder.id}>
                     <div
-                      className={`group flex cursor-pointer items-center gap-1.5 px-6 py-1.5 text-xs text-gray-300 hover:bg-gray-900/60 ${
-                        dragOverFolderId === folder.id ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70' : ''
+                      draggable
+                      className={`group flex cursor-pointer items-center gap-1.5 px-6 py-1.5 text-xs text-gray-300 transition-colors hover:bg-gray-900/60 ${
+                        dragOverFolderOrderId === folder.id
+                          ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
+                          : dragOverFolderId === folder.id
+                            ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
+                            : draggingFolderId === folder.id
+                              ? 'opacity-50'
+                              : ''
                       }`}
-                      onClick={() => setCollapsedFolders((previous) => {
-                        const next = new Set(previous);
-                        if (next.has(folder.id)) next.delete(folder.id);
-                        else next.add(folder.id);
-                        return next;
-                      })}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('application/x-requestloom-folder', folder.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                        setDraggingFolderId(folder.id);
+                        setDraggingRequestId(null);
+                      }}
+                      onDragEnd={clearDragState}
+                      onClick={() => {
+                        if (draggingFolderId) return;
+                        setCollapsedFolders((previous) => {
+                          const next = new Set(previous);
+                          if (next.has(folder.id)) next.delete(folder.id);
+                          else next.add(folder.id);
+                          return next;
+                        });
+                      }}
                       onContextMenu={(event) => handleContextMenu(event, 'folder', folder.id)}
                       onDragOver={(event) => {
+                        if (draggingFolderId) {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                          setDragOverFolderOrderId(folder.id);
+                          setDragOverFolderId(null);
+                          setDragOverServiceId(null);
+                          setDragOverRequestId(null);
+                          return;
+                        }
                         if (!draggingRequestId) return;
                         event.preventDefault();
                         event.dataTransfer.dropEffect = 'move';
@@ -950,10 +1014,21 @@ export function Sidebar() {
                       onDragLeave={(event) => {
                         if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
                           setDragOverFolderId((current) => current === folder.id ? null : current);
+                          setDragOverFolderOrderId((current) => current === folder.id ? null : current);
                         }
                       }}
-                      onDrop={(event) => handleDropOnFolder(event, folder.id)}
+                      onDrop={(event) => {
+                        if (getDraggedFolderId(event)) handleDropOnFolderOrder(event, service.id, folder.id);
+                        else handleDropOnFolder(event, folder.id);
+                      }}
                     >
+                      <span
+                        aria-hidden="true"
+                        className="w-3 cursor-grab select-none text-[13px] leading-none text-gray-600 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-hover:text-gray-400 active:cursor-grabbing"
+                        title="Drag to reorder folders"
+                      >
+                        ⠿
+                      </span>
                       <svg className={`h-3 w-3 flex-shrink-0 text-gray-500 transition-transform ${folderCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                       </svg>
