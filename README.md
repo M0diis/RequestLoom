@@ -23,7 +23,7 @@ RequestLoom runs three ways:
 - **Scripting** - pre-request and test scripts written in JavaScript (Jint engine)
 - **Import / export** - OpenAPI/Swagger, Postman collections, and full workspace export/import
 - **Code generation** - generate client snippets in Go, C#, Java, PHP, and Ruby
-- **History** - execution history for requests (with global clear, or disable recording entirely)
+- **History & response diffing** - execution history for requests, JSON-aware response comparison, and global clear (or disable recording entirely)
 - **Settings** - storage backend, request timeout, TLS verification, response size limit, history toggle, response format
 - **Services** - group related requests and share service-level variables
 
