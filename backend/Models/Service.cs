@@ -11,7 +11,27 @@ public class Service
     public string CreatedAt { get; set; } = "";
     public List<KeyValuePair> Headers { get; set; } = [];
     public ServiceAuth? Auth { get; set; }
+    public List<RequestFolder> Folders { get; set; } = [];
     public List<ApiRequest> Requests { get; set; } = [];
+}
+
+public class RequestFolder
+{
+    public string Id { get; set; } = "";
+    public string ServiceId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public int SortOrder { get; set; }
+    public string CreatedAt { get; set; } = "";
+}
+
+public class CreateRequestFolderRequest
+{
+    public string Name { get; set; } = "";
+}
+
+public class UpdateRequestFolderRequest
+{
+    public string Name { get; set; } = "";
 }
 
 public class ServiceAuth

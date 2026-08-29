@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { JsonStorageStrategy, StorageMode, SettingsUpdate } from '../../types';
+import { ConfirmModal } from './ConfirmModal';
 
 interface Props {
   onClose: () => void;
@@ -64,7 +65,7 @@ const SHORTCUTS: { keys: string; action: string }[] = [
 ];
 
 export function SettingsModal({ onClose }: Props) {
-  const { settings, loading, load, update, generateExamples, clearAllData } = useSettingsStore();
+  const { settings, loading, load, update, migrateStorage, generateExamples, clearAllData } = useSettingsStore();
   const [activeTab, setActiveTab] = useState<TabId>('general');
   const [selectedMode, setSelectedMode] = useState<StorageMode>('sqlite');
   const [selectedJsonStrategy, setSelectedJsonStrategy] = useState<JsonStorageStrategy>('single');
@@ -84,6 +85,7 @@ export function SettingsModal({ onClose }: Props) {
   const [dataBusy, setDataBusy] = useState(false);
   const [dataMessage, setDataMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [pendingStorageMigration, setPendingStorageMigration] = useState<SettingsUpdate | null>(null);
   const [examplesGenerated, setExamplesGenerated] = useState(false);
 
   useEffect(() => {
@@ -148,6 +150,12 @@ export function SettingsModal({ onClose }: Props) {
       proxyPassword,
     };
 
+    if (modeChanged) {
+      setError(null);
+      setPendingStorageMigration(patch);
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
@@ -155,6 +163,22 @@ export function SettingsModal({ onClose }: Props) {
       setSaved({ restartRequired: result.restartRequired });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleMigrateStorage = async () => {
+    if (!pendingStorageMigration) return;
+
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await migrateStorage(pendingStorageMigration);
+      setPendingStorageMigration(null);
+      setSaved({ restartRequired: result.restartRequired });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to migrate storage');
     } finally {
       setBusy(false);
     }
@@ -282,7 +306,7 @@ export function SettingsModal({ onClose }: Props) {
 
                   {modeChanged && !saved && (
                     <p className="mt-3 rounded border border-amber-900/60 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
-                      Storage changes take effect after restarting the app.
+                      Saving a storage change will migrate all data and require an app reload.
                     </p>
                   )}
                 </section>
@@ -637,7 +661,7 @@ export function SettingsModal({ onClose }: Props) {
                 <div className="flex items-center gap-3 rounded border border-emerald-900/60 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
                   <span className="min-w-0 flex-1">
                     Settings saved.
-                    {saved.restartRequired ? ' Reload the app to apply the storage mode change.' : ''}
+                    {saved.restartRequired ? ' Reload the app to apply the storage change.' : ''}
                   </span>
                   {saved.restartRequired ? (
                     <button type="button" onClick={() => void handleReloadApp()} className={BTN_PRIMARY} disabled={busy}>
@@ -671,6 +695,17 @@ export function SettingsModal({ onClose }: Props) {
           </button>
         </div>
       </div>
+
+      {pendingStorageMigration && (
+        <ConfirmModal
+          title="Migrate storage?"
+          message="All workspaces, collections, requests, folders, variables, environments, history, and mock servers will be copied to the selected storage. The existing target will be backed up before it is replaced, and the app will need to reload."
+          confirmLabel="Migrate & Save"
+          busy={busy}
+          onConfirm={() => { void handleMigrateStorage(); }}
+          onClose={() => { if (!busy) setPendingStorageMigration(null); }}
+        />
+      )}
     </div>
   );
 }

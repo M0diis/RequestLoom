@@ -38,7 +38,14 @@ public class ServiceExport
     public List<KeyValuePairRequest> Headers { get; set; } = [];
     public AuthRequest? Auth { get; set; }
     public List<ServiceVariableExport> Variables { get; set; } = [];
+    public List<RequestFolderExport> Folders { get; set; } = [];
     public List<RequestExport> Requests { get; set; } = [];
+}
+
+public class RequestFolderExport
+{
+    public string Name { get; set; } = "";
+    public int SortOrder { get; set; }
 }
 
 public class ServiceVariableExport
@@ -61,6 +68,7 @@ public class RequestExport
     public string PostRequestScript { get; set; } = "";
     public int SortOrder { get; set; }
     public bool IsFavorite { get; set; }
+    public string? FolderName { get; set; }
     public List<KeyValuePairRequest> Headers { get; set; } = [];
     public List<KeyValuePairRequest> Params { get; set; } = [];
     public List<RequestVariableRequest> Variables { get; set; } = [];

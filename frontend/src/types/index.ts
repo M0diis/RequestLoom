@@ -34,7 +34,16 @@ export interface Service {
   createdAt: string;
   headers: KeyValueEntry[];
   auth: ServiceAuth | null;
+  folders: RequestFolder[];
   requests: ApiRequest[];
+}
+
+export interface RequestFolder {
+  id: string;
+  serviceId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
 }
 
 export interface ServiceAuth {
@@ -57,6 +66,7 @@ export interface ServiceVariable {
 export interface ApiRequest {
   id: string;
   serviceId: string;
+  folderId: string | null;
   name: string;
   method: HttpMethod;
   url: string;
@@ -382,6 +392,7 @@ export interface ServiceExport {
   sortOrder: number;
   headers: KeyValuePairRequest[];
   auth: AuthRequest | null;
+  folders: RequestFolderExport[];
   variables: ServiceVariableExport[];
   requests: RequestExport[];
 }
@@ -404,6 +415,7 @@ export interface RequestExport {
   postRequestScript: string;
   sortOrder: number;
   isFavorite: boolean;
+  folderName?: string | null;
   headers: KeyValuePairRequest[];
   params: KeyValuePairRequest[];
   variables: RequestVariableRequest[];
@@ -428,6 +440,11 @@ export interface CodeSnippet {
   code: string;
 }
 
+export interface RequestFolderExport {
+  name: string;
+  sortOrder: number;
+}
+
 export interface DynamicValueDefinition {
   name: string;
   signature: string;
@@ -441,6 +458,8 @@ export interface DynamicValueDefinition {
 export interface CollectionRunResult {
   serviceId: string;
   serviceName: string;
+  folderId?: string | null;
+  folderName?: string | null;
   totalRequests: number;
   passedRequests: number;
   failedRequests: number;

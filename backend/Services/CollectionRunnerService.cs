@@ -35,17 +35,42 @@ public class CollectionRunnerService
     public async Task<CollectionRunResult> RunServiceAsync(
         string serviceId, string? environmentId, bool stopOnFailure, CancellationToken cancellationToken)
     {
-        var sw = Stopwatch.StartNew();
         var service = await _serviceRepo.GetByIdAsync(serviceId)
             ?? throw new InvalidOperationException("Service not found");
-
-        // Get fully‑populated requests (headers, params, variables, auth)
         var requests = await _requestRepo.GetByServiceIdAsync(serviceId);
+        return await RunRequestsAsync(service, requests, null, environmentId, stopOnFailure, cancellationToken);
+    }
 
+    /// <summary>Run only the requests assigned to a folder.</summary>
+    public async Task<CollectionRunResult> RunFolderAsync(
+        string serviceId, string folderId, string? environmentId, bool stopOnFailure, CancellationToken cancellationToken)
+    {
+        var service = await _serviceRepo.GetByIdAsync(serviceId)
+            ?? throw new InvalidOperationException("Service not found");
+        var folder = service.Folders.FirstOrDefault(item => item.Id == folderId)
+            ?? throw new InvalidOperationException("Folder not found");
+        var requests = (await _requestRepo.GetByServiceIdAsync(serviceId))
+            .Where(request => string.Equals(request.FolderId, folderId, StringComparison.Ordinal))
+            .ToList();
+
+        return await RunRequestsAsync(service, requests, folder, environmentId, stopOnFailure, cancellationToken);
+    }
+
+    private async Task<CollectionRunResult> RunRequestsAsync(
+        Service service,
+        IReadOnlyList<ApiRequest> requests,
+        RequestFolder? folder,
+        string? environmentId,
+        bool stopOnFailure,
+        CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
         var result = new CollectionRunResult
         {
-            ServiceId = serviceId,
+            ServiceId = service.Id,
             ServiceName = service.Name,
+            FolderId = folder?.Id,
+            FolderName = folder?.Name,
             TotalRequests = requests.Count,
             Results = []
         };
@@ -68,10 +93,7 @@ public class CollectionRunnerService
 
             try
             {
-                // Build execute payload from the request, injecting chained variables
                 var payload = BuildPayload(req, service.WorkspaceId, chainedVariables);
-
-                // Execute
                 var response = await _executionService.ExecuteAsync(payload, cancellationToken);
 
                 requestResult.StatusCode = response.StatusCode;
@@ -83,14 +105,12 @@ public class CollectionRunnerService
                     requestResult.Passed = false;
                 }
 
-                // Collect any runtime variables set during execution for chaining
                 if (response.ScriptVariables != null)
                 {
                     foreach (var (key, variable) in response.ScriptVariables)
                         chainedVariables[key] = variable.Value;
                 }
 
-                // Run test script if present
                 if (!string.IsNullOrWhiteSpace(req.TestScript) && string.IsNullOrWhiteSpace(response.Error))
                 {
                     var tests = RunTests(req.TestScript, response, chainedVariables);

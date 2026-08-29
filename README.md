@@ -15,7 +15,7 @@ RequestLoom runs three ways:
 - Multipart uploads - multipart/form-data fields with server-backed file uploads
 - Cookie/session jar - workspace-scoped cookies persisted across requests and backend restarts
 - **Request builder** - HTTP methods, headers, query params, JSON/raw/form bodies, and response inspection
-- **Collections** - organize requests and run them sequentially with the collection runner
+- **Collections & request folders** - organize requests into service-level folders, drag requests between folders or the service root, and run a whole collection or one folder sequentially
 - **Environments & variables** - scoped variables with `{{variable}}` interpolation, resolved at execution time
 - **OAuth2 / OIDC** - PKCE authorization-code login, OIDC discovery, in-memory token caching, and automatic refresh
 - **Workspaces** - separate workspaces with their own variables and data
@@ -186,10 +186,10 @@ In Docker, `Database__Path` is set to `/data/RequestLoom.db` so data survives co
 Uploaded multipart files are stored in the request-uploads/ directory beside the configured data file. Include this directory in deployment backups when requests reference uploaded files.
 RequestLoom supports two storage backends, switchable from the gear icon in the top bar (Settings):
 
-- **SQLite (default)** - all data lives in a single `RequestLoom.db` database file
-- **JSON** - all data lives in a single human-readable `requestloom-data.json` file
+- **SQLite (default)** - all data lives in a single `RequestLoom.db` database file; request folders are virtual database records
+- **JSON** - all data lives in a single human-readable `requestloom-data.json` file, or one file per collection; request-folder directories are created on disk for organization
 
-Mode precedence: environment variable (`STORAGE_MODE`) > `requestloom.settings.json` (written by the Settings UI) > `appsettings.json` (`Storage:Mode`) > `sqlite`. Changing the mode takes effect after the app is restarted; the settings file is created next to the database/JSON file on first change.
+Mode precedence: environment variable (`STORAGE_MODE`) > `requestloom.settings.json` (written by the Settings UI) > `appsettings.json` (`Storage:Mode`) > `sqlite`. Changing the mode or JSON layout from Settings prompts for a full migration, creates a backup of the target, and takes effect after the app is restarted.
 
 The SQLite schema is managed by Entity Framework Core migrations (`backend/Migrations/`) and applied automatically at startup. Adding a table or column later is a standard EF migration: create the entity, run `dotnet ef migrations add <Name> --project backend --output-dir Migrations`, and it will be applied on the next start.
 
@@ -219,6 +219,7 @@ The backend exposes a REST API under `/api`:
 | Cookies | GET/DELETE /api/workspaces/{workspaceId}/cookies |
 | Request uploads | POST /api/requests/{requestId}/uploads |
 | Requests | `GET/POST/PUT/DELETE /api/requests` |
+| Request folders | `POST/PUT/DELETE /api/workspaces/{workspaceId}/services/{serviceId}/folders`, `PUT /api/requests/{requestId}/folder` |
 | Execution | `POST /api/execute` |
 | Collections | `POST /api/collections/run` |
 | Environments | `GET/POST/PUT/DELETE /api/environments` |

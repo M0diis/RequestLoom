@@ -71,6 +71,40 @@ public class ServicesController : ControllerBase
         return Ok(service);
     }
 
+    [HttpPost("{id}/folders")]
+    public async Task<IActionResult> CreateFolder(string workspaceId, string id, [FromBody] CreateRequestFolderRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest("Folder name is required");
+
+        var folder = await _repo.CreateFolderAsync(workspaceId, id, request.Name.Trim());
+        return folder == null ? NotFound() : Ok(folder);
+    }
+
+    [HttpPut("{id}/folders/{folderId}")]
+    public async Task<IActionResult> UpdateFolder(string workspaceId, string id, string folderId, [FromBody] UpdateRequestFolderRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest("Folder name is required");
+
+        var folder = await _repo.UpdateFolderAsync(workspaceId, id, folderId, request.Name.Trim());
+        return folder == null ? NotFound() : Ok(folder);
+    }
+
+    [HttpPut("{id}/folders/reorder")]
+    public async Task<IActionResult> ReorderFolders(string workspaceId, string id, [FromBody] List<string> folderIds)
+    {
+        await _repo.ReorderFoldersAsync(workspaceId, id, folderIds);
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/folders/{folderId}")]
+    public async Task<IActionResult> DeleteFolder(string workspaceId, string id, string folderId)
+    {
+        var deleted = await _repo.DeleteFolderAsync(workspaceId, id, folderId);
+        return deleted ? NoContent() : NotFound();
+    }
+
     [HttpPut("reorder")]
     public async Task<IActionResult> Reorder(string workspaceId, [FromBody] List<string> serviceIds)
     {
@@ -89,6 +123,8 @@ public class ServicesController : ControllerBase
     [HttpPost("{id}/files")]
     public async Task<IActionResult> CreateFile(string id, [FromBody] CreateServiceFileRequest request)
     {
+        if (!_jsonStore.IsJsonStorage)
+            return BadRequest("Collection files are only available when JSON storage is active.");
         if (string.IsNullOrWhiteSpace(request.Name))
             return BadRequest("File name is required");
 
@@ -122,6 +158,7 @@ public class ServicesController : ControllerBase
     [HttpGet("{id}/files")]
     public async Task<IActionResult> GetFiles(string id)
     {
+        if (!_jsonStore.IsJsonStorage) return Ok(Array.Empty<ServiceFileResponse>());
         var service = await _repo.GetByIdAsync(id);
         if (service == null) return NotFound();
 
@@ -131,6 +168,8 @@ public class ServicesController : ControllerBase
     [HttpPut("{id}/files/{fileName}")]
     public async Task<IActionResult> SaveFile(string id, string fileName, [FromBody] SaveServiceFileRequest request)
     {
+        if (!_jsonStore.IsJsonStorage)
+            return BadRequest("Collection files are only available when JSON storage is active.");
         var service = await _repo.GetByIdAsync(id);
         if (service == null) return NotFound();
 
@@ -152,6 +191,8 @@ public class ServicesController : ControllerBase
     [HttpDelete("{id}/files/{fileName}")]
     public async Task<IActionResult> DeleteFile(string id, string fileName)
     {
+        if (!_jsonStore.IsJsonStorage)
+            return BadRequest("Collection files are only available when JSON storage is active.");
         var service = await _repo.GetByIdAsync(id);
         if (service == null) return NotFound();
 
@@ -173,6 +214,8 @@ public class ServicesController : ControllerBase
     [HttpPost("{id}/files/{fileName}/run")]
     public async Task<IActionResult> RunFile(string id, string fileName, [FromBody] RunServiceFileRequest request)
     {
+        if (!_jsonStore.IsJsonStorage)
+            return BadRequest("Collection files are only available when JSON storage is active.");
         var service = await _repo.GetByIdAsync(id);
         if (service == null) return NotFound();
 

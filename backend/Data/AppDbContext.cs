@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<EnvironmentVariableRow> EnvironmentVariables => Set<EnvironmentVariableRow>();
     public DbSet<ServiceRow> Services => Set<ServiceRow>();
     public DbSet<ApiRequestRow> Requests => Set<ApiRequestRow>();
+    public DbSet<RequestFolderRow> RequestFolders => Set<RequestFolderRow>();
     public DbSet<RequestHeaderRow> RequestHeaders => Set<RequestHeaderRow>();
     public DbSet<RequestParamRow> RequestParams => Set<RequestParamRow>();
     public DbSet<RequestVariableRow> RequestVariables => Set<RequestVariableRow>();
@@ -52,6 +53,18 @@ public class AppDbContext : DbContext
             .WithMany()
             .HasForeignKey(r => r.ServiceId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<RequestFolderRow>()
+            .HasOne<ServiceRow>()
+            .WithMany()
+            .HasForeignKey(f => f.ServiceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ApiRequestRow>()
+            .HasOne<RequestFolderRow>()
+            .WithMany()
+            .HasForeignKey(r => r.FolderId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<RequestHeaderRow>()
             .HasOne<ApiRequestRow>()
@@ -162,6 +175,8 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<EnvironmentRow>().HasIndex(e => e.WorkspaceId);
         modelBuilder.Entity<ServiceRow>().HasIndex(s => s.WorkspaceId);
         modelBuilder.Entity<ApiRequestRow>().HasIndex(r => r.ServiceId);
+        modelBuilder.Entity<ApiRequestRow>().HasIndex(r => r.FolderId);
+        modelBuilder.Entity<RequestFolderRow>().HasIndex(f => f.ServiceId);
         modelBuilder.Entity<RequestHeaderRow>().HasIndex(h => h.RequestId);
         modelBuilder.Entity<RequestParamRow>().HasIndex(p => p.RequestId);
         modelBuilder.Entity<ServiceHeaderRow>().HasIndex(h => h.ServiceId);

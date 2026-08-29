@@ -9,7 +9,7 @@ import type {
   MockServer, CreateMockServerRequest, UpdateMockServerRequest,
   MockServerEndpoint, CreateMockEndpointRequest, UpdateMockEndpointRequest,
   AppSettings, SettingsUpdate, ApiRequestSettings, StoredRequestFile, ServiceFileResponse, JavaScriptRunResponse,
-  CookieJarEntry, RequestFileUploadResponse,
+  CookieJarEntry, RequestFileUploadResponse, RequestFolder,
   OAuth2Configuration, OAuthDiscoveryResponse, OAuthTokenExchangeResponse, OAuthTokenStatus,
 } from '../types';
 
@@ -66,6 +66,14 @@ export const servicesApi = {
     auth: AuthRequest | null = null,
   ) =>
     api.put<Service>(`/workspaces/${workspaceId}/services/${id}`, { name, description, headers, auth }).then(r => r.data),
+  createFolder: (workspaceId: string, serviceId: string, name: string) =>
+    api.post<RequestFolder>(`/workspaces/${workspaceId}/services/${serviceId}/folders`, { name }).then(r => r.data),
+  updateFolder: (workspaceId: string, serviceId: string, folderId: string, name: string) =>
+    api.put<RequestFolder>(`/workspaces/${workspaceId}/services/${serviceId}/folders/${folderId}`, { name }).then(r => r.data),
+  reorderFolders: (workspaceId: string, serviceId: string, folderIds: string[]) =>
+    api.put(`/workspaces/${workspaceId}/services/${serviceId}/folders/reorder`, folderIds),
+  deleteFolder: (workspaceId: string, serviceId: string, folderId: string) =>
+    api.delete(`/workspaces/${workspaceId}/services/${serviceId}/folders/${folderId}`),
   reorder: (workspaceId: string, serviceIds: string[]) =>
     api.put(`/workspaces/${workspaceId}/services/reorder`, serviceIds),
   delete: (workspaceId: string, id: string) =>
@@ -80,7 +88,7 @@ export const requestsApi = {
     return api.post<RequestFileUploadResponse>('/requests/' + id + '/uploads', form).then(r => r.data);
   },
   getById: (id: string) => api.get<ApiRequest>(`/requests/${id}`).then(r => r.data),
-  create: (serviceId: string, data: { name: string; method: string; url: string }) =>
+  create: (serviceId: string, data: { name: string; method: string; url: string; folderId?: string | null }) =>
     api.post<ApiRequest>(`/requests/service/${serviceId}`, data).then(r => r.data),
   update: (id: string, data: UpdateApiRequestPayload) =>
     api.put<ApiRequest>(`/requests/${id}`, data).then(r => r.data),
@@ -88,6 +96,10 @@ export const requestsApi = {
   toggleFavorite: (id: string) => api.post(`/requests/${id}/favorite`),
   moveToService: (id: string, newServiceId: string) =>
     api.post(`/requests/${id}/move/${newServiceId}`),
+  moveToFolder: (id: string, folderId: string | null) =>
+    api.put(`/requests/${id}/folder`, { folderId }),
+  reorder: (id: string, folderId: string | null, beforeRequestId?: string | null) =>
+    api.put(`/requests/${id}/reorder`, { folderId, beforeRequestId: beforeRequestId ?? null }),
   delete: (id: string) => api.delete(`/requests/${id}`),
   getFile: (id: string) => api.get<StoredRequestFile>(`/requests/${id}/file`).then(r => r.data),
   getSettings: (id: string) => api.get<ApiRequestSettings>(`/requests/${id}/settings`).then(r => r.data),
@@ -265,6 +277,8 @@ export const toolsApi = {
 export const collectionRunnerApi = {
   runService: (serviceId: string, stopOnFailure?: boolean) =>
     api.post<CollectionRunResult>(`/services/${serviceId}/run`, { stopOnFailure }).then(r => r.data),
+  runFolder: (serviceId: string, folderId: string, stopOnFailure?: boolean) =>
+    api.post<CollectionRunResult>(`/services/${serviceId}/folders/${folderId}/run`, { stopOnFailure }).then(r => r.data),
 };
 
 // Mock Servers
@@ -301,6 +315,8 @@ export const settingsApi = {
   get: () => api.get<AppSettings>('/settings').then(r => r.data),
   update: (payload: SettingsUpdate) =>
     api.put<AppSettings>('/settings', payload).then(r => r.data),
+  migrate: (payload: SettingsUpdate) =>
+    api.post<AppSettings>('/settings/migrate', payload).then(r => r.data),
   clearHistory: () =>
     api.delete<{ deleted: number }>('/settings/history').then(r => r.data),
   generateExamples: () =>

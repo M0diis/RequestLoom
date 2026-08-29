@@ -12,6 +12,8 @@ public interface IRequestRepository
     Task<bool> DeleteAsync(string id);
     Task<List<ApiRequest>> GetByServiceIdAsync(string serviceId);
     Task<bool> MoveToServiceAsync(string id, string newServiceId);
+    Task<bool> MoveToFolderAsync(string id, string? folderId);
+    Task<bool> ReorderAsync(string id, string? folderId, string? beforeRequestId);
     Task<ApiRequestSettings?> GetSettingsAsync(string requestId);
     Task<ApiRequestSettings> SaveSettingsAsync(string requestId, ApiRequestSettings settings);
 }

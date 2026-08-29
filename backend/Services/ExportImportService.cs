@@ -82,11 +82,12 @@ public class ExportImportService
         {
             var requests = await _requests.GetByServiceIdAsync(svc.Id);
             var svcVars = (await _serviceVariables.GetByServiceAsync(svc.Id)).ToList();
+            var folderNames = svc.Folders.ToDictionary(folder => folder.Id, folder => folder.Name);
 
             var requestExports = new List<RequestExport>();
             foreach (var request in requests)
             {
-                requestExports.Add(await BuildRequestExportAsync(request));
+                requestExports.Add(await BuildRequestExportAsync(request, folderNames));
             }
 
             serviceExports.Add(new ServiceExport
@@ -98,6 +99,10 @@ public class ExportImportService
                     .Select(h => new KeyValuePairRequest { Key = h.Key, Value = h.Value, Enabled = h.Enabled })
                     .ToList(),
                 Auth = BuildServiceAuth(svc.Auth),
+                Folders = svc.Folders
+                    .OrderBy(folder => folder.SortOrder)
+                    .Select(folder => new RequestFolderExport { Name = folder.Name, SortOrder = folder.SortOrder })
+                    .ToList(),
                 Variables = svcVars
                     .OrderBy(v => v.Key)
                     .Select(v => new ServiceVariableExport
@@ -210,11 +215,12 @@ public class ExportImportService
 
         var requests = await _requests.GetByServiceIdAsync(serviceId);
         var svcVars = (await _serviceVariables.GetByServiceAsync(serviceId)).ToList();
+        var folderNames = svc.Folders.ToDictionary(folder => folder.Id, folder => folder.Name);
 
         var requestExports = new List<RequestExport>();
         foreach (var request in requests)
         {
-            requestExports.Add(await BuildRequestExportAsync(request));
+            requestExports.Add(await BuildRequestExportAsync(request, folderNames));
         }
 
         return new ServiceExport
@@ -226,6 +232,10 @@ public class ExportImportService
                 .Select(h => new KeyValuePairRequest { Key = h.Key, Value = h.Value, Enabled = h.Enabled })
                 .ToList(),
             Auth = BuildServiceAuth(svc.Auth),
+            Folders = svc.Folders
+                .OrderBy(folder => folder.SortOrder)
+                .Select(folder => new RequestFolderExport { Name = folder.Name, SortOrder = folder.SortOrder })
+                .ToList(),
             Variables = svcVars
                 .OrderBy(v => v.Key)
                 .Select(v => new ServiceVariableExport
@@ -246,7 +256,10 @@ public class ExportImportService
         var req = await _requests.GetByIdAsync(requestId)
             ?? throw new InvalidOperationException("Request not found");
 
-        return await BuildRequestExportAsync(req);
+        var service = await _services.GetByIdAsync(req.ServiceId);
+        var folderNames = service?.Folders.ToDictionary(folder => folder.Id, folder => folder.Name)
+            ?? new Dictionary<string, string>();
+        return await BuildRequestExportAsync(req, folderNames);
     }
 
     private static AuthRequest? BuildServiceAuth(ServiceAuth? auth)
@@ -257,7 +270,7 @@ public class ExportImportService
         return null;
     }
 
-    private async Task<RequestExport> BuildRequestExportAsync(ApiRequest req)
+    private async Task<RequestExport> BuildRequestExportAsync(ApiRequest req, IReadOnlyDictionary<string, string>? folderNames = null)
     {
         var settings = await _requests.GetSettingsAsync(req.Id);
 
@@ -272,6 +285,9 @@ public class ExportImportService
             PostRequestScript = req.PostRequestScript ?? "",
             SortOrder = req.SortOrder,
             IsFavorite = req.IsFavorite,
+            FolderName = req.FolderId != null && folderNames != null && folderNames.TryGetValue(req.FolderId, out var folderName)
+                ? folderName
+                : null,
             Headers = req.Headers
                 .Select(h => new KeyValuePairRequest { Key = h.Key, Value = h.Value, Enabled = h.Enabled })
                 .ToList(),
@@ -464,14 +480,36 @@ public class ExportImportService
             });
         }
 
+        var folderNameToId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in svc.Folders.OrderBy(folder => folder.SortOrder))
+        {
+            var folderName = folder.Name?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(folderName) || folderNameToId.ContainsKey(folderName)) continue;
+
+            var folderId = Guid.NewGuid().ToString("N");
+            folderNameToId[folderName] = folderId;
+            _db.RequestFolders.Add(new RequestFolderRow
+            {
+                Id = folderId,
+                ServiceId = serviceId,
+                Name = folderName,
+                SortOrder = folder.SortOrder,
+                CreatedAt = DateTime.UtcNow.ToString("o"),
+            });
+        }
+
         foreach (var req in svc.Requests)
         {
             var requestId = Guid.NewGuid().ToString("N");
+            var folderId = !string.IsNullOrWhiteSpace(req.FolderName) && folderNameToId.TryGetValue(req.FolderName.Trim(), out var resolvedFolderId)
+                ? resolvedFolderId
+                : null;
 
             _db.Requests.Add(new ApiRequestRow
             {
                 Id = requestId,
                 ServiceId = serviceId,
+                FolderId = folderId,
                 Name = req.Name,
                 Method = req.Method,
                 Url = req.Url,
@@ -698,6 +736,23 @@ public class ExportImportService
             });
 
             var service = doc.Services[^1];
+            var folderNameToId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var folder in svc.Folders.OrderBy(folder => folder.SortOrder))
+            {
+                var folderName = folder.Name?.Trim() ?? "";
+                if (string.IsNullOrWhiteSpace(folderName) || folderNameToId.ContainsKey(folderName)) continue;
+
+                var folderId = Guid.NewGuid().ToString("N");
+                folderNameToId[folderName] = folderId;
+                doc.RequestFolders.Add(new RequestFolder
+                {
+                    Id = folderId,
+                    ServiceId = serviceId,
+                    Name = folderName,
+                    SortOrder = folder.SortOrder,
+                    CreatedAt = JsonDataStore.Now(),
+                });
+            }
 
             if (svc.Auth != null && !string.IsNullOrWhiteSpace(svc.Auth.AuthType)
                 && !string.Equals(svc.Auth.AuthType, "none", StringComparison.OrdinalIgnoreCase))
@@ -732,11 +787,15 @@ public class ExportImportService
             foreach (var req in svc.Requests)
             {
                 var requestId = Guid.NewGuid().ToString("N");
+                var folderId = !string.IsNullOrWhiteSpace(req.FolderName) && folderNameToId.TryGetValue(req.FolderName.Trim(), out var resolvedFolderId)
+                    ? resolvedFolderId
+                    : null;
 
                 doc.Requests.Add(new ApiRequest
                 {
                     Id = requestId,
                     ServiceId = serviceId,
+                    FolderId = folderId,
                     Name = req.Name,
                     Method = req.Method,
                     Url = req.Url,

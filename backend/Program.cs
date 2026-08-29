@@ -79,6 +79,7 @@ builder.Services.AddScoped<CollectionRunnerService>();
 builder.Services.AddScoped<JavaScriptRunnerService>();
 builder.Services.AddScoped<MockServerService>();
 builder.Services.AddScoped<ExampleDataService>();
+builder.Services.AddScoped<StorageMigrationService>();
 
 var app = builder.Build();
 

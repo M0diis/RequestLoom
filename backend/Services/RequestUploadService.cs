@@ -13,6 +13,8 @@ public sealed class RequestUploadService
         _rootDirectory = Path.Combine(storageDirectory, UploadDirectoryName);
     }
 
+    public string RootDirectory => _rootDirectory;
+
     public async Task<RequestFileUploadResponse> SaveAsync(
         string requestId,
         Stream content,

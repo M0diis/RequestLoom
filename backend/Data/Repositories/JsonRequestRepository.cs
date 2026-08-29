@@ -28,6 +28,9 @@ public class JsonRequestRepository : IRequestRepository
         ApiRequest? created = null;
         _store.Mutate(doc =>
         {
+            if (!string.IsNullOrWhiteSpace(req.FolderId) && !doc.RequestFolders.Any(folder => folder.Id == req.FolderId && folder.ServiceId == serviceId))
+                throw new InvalidOperationException("Folder does not belong to the request service.");
+
             var maxOrder = doc.Requests
                 .Where(r => r.ServiceId == serviceId)
                 .Select(r => (int?)r.SortOrder)
@@ -37,6 +40,7 @@ public class JsonRequestRepository : IRequestRepository
             {
                 Id = Guid.NewGuid().ToString("N"),
                 ServiceId = serviceId,
+                FolderId = string.IsNullOrWhiteSpace(req.FolderId) ? null : req.FolderId,
                 Name = req.Name,
                 Method = req.Method,
                 Url = req.Url,
@@ -141,6 +145,7 @@ public class JsonRequestRepository : IRequestRepository
             {
                 Id = Guid.NewGuid().ToString("N"),
                 ServiceId = original.ServiceId,
+                FolderId = original.FolderId,
                 Name = original.Name + " (copy)",
                 Method = original.Method,
                 Url = original.Url,
@@ -252,7 +257,75 @@ public class JsonRequestRepository : IRequestRepository
                 .Max() ?? -1;
 
             request.ServiceId = newServiceId;
+            request.FolderId = null;
             request.SortOrder = maxOrder + 1;
+            moved = true;
+        });
+
+        return Task.FromResult(moved);
+    }
+
+    public Task<bool> MoveToFolderAsync(string id, string? folderId)
+    {
+        var moved = false;
+        _store.Mutate(doc =>
+        {
+            var request = doc.Requests.FirstOrDefault(row => row.Id == id);
+            if (request == null) return;
+            if (!string.IsNullOrWhiteSpace(folderId) && !doc.RequestFolders.Any(folder => folder.Id == folderId && folder.ServiceId == request.ServiceId)) return;
+
+            var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
+            var maxSort = doc.Requests
+                .Where(row => row.ServiceId == request.ServiceId && row.FolderId == targetFolderId && row.Id != id)
+                .Select(row => (int?)row.SortOrder)
+                .Max() ?? -1;
+            request.FolderId = targetFolderId;
+            request.SortOrder = maxSort + 1;
+            request.UpdatedAt = JsonDataStore.Now();
+            moved = true;
+        });
+
+        return Task.FromResult(moved);
+    }
+
+    public Task<bool> ReorderAsync(string id, string? folderId, string? beforeRequestId)
+    {
+        var moved = false;
+        _store.Mutate(doc =>
+        {
+            var request = doc.Requests.FirstOrDefault(row => row.Id == id);
+            if (request == null) return;
+
+            var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
+            if (targetFolderId != null && !doc.RequestFolders.Any(folder => folder.Id == targetFolderId && folder.ServiceId == request.ServiceId))
+                return;
+
+            var rows = doc.Requests
+                .Where(row => row.ServiceId == request.ServiceId)
+                .OrderBy(row => row.SortOrder)
+                .ThenBy(row => row.Id)
+                .ToList();
+            var before = string.IsNullOrWhiteSpace(beforeRequestId)
+                ? null
+                : rows.FirstOrDefault(row => row.Id == beforeRequestId && row.FolderId == targetFolderId);
+            if (!string.IsNullOrWhiteSpace(beforeRequestId) && before == null) return;
+            if (before?.Id == id && request.FolderId == targetFolderId)
+            {
+                moved = true;
+                return;
+            }
+
+            rows.Remove(request);
+            var insertIndex = before == null
+                ? rows.FindLastIndex(row => row.FolderId == targetFolderId) + 1
+                : rows.IndexOf(before);
+            if (insertIndex < 0) insertIndex = rows.Count;
+
+            request.FolderId = targetFolderId;
+            request.UpdatedAt = JsonDataStore.Now();
+            rows.Insert(insertIndex, request);
+            for (var index = 0; index < rows.Count; index++)
+                rows[index].SortOrder = index;
             moved = true;
         });
 
@@ -332,6 +405,7 @@ public class JsonRequestRepository : IRequestRepository
         {
             Id = request.Id,
             ServiceId = request.ServiceId,
+            FolderId = request.FolderId,
             Name = request.Name,
             Method = request.Method,
             Url = request.Url,

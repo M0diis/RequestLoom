@@ -41,8 +41,15 @@ public class RequestsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Name))
             return BadRequest("Name is required");
 
-        var created = await _repo.CreateAsync(serviceId, request);
-        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        try
+        {
+            var created = await _repo.CreateAsync(serviceId, request);
+            return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpPut("{id}")]
@@ -112,6 +119,21 @@ public class RequestsController : ControllerBase
         var deleted = await _repo.DeleteAsync(id);
         if (!deleted) return NotFound();
         return NoContent();
+    }
+
+    [HttpPut("{id}/folder")]
+    public async Task<IActionResult> MoveToFolder(string id, [FromBody] MoveRequestToFolderRequest request)
+    {
+        var moved = await _repo.MoveToFolderAsync(id, request.FolderId);
+        return moved ? NoContent() : NotFound();
+    }
+
+    [HttpPut("{id}/reorder")]
+    public async Task<IActionResult> Reorder(string id, [FromBody] ReorderRequestRequest request)
+    {
+        if (request == null) return BadRequest("Reorder details are required.");
+        var moved = await _repo.ReorderAsync(id, request.FolderId, request.BeforeRequestId);
+        return moved ? NoContent() : NotFound();
     }
 
     [HttpGet("{id}/file")]

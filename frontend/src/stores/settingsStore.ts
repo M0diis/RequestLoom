@@ -8,6 +8,7 @@ interface SettingsState {
   loading: boolean;
   load: () => Promise<void>;
   update: (patch: SettingsUpdate) => Promise<AppSettings>;
+  migrateStorage: (patch: SettingsUpdate) => Promise<AppSettings>;
   clearHistory: () => Promise<number>;
   generateExamples: () => Promise<{ workspaceId: string; name: string; message: string }>;
   clearAllData: () => Promise<number>;
@@ -32,6 +33,15 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   update: async (patch) => {
     const settings = await settingsApi.update(patch);
+    set({ settings });
+    if (patch.responseFormat) {
+      useUiStore.getState().setResponseViewMode(toViewMode(patch.responseFormat));
+    }
+    return settings;
+  },
+
+  migrateStorage: async (patch) => {
+    const settings = await settingsApi.migrate(patch);
     set({ settings });
     if (patch.responseFormat) {
       useUiStore.getState().setResponseViewMode(toViewMode(patch.responseFormat));

@@ -84,6 +84,78 @@ public class ServiceRepository : IServiceRepository
         return await MapAsync(row, includeRequests: false);
     }
 
+    public async Task<RequestFolder?> CreateFolderAsync(string workspaceId, string serviceId, string name)
+    {
+        var serviceExists = await _db.Services.AnyAsync(s => s.Id == serviceId && s.WorkspaceId == workspaceId);
+        if (!serviceExists) return null;
+
+        var maxSort = await _db.RequestFolders
+            .Where(f => f.ServiceId == serviceId)
+            .Select(f => (int?)f.SortOrder)
+            .MaxAsync() ?? -1;
+
+        var row = new RequestFolderRow
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            ServiceId = serviceId,
+            Name = name,
+            SortOrder = maxSort + 1,
+            CreatedAt = DateTime.UtcNow.ToString("o"),
+        };
+        _db.RequestFolders.Add(row);
+        await _db.SaveChangesAsync();
+        return MapFolder(row);
+    }
+
+    public async Task<RequestFolder?> UpdateFolderAsync(string workspaceId, string serviceId, string folderId, string name)
+    {
+        var row = await _db.RequestFolders
+            .Join(_db.Services, folder => folder.ServiceId, service => service.Id, (folder, service) => new { folder, service })
+            .Where(x => x.folder.Id == folderId && x.folder.ServiceId == serviceId && x.service.WorkspaceId == workspaceId)
+            .Select(x => x.folder)
+            .FirstOrDefaultAsync();
+        if (row == null) return null;
+
+        row.Name = name;
+        await _db.SaveChangesAsync();
+        return MapFolder(row);
+    }
+
+    public async Task<bool> DeleteFolderAsync(string workspaceId, string serviceId, string folderId)
+    {
+        var row = await _db.RequestFolders
+            .Join(_db.Services, folder => folder.ServiceId, service => service.Id, (folder, service) => new { folder, service })
+            .Where(x => x.folder.Id == folderId && x.folder.ServiceId == serviceId && x.service.WorkspaceId == workspaceId)
+            .Select(x => x.folder)
+            .FirstOrDefaultAsync();
+        if (row == null) return false;
+
+        await _db.Requests
+            .Where(request => request.FolderId == folderId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.FolderId, (string?)null));
+        _db.RequestFolders.Remove(row);
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> ReorderFoldersAsync(string workspaceId, string serviceId, List<string> folderIds)
+    {
+        var validFolderIds = await _db.RequestFolders
+            .Join(_db.Services, folder => folder.ServiceId, service => service.Id, (folder, service) => new { folder, service })
+            .Where(x => x.folder.ServiceId == serviceId && x.service.WorkspaceId == workspaceId)
+            .Select(x => x.folder)
+            .ToListAsync();
+
+        for (var i = 0; i < folderIds.Count; i++)
+        {
+            var row = validFolderIds.FirstOrDefault(folder => folder.Id == folderIds[i]);
+            if (row != null) row.SortOrder = i;
+        }
+
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
     public async Task<bool> ReorderAsync(string workspaceId, List<string> ids)
     {
         var rows = await _db.Services
@@ -154,6 +226,13 @@ public class ServiceRepository : IServiceRepository
             }
         }
 
+        result.Folders = (await _db.RequestFolders
+                .Where(folder => folder.ServiceId == row.Id)
+                .OrderBy(folder => folder.SortOrder)
+                .ToListAsync())
+            .Select(MapFolder)
+            .ToList();
+
         return result;
     }
 
@@ -203,6 +282,18 @@ public class ServiceRepository : IServiceRepository
             WorkspaceId = row.WorkspaceId,
             Name = row.Name,
             Description = row.Description,
+            SortOrder = row.SortOrder,
+            CreatedAt = row.CreatedAt,
+        };
+    }
+
+    private static RequestFolder MapFolder(RequestFolderRow row)
+    {
+        return new RequestFolder
+        {
+            Id = row.Id,
+            ServiceId = row.ServiceId,
+            Name = row.Name,
             SortOrder = row.SortOrder,
             CreatedAt = row.CreatedAt,
         };

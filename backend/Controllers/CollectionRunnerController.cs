@@ -41,4 +41,32 @@ public class CollectionRunnerController : ControllerBase
             return StatusCode(499, new { error = "Collection run cancelled" });
         }
     }
+
+    [HttpPost("services/{serviceId}/folders/{folderId}/run")]
+    public async Task<IActionResult> RunFolder(
+        string serviceId,
+        string folderId,
+        [FromBody] RunCollectionRequest? req,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _runner.RunFolderAsync(
+                serviceId,
+                folderId,
+                req?.EnvironmentId,
+                req?.StopOnFailure ?? false,
+                cancellationToken);
+
+            return Ok(result);
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new { error = "Folder not found" });
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499, new { error = "Folder run cancelled" });
+        }
+    }
 }

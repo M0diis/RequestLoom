@@ -6,11 +6,14 @@ import type { CollectionRunResult } from '../../types';
 interface Props {
   onClose: () => void;
   serviceId: string;
+  folderId?: string;
 }
 
-export function CollectionRunnerModal({ onClose, serviceId }: Props) {
+export function CollectionRunnerModal({ onClose, serviceId, folderId }: Props) {
   const { services } = useRequestStore();
   const service = services.find(s => s.id === serviceId);
+  const folder = service?.folders.find(item => item.id === folderId);
+  const requests = service?.requests.filter(request => request.folderId === folderId) ?? [];
 
   const [result, setResult] = useState<CollectionRunResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -22,7 +25,9 @@ export function CollectionRunnerModal({ onClose, serviceId }: Props) {
     setError(null);
     setResult(null);
     try {
-      const r = await collectionRunnerApi.runService(serviceId, stopOnFailure);
+      const r = folderId
+        ? await collectionRunnerApi.runFolder(serviceId, folderId, stopOnFailure)
+        : await collectionRunnerApi.runService(serviceId, stopOnFailure);
       setResult(r);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Collection run failed');
@@ -41,8 +46,8 @@ export function CollectionRunnerModal({ onClose, serviceId }: Props) {
       <div className="w-full max-w-2xl max-h-[85vh] border border-gray-700 bg-[#141414] shadow-[0_24px_60px_rgba(0,0,0,0.55)] flex flex-col">
         <div className="flex items-center border-b border-gray-800 px-4 py-3 flex-shrink-0">
           <div>
-            <h3 className="text-sm font-semibold text-gray-100">Run Collection</h3>
-            <p className="text-[11px] text-gray-500">{service?.name} - {service?.requests.length ?? 0} request(s)</p>
+            <h3 className="text-sm font-semibold text-gray-100">{folder ? 'Run Folder' : 'Run Collection'}</h3>
+            <p className="text-[11px] text-gray-500">{folder ? `${service?.name} / ${folder.name}` : service?.name} - {folderId ? requests.length : service?.requests.length ?? 0} request(s)</p>
           </div>
           <div className="flex-1" />
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300" disabled={running}>
@@ -57,7 +62,7 @@ export function CollectionRunnerModal({ onClose, serviceId }: Props) {
             <button onClick={() => { void handleRun(); }}
               className="border border-[#ff6c37] bg-[#ff6c37] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#f95e26] disabled:opacity-50"
               disabled={running}>
-              {running ? 'Running...' : 'Run All Requests'}
+              {running ? 'Running...' : folder ? 'Run Folder Requests' : 'Run All Requests'}
             </button>
             <label className="flex items-center gap-1.5 text-[11px] text-gray-400">
               <input type="checkbox" checked={stopOnFailure} onChange={e => setStopOnFailure(e.target.checked)} />

@@ -8,6 +8,7 @@ import type {
   UpdateApiRequestPayload,
   KeyValuePairRequest,
   AuthRequest,
+  RequestFolder,
 } from '../types';
 import { servicesApi, requestsApi, executeApi, serviceVariablesApi } from '../services/api';
 import { useDevToolsStore } from './devToolsStore';
@@ -78,12 +79,17 @@ interface RequestState {
   ) => Promise<void>;
   deleteService: (workspaceId: string, id: string) => Promise<void>;
   moveService: (workspaceId: string, id: string, direction: -1 | 1) => Promise<void>;
+  createFolder: (workspaceId: string, serviceId: string, name: string) => Promise<RequestFolder>;
+  updateFolder: (workspaceId: string, serviceId: string, folderId: string, name: string) => Promise<void>;
+  deleteFolder: (workspaceId: string, serviceId: string, folderId: string) => Promise<void>;
 
   selectRequest: (id: string) => Promise<void>;
   closeRequest: (id: string) => void;
-  createRequest: (serviceId: string, name: string, method: string) => Promise<ApiRequest>;
+  createRequest: (serviceId: string, name: string, method: string, folderId?: string | null) => Promise<ApiRequest>;
   updateRequest: (id: string, data: Partial<ApiRequest>) => Promise<void>;
   duplicateRequest: (id: string) => Promise<ApiRequest>;
+  moveRequestToFolder: (id: string, folderId: string | null) => Promise<void>;
+  reorderRequest: (id: string, folderId: string | null, beforeRequestId?: string | null) => Promise<void>;
   deleteRequest: (id: string) => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
 
@@ -147,6 +153,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   createService: async (workspaceId, name, storagePath) => {
     const service = await servicesApi.create(workspaceId, name, '', [], null, storagePath);
     service.requests = [];
+    service.folders = [];
     set((s) => ({ services: [...s.services, service] }));
     return service;
   },
@@ -163,11 +170,18 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       source.auth ? { authType: source.auth.authType, configJson: source.auth.configJson } : null,
     );
 
+    const folderIds = new Map<string, string>();
+    for (const folder of source.folders) {
+      const createdFolder = await servicesApi.createFolder(workspaceId, created.id, folder.name);
+      folderIds.set(folder.id, createdFolder.id);
+    }
+
     for (const request of source.requests) {
       const createdRequest = await requestsApi.create(created.id, {
         name: request.name,
         method: request.method,
         url: request.url,
+        folderId: request.folderId ? folderIds.get(request.folderId) ?? null : null,
       });
       await requestsApi.update(createdRequest.id, buildUpdatePayload({
         ...request,
@@ -215,6 +229,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
             // When service auth is set to "none", backend omits null auth in JSON.
             // Respect explicit save intent by clearing stale auth in client state.
             auth: authWasExplicitlyProvided ? (updated.auth ?? null) : svc.auth,
+            folders: svc.folders,
             requests: svc.requests,
           }
           : svc
@@ -303,8 +318,41 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     }
   },
 
-  createRequest: async (serviceId, name, method) => {
-    const request = await requestsApi.create(serviceId, { name, method, url: '' });
+  createFolder: async (workspaceId, serviceId, name) => {
+    const folder = await servicesApi.createFolder(workspaceId, serviceId, name);
+    set((s) => ({
+      services: s.services.map((service) => service.id === serviceId
+        ? { ...service, folders: [...service.folders, folder].sort((a, b) => a.sortOrder - b.sortOrder) }
+        : service),
+    }));
+    return folder;
+  },
+
+  updateFolder: async (workspaceId, serviceId, folderId, name) => {
+    const folder = await servicesApi.updateFolder(workspaceId, serviceId, folderId, name);
+    set((s) => ({
+      services: s.services.map((service) => service.id === serviceId
+        ? { ...service, folders: service.folders.map((item) => item.id === folderId ? folder : item) }
+        : service),
+    }));
+  },
+
+  deleteFolder: async (workspaceId, serviceId, folderId) => {
+    await servicesApi.deleteFolder(workspaceId, serviceId, folderId);
+    set((s) => ({
+      services: s.services.map((service) => service.id === serviceId
+        ? {
+          ...service,
+          folders: service.folders.filter((folder) => folder.id !== folderId),
+          requests: service.requests.map((request) => request.folderId === folderId ? { ...request, folderId: null } : request),
+        }
+        : service),
+      activeRequest: s.activeRequest?.folderId === folderId ? { ...s.activeRequest, folderId: null } : s.activeRequest,
+    }));
+  },
+
+  createRequest: async (serviceId, name, method, folderId = null) => {
+    const request = await requestsApi.create(serviceId, { name, method, url: '', folderId });
     set((s) => ({
       services: s.services.map((svc) =>
         svc.id === serviceId ? { ...svc, requests: [...svc.requests, request] } : svc
@@ -405,6 +453,41 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       ),
     }));
     return duplicated;
+  },
+
+  moveRequestToFolder: async (id, folderId) => {
+    await requestsApi.moveToFolder(id, folderId);
+    set((s) => ({
+      services: s.services.map((service) => ({
+        ...service,
+        requests: service.requests.map((request) => request.id === id ? { ...request, folderId } : request),
+      })),
+      activeRequest: s.activeRequest?.id === id ? { ...s.activeRequest, folderId } : s.activeRequest,
+    }));
+  },
+
+  reorderRequest: async (id, folderId, beforeRequestId = null) => {
+    await requestsApi.reorder(id, folderId, beforeRequestId);
+    set((s) => {
+      const service = s.services.find((item) => item.requests.some((request) => request.id === id));
+      if (!service) return s;
+
+      const request = service.requests.find((item) => item.id === id);
+      if (!request) return s;
+
+      const nextRequests = service.requests.filter((item) => item.id !== id);
+      const movedRequest = { ...request, folderId };
+      let insertIndex = beforeRequestId
+        ? nextRequests.findIndex((item) => item.id === beforeRequestId && item.folderId === folderId)
+        : nextRequests.findLastIndex((item) => item.folderId === folderId) + 1;
+      if (insertIndex < 0) insertIndex = nextRequests.length;
+      nextRequests.splice(insertIndex, 0, movedRequest);
+
+      return {
+        services: s.services.map((item) => item.id === service.id ? { ...item, requests: nextRequests } : item),
+        activeRequest: s.activeRequest?.id === id ? { ...s.activeRequest, folderId } : s.activeRequest,
+      };
+    });
   },
 
   deleteRequest: async (id) => {

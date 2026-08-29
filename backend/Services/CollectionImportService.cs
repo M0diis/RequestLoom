@@ -46,7 +46,7 @@ public class CollectionImportService
         }
 
         var items = root["item"] as JsonArray;
-        var requests = new List<(string Name, JsonObject RequestObj)>();
+        var requests = new List<(string Name, JsonObject RequestObj, string? FolderName)>();
         if (items != null)
         {
             WalkPostmanItems(items, "", requests);
@@ -57,10 +57,34 @@ public class CollectionImportService
             throw new InvalidOperationException("No requests found in the Postman collection.");
         }
 
-        var createdRequests = 0;
-        foreach (var (name, requestObj) in requests)
+        var folderIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var targetService = await _serviceRepository.GetByIdAsync(serviceId)
+            ?? throw new InvalidOperationException("Service not found");
+        foreach (var folder in targetService.Folders)
         {
-            var created = await ImportPostmanRequestAsync(serviceId, name, requestObj, warnings);
+            folderIds[folder.Name] = folder.Id;
+        }
+
+        foreach (var folderName in requests
+            .Select(item => item.FolderName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (folderIds.ContainsKey(folderName)) continue;
+
+            var folder = await _serviceRepository.CreateFolderAsync(workspaceId, serviceId, folderName)
+                ?? throw new InvalidOperationException($"Could not create Postman folder '{folderName}'.");
+            folderIds[folderName] = folder.Id;
+        }
+
+        var createdRequests = 0;
+        foreach (var (name, requestObj, folderName) in requests)
+        {
+            var folderId = !string.IsNullOrWhiteSpace(folderName) && folderIds.TryGetValue(folderName.Trim(), out var resolvedFolderId)
+                ? resolvedFolderId
+                : null;
+            var created = await ImportPostmanRequestAsync(serviceId, name, requestObj, warnings, folderId);
             if (created != null)
             {
                 createdRequests++;
@@ -125,7 +149,7 @@ public class CollectionImportService
 
     // ---------- Postman ----------
 
-    private void WalkPostmanItems(JsonArray items, string folderPrefix, List<(string Name, JsonObject Request)> output)
+    private void WalkPostmanItems(JsonArray items, string folderPath, List<(string Name, JsonObject Request, string? FolderName)> output)
     {
         foreach (var itemNode in items)
         {
@@ -134,24 +158,24 @@ public class CollectionImportService
             var itemName = item["name"]?.GetValue<string>() ?? "";
             if (item["item"] is JsonArray children)
             {
-                var prefix = string.IsNullOrWhiteSpace(folderPrefix)
+                var nextFolderPath = string.IsNullOrWhiteSpace(folderPath)
                     ? itemName
-                    : $"{folderPrefix} / {itemName}";
-                WalkPostmanItems(children, prefix, output);
+                    : string.IsNullOrWhiteSpace(itemName)
+                        ? folderPath
+                        : $"{folderPath} / {itemName}";
+                WalkPostmanItems(children, nextFolderPath, output);
                 continue;
             }
 
             if (item["request"] is not JsonObject requestObj) continue;
 
-            var name = string.IsNullOrWhiteSpace(folderPrefix)
-                ? (string.IsNullOrWhiteSpace(itemName) ? "Untitled request" : itemName)
-                : $"{folderPrefix} / {(string.IsNullOrWhiteSpace(itemName) ? "Untitled request" : itemName)}";
+            var name = string.IsNullOrWhiteSpace(itemName) ? "Untitled request" : itemName;
 
-            output.Add((name, requestObj));
+            output.Add((name, requestObj, string.IsNullOrWhiteSpace(folderPath) ? null : folderPath));
         }
     }
 
-    private async Task<ApiRequest?> ImportPostmanRequestAsync(string serviceId, string name, JsonObject requestObj, List<string> warnings)
+    private async Task<ApiRequest?> ImportPostmanRequestAsync(string serviceId, string name, JsonObject requestObj, List<string> warnings, string? folderId = null)
     {
         var method = NormalizeHttpMethod(requestObj["method"]?.GetValue<string>());
         if (method == null)
@@ -244,6 +268,7 @@ public class CollectionImportService
             Url = url,
             Body = bodyText,
             BodyType = bodyType,
+            FolderId = folderId,
         });
 
         if (headers.Count > 0 || paramsList.Count > 0 || authRequest != null)

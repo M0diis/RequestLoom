@@ -50,6 +50,8 @@ public class CollectionRunResult
 {
     public string ServiceId { get; set; } = "";
     public string ServiceName { get; set; } = "";
+    public string? FolderId { get; set; }
+    public string? FolderName { get; set; }
     public int TotalRequests { get; set; }
     public int PassedRequests { get; set; }
     public int FailedRequests { get; set; }

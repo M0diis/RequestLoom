@@ -50,6 +50,7 @@ public class ApiRequestRow
 {
     [Key, Column("id")] public string Id { get; set; } = "";
     [Column("service_id")] public string ServiceId { get; set; } = "";
+    [Column("folder_id")] public string? FolderId { get; set; }
     [Column("name")] public string Name { get; set; } = "";
     [Column("method")] public string Method { get; set; } = "GET";
     [Column("url")] public string Url { get; set; } = "";
@@ -62,6 +63,16 @@ public class ApiRequestRow
     [Column("is_favorite")] public bool IsFavorite { get; set; }
     [Column("created_at")] public string CreatedAt { get; set; } = "";
     [Column("updated_at")] public string UpdatedAt { get; set; } = "";
+}
+
+[Table("request_folders")]
+public class RequestFolderRow
+{
+    [Key, Column("id")] public string Id { get; set; } = "";
+    [Column("service_id")] public string ServiceId { get; set; } = "";
+    [Column("name")] public string Name { get; set; } = "";
+    [Column("sort_order")] public int SortOrder { get; set; }
+    [Column("created_at")] public string CreatedAt { get; set; } = "";
 }
 
 [Table("request_headers")]

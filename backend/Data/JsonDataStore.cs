@@ -82,25 +82,104 @@ public class JsonDataStore
 
     public string ResolveCollectionPath(string serviceId, string name, string? requestedPath)
     {
-        if (!IsPerCollection)
-        {
-            return "";
-        }
+        return ResolveCollectionPathFor(
+            serviceId,
+            name,
+            requestedPath,
+            _filePath,
+            IsPerCollection);
+    }
 
-        var normalized = requestedPath?.Trim();
-        if (!string.IsNullOrWhiteSpace(normalized) &&
-            string.Equals(Path.GetExtension(normalized), ".json", StringComparison.OrdinalIgnoreCase) &&
-            !Directory.Exists(normalized))
+    public JsonDataDocument Snapshot()
+    {
+        lock (_lock)
         {
-            return Path.GetFullPath(normalized);
+            return CloneDocument(_doc);
         }
+    }
 
-        var parent = string.IsNullOrWhiteSpace(normalized)
-            ? DefaultCollectionsDirectory
-            : Path.GetFullPath(normalized);
-        var safeName = SanitizeFileName(name);
-        var suffix = serviceId.Length > 8 ? serviceId[..8] : serviceId;
-        return Path.Combine(parent, $"{safeName}-{suffix}.json");
+    public void WriteMigratedDocument(JsonDataDocument document, string targetPath, string strategy)
+    {
+        lock (_lock)
+        {
+            SaveDocumentLocked(
+                document,
+                Path.GetFullPath(targetPath),
+                string.Equals(strategy, SettingsService.JsonPerCollection, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    public void EnsureRequestFolderDirectory(
+        string serviceId,
+        string serviceName,
+        string? storagePath,
+        string folderName)
+    {
+        lock (_lock)
+        {
+            Directory.CreateDirectory(ResolveRequestFolderPath(
+                serviceId,
+                serviceName,
+                storagePath,
+                folderName));
+        }
+    }
+
+    public void RenameRequestFolderDirectory(
+        string serviceId,
+        string serviceName,
+        string? storagePath,
+        string oldName,
+        string newName)
+    {
+        lock (_lock)
+        {
+            var oldPath = ResolveRequestFolderPath(serviceId, serviceName, storagePath, oldName);
+            var newPath = ResolveRequestFolderPath(serviceId, serviceName, storagePath, newName);
+            if (string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
+            {
+                Directory.CreateDirectory(newPath);
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            if (Directory.Exists(oldPath) && !Directory.Exists(newPath))
+            {
+                Directory.Move(oldPath, newPath);
+            }
+            else
+            {
+                Directory.CreateDirectory(newPath);
+            }
+        }
+    }
+
+    public void DeleteRequestFolderDirectory(
+        string serviceId,
+        string serviceName,
+        string? storagePath,
+        string folderName)
+    {
+        lock (_lock)
+        {
+            var path = ResolveRequestFolderPath(serviceId, serviceName, storagePath, folderName);
+            if (!Directory.Exists(path)) return;
+
+            try
+            {
+                // Request folders are metadata containers. Never remove user files
+                // accidentally if somebody placed files in the directory.
+                Directory.Delete(path);
+            }
+            catch (IOException)
+            {
+                // Keep a non-empty directory; its request-folder metadata is gone.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Keep an inaccessible directory; its request-folder metadata is gone.
+            }
+        }
     }
 
     public void Mutate(Action<JsonDataDocument> action)
@@ -275,9 +354,20 @@ public class JsonDataStore
         return $"// Shared collection script: {fileName}\n// Use module.exports to expose reusable helpers to request scripts.\n\nmodule.exports = {{}};\n";
     }
 
-    private string DefaultCollectionsDirectory => Path.Combine(
-        Path.GetDirectoryName(_filePath) ?? Directory.GetCurrentDirectory(),
-        $"{Path.GetFileNameWithoutExtension(_filePath)}-collections");
+    private string ResolveRequestFolderPath(
+        string serviceId,
+        string serviceName,
+        string? storagePath,
+        string folderName)
+    {
+        return ResolveRequestFolderPathFor(
+            serviceId,
+            serviceName,
+            storagePath,
+            _filePath,
+            _settings.JsonStorageStrategy,
+            folderName);
+    }
 
     private void LoadRootLocked()
     {
@@ -302,9 +392,11 @@ public class JsonDataStore
     private void LoadCollectionFilesLocked()
     {
         var legacyRequests = _doc.Requests.ToList();
+        var legacyFolders = _doc.RequestFolders.ToList();
         var legacySettings = _doc.RequestSettings.ToList();
         var legacyVariables = _doc.ServiceVariables.ToList();
         _doc.Requests = [];
+        _doc.RequestFolders = [];
         _doc.RequestSettings = [];
         _doc.ServiceVariables = [];
 
@@ -322,6 +414,7 @@ public class JsonDataStore
                     if (collection != null)
                     {
                         _doc.Requests.AddRange(collection.Requests.Where(row => row.ServiceId == service.Id));
+                        _doc.RequestFolders.AddRange(collection.RequestFolders.Where(row => row.ServiceId == service.Id));
                         _doc.RequestSettings.AddRange(collection.RequestSettings.Where(row => row.RequestId != ""));
                         _doc.ServiceVariables.AddRange(collection.ServiceVariables.Where(row => row.ServiceId == service.Id));
                         continue;
@@ -334,6 +427,7 @@ public class JsonDataStore
             }
 
             _doc.Requests.AddRange(legacyRequests.Where(row => row.ServiceId == service.Id));
+            _doc.RequestFolders.AddRange(legacyFolders.Where(row => row.ServiceId == service.Id));
             _doc.RequestSettings.AddRange(legacySettings.Where(row => legacyRequests.Any(request => request.Id == row.RequestId && request.ServiceId == service.Id)));
             _doc.ServiceVariables.AddRange(legacyVariables.Where(row => row.ServiceId == service.Id));
         }
@@ -341,44 +435,156 @@ public class JsonDataStore
 
     private void SaveLocked()
     {
-        if (!IsPerCollection)
+        SaveDocumentLocked(_doc, _filePath, IsPerCollection);
+    }
+
+    private void SaveDocumentLocked(JsonDataDocument document, string filePath, bool isPerCollection)
+    {
+        if (!isPerCollection)
         {
-            WriteJsonFile(_filePath, _doc);
+            foreach (var service in document.Services)
+            {
+                service.StoragePath = "";
+            }
+
+            WriteJsonFile(filePath, document);
+            EnsureRequestFolderDirectoriesLocked(document, filePath, SettingsService.JsonSingleFile);
             return;
         }
 
-        foreach (var service in _doc.Services)
+        foreach (var service in document.Services)
         {
-            service.StoragePath = ResolveCollectionPath(service.Id, service.Name, service.StoragePath);
+            service.StoragePath = ResolveCollectionPathFor(
+                service.Id,
+                service.Name,
+                service.StoragePath,
+                filePath,
+                true);
         }
 
         var manifest = new JsonDataDocument
         {
-            Version = _doc.Version,
-            Workspaces = _doc.Workspaces,
-            Environments = _doc.Environments,
-            EnvironmentVariables = _doc.EnvironmentVariables,
-            Services = _doc.Services,
-            WorkspaceVariables = _doc.WorkspaceVariables,
-            History = _doc.History,
-            MockServers = _doc.MockServers,
+            Version = document.Version,
+            Workspaces = document.Workspaces,
+            Environments = document.Environments,
+            EnvironmentVariables = document.EnvironmentVariables,
+            Services = document.Services,
+            WorkspaceVariables = document.WorkspaceVariables,
+            History = document.History,
+            MockServers = document.MockServers,
         };
-        WriteJsonFile(_filePath, manifest);
+        WriteJsonFile(filePath, manifest);
 
-        foreach (var service in _doc.Services)
+        foreach (var service in document.Services)
         {
             var collection = new JsonCollectionDocument
             {
                 Service = service,
-                Requests = _doc.Requests.Where(row => row.ServiceId == service.Id).ToList(),
-                RequestSettings = _doc.RequestSettings
-                    .Where(row => _doc.Requests.Any(request => request.Id == row.RequestId && request.ServiceId == service.Id))
+                RequestFolders = document.RequestFolders.Where(folder => folder.ServiceId == service.Id).ToList(),
+                Requests = document.Requests.Where(row => row.ServiceId == service.Id).ToList(),
+                RequestSettings = document.RequestSettings
+                    .Where(row => document.Requests.Any(request => request.Id == row.RequestId && request.ServiceId == service.Id))
                     .ToList(),
-                ServiceVariables = _doc.ServiceVariables.Where(row => row.ServiceId == service.Id).ToList(),
+                ServiceVariables = document.ServiceVariables.Where(row => row.ServiceId == service.Id).ToList(),
             };
             collection.Service.Requests = [];
+            collection.Service.Folders = [];
             WriteJsonFile(service.StoragePath, collection);
         }
+
+        EnsureRequestFolderDirectoriesLocked(document, filePath, SettingsService.JsonPerCollection);
+    }
+
+    private static void EnsureRequestFolderDirectoriesLocked(
+        JsonDataDocument document,
+        string filePath,
+        string strategy)
+    {
+        foreach (var service in document.Services)
+        {
+            foreach (var folder in document.RequestFolders.Where(folder => folder.ServiceId == service.Id))
+            {
+                Directory.CreateDirectory(ResolveRequestFolderPathFor(
+                    service.Id,
+                    service.Name,
+                    service.StoragePath,
+                    filePath,
+                    strategy,
+                    folder.Name));
+            }
+        }
+    }
+
+    public static string ResolveCollectionPathFor(
+        string serviceId,
+        string name,
+        string? requestedPath,
+        string targetFilePath,
+        bool isPerCollection)
+    {
+        if (!isPerCollection) return "";
+
+        var normalized = requestedPath?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalized) &&
+            string.Equals(Path.GetExtension(normalized), ".json", StringComparison.OrdinalIgnoreCase) &&
+            !Directory.Exists(normalized))
+        {
+            return Path.GetFullPath(normalized);
+        }
+
+        var defaultDirectory = Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(targetFilePath)) ?? Directory.GetCurrentDirectory(),
+            $"{Path.GetFileNameWithoutExtension(targetFilePath)}-collections");
+        var parent = string.IsNullOrWhiteSpace(normalized)
+            ? defaultDirectory
+            : Path.GetFullPath(normalized);
+        var safeName = SanitizeFileName(name);
+        var suffix = serviceId.Length > 8 ? serviceId[..8] : serviceId;
+        return Path.Combine(parent, $"{safeName}-{suffix}.json");
+    }
+
+    public static string ResolveRequestFolderPathFor(
+        string serviceId,
+        string serviceName,
+        string? storagePath,
+        string jsonDataPath,
+        string strategy,
+        string folderName)
+    {
+        var isPerCollection = string.Equals(
+            strategy,
+            SettingsService.JsonPerCollection,
+            StringComparison.OrdinalIgnoreCase);
+        string serviceDirectory;
+
+        if (isPerCollection && !string.IsNullOrWhiteSpace(storagePath))
+        {
+            var collectionPath = Path.GetFullPath(storagePath);
+            serviceDirectory = Path.Combine(
+                Path.GetDirectoryName(collectionPath) ?? Directory.GetCurrentDirectory(),
+                Path.GetFileNameWithoutExtension(collectionPath));
+        }
+        else
+        {
+            var collectionsDirectory = Path.Combine(
+                Path.GetDirectoryName(Path.GetFullPath(jsonDataPath)) ?? Directory.GetCurrentDirectory(),
+                "requestloom-collections");
+            var safeName = SanitizeFileName(serviceName);
+            var suffix = serviceId.Length > 8 ? serviceId[..8] : serviceId;
+            var legacyDirectory = Path.Combine(collectionsDirectory, $"{safeName}-{suffix}");
+            serviceDirectory = Directory.Exists(legacyDirectory)
+                ? legacyDirectory
+                : Path.Combine(collectionsDirectory, $"collection-{suffix}");
+        }
+
+        return Path.Combine(serviceDirectory, SanitizeFileName(folderName));
+    }
+
+    private static JsonDataDocument CloneDocument(JsonDataDocument document)
+    {
+        return JsonSerializer.Deserialize<JsonDataDocument>(
+            JsonSerializer.Serialize(document, JsonOptions),
+            JsonOptions) ?? new JsonDataDocument();
     }
 
     private static void WriteJsonFile(string path, object value)
@@ -437,6 +643,7 @@ public class JsonCollectionDocument
 {
     public int Version { get; set; } = 1;
     public Service Service { get; set; } = new();
+    public List<RequestFolder> RequestFolders { get; set; } = [];
     public List<ApiRequest> Requests { get; set; } = [];
     public List<ApiRequestSettings> RequestSettings { get; set; } = [];
     public List<ServiceVariable> ServiceVariables { get; set; } = [];
@@ -450,6 +657,7 @@ public class JsonDataDocument
     public List<Environment> Environments { get; set; } = [];
     public List<EnvironmentVariable> EnvironmentVariables { get; set; } = [];
     public List<Service> Services { get; set; } = [];
+    public List<RequestFolder> RequestFolders { get; set; } = [];
     public List<ApiRequest> Requests { get; set; } = [];
     public List<ApiRequestSettings> RequestSettings { get; set; } = [];
     public List<WorkspaceVariable> WorkspaceVariables { get; set; } = [];

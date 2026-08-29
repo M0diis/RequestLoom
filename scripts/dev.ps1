@@ -30,6 +30,7 @@ $BACKEND_PID_FILE = Join-Path $PID_DIR "backend.pid"
 $FRONTEND_PID_FILE = Join-Path $PID_DIR "frontend.pid"
 $BACKEND_LOG = Join-Path $LOG_DIR "backend.log"
 $FRONTEND_LOG = Join-Path $LOG_DIR "frontend.log"
+$STDIN_FILE = Join-Path $LOG_DIR "dev-stdin.txt"
 
 $BACKEND_PORT = if ($env:BACKEND_PORT) { $env:BACKEND_PORT } else { "5056" }
 $FRONTEND_PORT = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "5173" }
@@ -139,7 +140,8 @@ function Start-Backend {
         -WorkingDirectory $BACKEND_DIR `
         -RedirectStandardOutput $BACKEND_LOG `
         -RedirectStandardError (Join-Path $LOG_DIR "backend-error.log") `
-        -NoNewWindow `
+        -RedirectStandardInput $STDIN_FILE `
+        -WindowStyle Hidden `
         -PassThru
 
     $proc.Id | Out-File -FilePath $BACKEND_PID_FILE -NoNewline
@@ -165,7 +167,8 @@ function Start-Frontend {
         -WorkingDirectory $FRONTEND_DIR `
         -RedirectStandardOutput $FRONTEND_LOG `
         -RedirectStandardError (Join-Path $LOG_DIR "frontend-error.log") `
-        -NoNewWindow `
+        -RedirectStandardInput $STDIN_FILE `
+        -WindowStyle Hidden `
         -PassThru
 
     $proc.Id | Out-File -FilePath $FRONTEND_PID_FILE -NoNewline
@@ -231,6 +234,9 @@ function Show-Status {
 
 function Start-All {
     New-Item -ItemType Directory -Force -Path $LOG_DIR, $PID_DIR | Out-Null
+    if (-not (Test-Path -LiteralPath $STDIN_FILE)) {
+        New-Item -ItemType File -Path $STDIN_FILE | Out-Null
+    }
     Start-Backend
     Start-Frontend
     Write-Host ""

@@ -4,6 +4,7 @@ public class ApiRequest
 {
     public string Id { get; set; } = "";
     public string ServiceId { get; set; } = "";
+    public string? FolderId { get; set; }
     public string Name { get; set; } = "";
     public string Method { get; set; } = "GET";
     public string Url { get; set; } = "";
@@ -75,6 +76,18 @@ public class CreateApiRequestRequest
     public string Url { get; set; } = "";
     public string? Body { get; set; }
     public string BodyType { get; set; } = "none";
+    public string? FolderId { get; set; }
+}
+
+public class MoveRequestToFolderRequest
+{
+    public string? FolderId { get; set; }
+}
+
+public class ReorderRequestRequest
+{
+    public string? FolderId { get; set; }
+    public string? BeforeRequestId { get; set; }
 }
 
 public class UpdateApiRequestRequest

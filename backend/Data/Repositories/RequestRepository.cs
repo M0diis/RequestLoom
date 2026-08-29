@@ -22,6 +22,9 @@ public class RequestRepository : IRequestRepository
 
     public async Task<ApiRequest> CreateAsync(string serviceId, CreateApiRequestRequest request)
     {
+        if (!string.IsNullOrWhiteSpace(request.FolderId) && !await IsFolderInServiceAsync(request.FolderId, serviceId))
+            throw new InvalidOperationException("Folder does not belong to the request service.");
+
         var maxSort = await _db.Requests
             .Where(r => r.ServiceId == serviceId)
             .Select(r => (int?)r.SortOrder)
@@ -32,6 +35,7 @@ public class RequestRepository : IRequestRepository
         {
             Id = Guid.NewGuid().ToString("N"),
             ServiceId = serviceId,
+            FolderId = string.IsNullOrWhiteSpace(request.FolderId) ? null : request.FolderId,
             Name = request.Name,
             Method = request.Method,
             Url = request.Url,
@@ -161,6 +165,7 @@ public class RequestRepository : IRequestRepository
         {
             Id = Guid.NewGuid().ToString("N"),
             ServiceId = row.ServiceId,
+            FolderId = row.FolderId,
             Name = row.Name + " (copy)",
             Method = row.Method,
             Url = row.Url,
@@ -240,9 +245,69 @@ public class RequestRepository : IRequestRepository
             .MaxAsync() ?? -1;
 
         row.ServiceId = newServiceId;
+        row.FolderId = null;
         row.SortOrder = maxSort + 1;
         await _db.SaveChangesAsync();
 
+        return true;
+    }
+
+    public async Task<bool> MoveToFolderAsync(string id, string? folderId)
+    {
+        var row = await _db.Requests.FindAsync(id);
+        if (row == null) return false;
+
+        if (!string.IsNullOrWhiteSpace(folderId) && !await IsFolderInServiceAsync(folderId, row.ServiceId))
+            return false;
+
+        var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
+        var maxSort = await _db.Requests
+            .Where(request => request.ServiceId == row.ServiceId && request.FolderId == targetFolderId && request.Id != id)
+            .Select(request => (int?)request.SortOrder)
+            .MaxAsync() ?? -1;
+
+        row.FolderId = targetFolderId;
+        row.SortOrder = maxSort + 1;
+        row.UpdatedAt = DateTime.UtcNow.ToString("o");
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> ReorderAsync(string id, string? folderId, string? beforeRequestId)
+    {
+        var row = await _db.Requests.FirstOrDefaultAsync(request => request.Id == id);
+        if (row == null) return false;
+
+        var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
+        if (targetFolderId != null && !await IsFolderInServiceAsync(targetFolderId, row.ServiceId))
+            return false;
+
+        var rows = await _db.Requests
+            .Where(request => request.ServiceId == row.ServiceId)
+            .OrderBy(request => request.SortOrder)
+            .ThenBy(request => request.Id)
+            .ToListAsync();
+        var before = string.IsNullOrWhiteSpace(beforeRequestId)
+            ? null
+            : rows.FirstOrDefault(request => request.Id == beforeRequestId && request.FolderId == targetFolderId);
+        if (!string.IsNullOrWhiteSpace(beforeRequestId) && before == null)
+            return false;
+        if (before?.Id == id && row.FolderId == targetFolderId)
+            return true;
+
+        rows.Remove(row);
+        var insertIndex = before == null
+            ? rows.FindLastIndex(request => request.FolderId == targetFolderId) + 1
+            : rows.IndexOf(before);
+        if (insertIndex < 0) insertIndex = rows.Count;
+
+        row.FolderId = targetFolderId;
+        row.UpdatedAt = DateTime.UtcNow.ToString("o");
+        rows.Insert(insertIndex, row);
+        for (var index = 0; index < rows.Count; index++)
+            rows[index].SortOrder = index;
+
+        await _db.SaveChangesAsync();
         return true;
     }
 
@@ -373,6 +438,7 @@ public class RequestRepository : IRequestRepository
         {
             Id = row.Id,
             ServiceId = row.ServiceId,
+            FolderId = row.FolderId,
             Name = row.Name,
             Method = row.Method,
             Url = row.Url,
@@ -415,5 +481,10 @@ public class RequestRepository : IRequestRepository
         }
 
         return result;
+    }
+
+    private Task<bool> IsFolderInServiceAsync(string? folderId, string serviceId)
+    {
+        return _db.RequestFolders.AnyAsync(folder => folder.Id == folderId && folder.ServiceId == serviceId);
     }
 }

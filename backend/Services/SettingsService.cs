@@ -178,7 +178,7 @@ public class SettingsService
         string? newJsonStorageStrategy = null;
         if (!string.IsNullOrWhiteSpace(request.JsonStorageStrategy))
         {
-            var normalizedStrategy = Normalize(request.JsonStorageStrategy);
+            var normalizedStrategy = NormalizeJsonStorageStrategy(request.JsonStorageStrategy);
             if (normalizedStrategy != JsonSingleFile && normalizedStrategy != JsonPerCollection)
                 throw new ArgumentException($"Invalid JSON storage strategy '{request.JsonStorageStrategy}'. Expected 'single' or 'perCollection'.");
             newJsonStorageStrategy = normalizedStrategy;
@@ -293,6 +293,14 @@ public class SettingsService
     }
 
     private static string Normalize(string mode) => mode.Trim().ToLowerInvariant();
+
+    private static string NormalizeJsonStorageStrategy(string strategy)
+    {
+        var normalized = strategy.Trim();
+        return normalized.Equals(JsonPerCollection, StringComparison.OrdinalIgnoreCase)
+            ? JsonPerCollection
+            : normalized.ToLowerInvariant();
+    }
 }
 
 public class AppSettingsDto

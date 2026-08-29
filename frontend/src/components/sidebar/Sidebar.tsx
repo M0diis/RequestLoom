@@ -10,6 +10,7 @@ import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import { AlertModal } from '../common/AlertModal';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { TextInputModal } from '../common/TextInputModal';
+import { MoveRequestFolderModal } from '../common/MoveRequestFolderModal';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useScriptFileStore, type ScriptFileEntry } from '../../stores/scriptFileStore';
 import { exportImportApi, requestsApi, serviceFilesApi } from '../../services/api';
@@ -135,6 +136,11 @@ export function Sidebar() {
     toggleFavorite,
     isRequestDirty,
     moveService,
+    createFolder,
+    updateFolder,
+    deleteFolder,
+    moveRequestToFolder,
+    reorderRequest,
   } = useRequestStore();
   const { activeWorkspaceId } = useWorkspaceStore();
   const {
@@ -157,15 +163,25 @@ export function Sidebar() {
   const [newServicePath, setNewServicePath] = useState('');
   const [addingService, setAddingService] = useState(false);
   const [addingRequestToService, setAddingRequestToService] = useState<string | null>(null);
+  const [addingRequestToFolder, setAddingRequestToFolder] = useState<{ serviceId: string; folderId: string } | null>(null);
   const [newRequestName, setNewRequestName] = useState('');
-  const [contextMenu, setContextMenu] = useState<{ type: 'service' | 'request' | 'script'; id: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ type: 'service' | 'request' | 'folder' | 'script'; id: string; x: number; y: number } | null>(null);
   const [collapsedServices, setCollapsedServices] = useState<Set<string>>(new Set());
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [showImport, setShowImport] = useState(false);
-  const [showCollectionRunner, setShowCollectionRunner] = useState<string | null>(null);
+  const [showCollectionRunner, setShowCollectionRunner] = useState<{ serviceId: string; folderId?: string } | null>(null);
   const [renamingRequestId, setRenamingRequestId] = useState<string | null>(null);
   const [renamingRequestName, setRenamingRequestName] = useState('');
   const [renamingServiceId, setRenamingServiceId] = useState<string | null>(null);
   const [renamingServiceName, setRenamingServiceName] = useState('');
+  const [folderDialog, setFolderDialog] = useState<{
+    mode: 'create' | 'rename';
+    serviceId: string;
+    folderId?: string;
+    initialValue: string;
+  } | null>(null);
+  const [folderToDelete, setFolderToDelete] = useState<{ serviceId: string; id: string; name: string } | null>(null);
+  const [moveRequestId, setMoveRequestId] = useState<string | null>(null);
   const [showCodeForRequest, setShowCodeForRequest] = useState<ApiRequest | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [collectionAssetDialog, setCollectionAssetDialog] = useState<{
@@ -174,6 +190,10 @@ export function Sidebar() {
   } | null>(null);
   const [scriptToDelete, setScriptToDelete] = useState<ScriptFileEntry | null>(null);
   const [deletingScript, setDeletingScript] = useState(false);
+  const [draggingRequestId, setDraggingRequestId] = useState<string | null>(null);
+  const [dragOverRequestId, setDragOverRequestId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [dragOverServiceId, setDragOverServiceId] = useState<string | null>(null);
   const addRequestSubmitting = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -225,13 +245,14 @@ export function Sidebar() {
     if (selected) setNewServicePath(selected);
   };
 
-  const handleAddRequest = async (serviceId: string) => {
+  const handleAddRequest = async (serviceId: string, folderId: string | null = null) => {
     if (!newRequestName.trim() || addRequestSubmitting.current) return;
     addRequestSubmitting.current = true;
     try {
-      const req = await createRequest(serviceId, newRequestName.trim(), 'GET');
+      const req = await createRequest(serviceId, newRequestName.trim(), 'GET', folderId);
       setNewRequestName('');
       setAddingRequestToService(null);
+      setAddingRequestToFolder(null);
       setActiveScriptFile(null);
       await selectRequest(req.id);
     } finally {
@@ -301,9 +322,50 @@ export function Sidebar() {
     setRenamingServiceName('');
   };
 
-  const handleContextMenu = (e: React.MouseEvent, type: 'service' | 'request' | 'script', id: string) => {
+  const handleContextMenu = (e: React.MouseEvent, type: 'service' | 'request' | 'folder' | 'script', id: string) => {
     e.preventDefault();
     setContextMenu({ type, id, x: e.clientX, y: e.clientY });
+  };
+
+  const openCreateFolderDialog = (serviceId: string) => {
+    setContextMenu(null);
+    setFolderDialog({ mode: 'create', serviceId, initialValue: '' });
+  };
+
+  const openRenameFolderDialog = (serviceId: string, folderId: string, name: string) => {
+    setContextMenu(null);
+    setFolderDialog({ mode: 'rename', serviceId, folderId, initialValue: name });
+  };
+
+  const handleFolderDialogSubmit = async (name: string) => {
+    if (!folderDialog) return;
+    try {
+      if (folderDialog.mode === 'create') {
+        await createFolder(activeWorkspaceId, folderDialog.serviceId, name);
+      } else if (folderDialog.folderId) {
+        await updateFolder(activeWorkspaceId, folderDialog.serviceId, folderDialog.folderId, name);
+      }
+      setFolderDialog(null);
+    } catch (error) {
+      setFolderDialog(null);
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to save request folder');
+    }
+  };
+
+  const handleDeleteFolder = async () => {
+    if (!folderToDelete) return;
+    try {
+      await deleteFolder(activeWorkspaceId, folderToDelete.serviceId, folderToDelete.id);
+      setCollapsedFolders((previous) => {
+        const next = new Set(previous);
+        next.delete(folderToDelete.id);
+        return next;
+      });
+      setFolderToDelete(null);
+    } catch (error) {
+      setFolderToDelete(null);
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to delete request folder');
+    }
   };
 
   const openServiceSettings = (serviceId: string) => {
@@ -321,6 +383,62 @@ export function Sidebar() {
     }
     await store.selectRequest(requestId);
     await store.sendRequest(activeWorkspaceId);
+  };
+
+  const clearDragState = () => {
+    setDraggingRequestId(null);
+    setDragOverRequestId(null);
+    setDragOverFolderId(null);
+    setDragOverServiceId(null);
+  };
+
+  const getDraggedRequestId = (event: React.DragEvent) =>
+    event.dataTransfer.getData('text/plain') || draggingRequestId;
+
+  const handleDropOnRequest = (event: React.DragEvent, target: ApiRequest) => {
+    event.preventDefault();
+    const requestId = getDraggedRequestId(event);
+    if (!requestId || requestId === target.id) {
+      clearDragState();
+      return;
+    }
+
+    void reorderRequest(requestId, target.folderId ?? null, target.id)
+      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
+      .finally(clearDragState);
+  };
+
+  const handleDropOnFolder = (event: React.DragEvent, folderId: string) => {
+    event.preventDefault();
+    const requestId = getDraggedRequestId(event);
+    if (!requestId) {
+      clearDragState();
+      return;
+    }
+
+    void reorderRequest(requestId, folderId, null)
+      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
+      .finally(clearDragState);
+  };
+
+  const handleDropOnService = (event: React.DragEvent, serviceId: string) => {
+    event.preventDefault();
+    const requestId = getDraggedRequestId(event);
+    const source = requestId
+      ? services.flatMap((service) => service.requests).find((request) => request.id === requestId)
+      : null;
+    if (source && source.serviceId !== serviceId) {
+      clearDragState();
+      return;
+    }
+    if (!requestId) {
+      clearDragState();
+      return;
+    }
+
+    void reorderRequest(requestId, null, null)
+      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
+      .finally(clearDragState);
   };
 
   const revealPath = async (targetPath: string) => {
@@ -457,6 +575,84 @@ export function Sidebar() {
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [contextMenu]);
+
+  const renderRequest = (request: ApiRequest, indentation = 'pl-8') => {
+    if (renamingRequestId === request.id) {
+      return (
+        <div key={request.id} className={`${indentation} pr-3 py-1.5`}>
+          <input
+            autoFocus
+            value={renamingRequestName}
+            onChange={(event) => setRenamingRequestName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void commitRenameRequest(request.id, event.currentTarget.value);
+              if (event.key === 'Escape') cancelRenameRequest();
+            }}
+            onBlur={(event) => { void commitRenameRequest(request.id, event.currentTarget.value); }}
+            className="w-full border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
+            placeholder="Request name"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={request.id}
+        draggable
+        onDragStart={(event) => {
+          event.dataTransfer.setData('text/plain', request.id);
+          event.dataTransfer.effectAllowed = 'move';
+          setDraggingRequestId(request.id);
+        }}
+        onDragEnd={clearDragState}
+        onDragOver={(event) => {
+          if (!draggingRequestId) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          setDragOverRequestId(request.id);
+          setDragOverFolderId(null);
+          setDragOverServiceId(null);
+        }}
+        onDragLeave={(event) => {
+          if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
+            setDragOverRequestId((current) => current === request.id ? null : current);
+          }
+        }}
+        onDrop={(event) => handleDropOnRequest(event, request)}
+        className={`group relative ${indentation} transition-colors ${
+          dragOverRequestId === request.id
+            ? 'border-t-2 border-cyan-400/80 bg-cyan-500/10'
+            : activeRequestId === request.id
+              ? 'bg-gray-800/70'
+              : 'hover:bg-gray-900/50'
+        }`}
+      >
+        <button
+          onClick={() => { setServiceSettingsServiceId(null); setActiveScriptFile(null); void selectRequest(request.id); }}
+          onContextMenu={(event) => handleContextMenu(event, 'request', request.id)}
+          className={`flex w-full items-center gap-2 py-1.5 pr-3 text-left text-xs active:cursor-grabbing ${
+            activeRequestId === request.id ? 'text-gray-100' : 'text-gray-400'
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className="w-3 cursor-grab select-none text-[13px] leading-none text-gray-600 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-hover:text-gray-400 active:cursor-grabbing"
+            title="Drag to move"
+          >
+            ⠿
+          </span>
+          <span className={`w-10 font-mono text-[10px] font-bold ${METHOD_COLORS[request.method]}`}>
+            {request.method}
+          </span>
+          <span className="truncate">{request.name}</span>
+          {isRequestDirty(request.id) && (
+            <span className="ml-auto inline-block h-2 w-2 flex-shrink-0 rounded-full bg-amber-500" title="Unsaved changes" />
+          )}
+        </button>
+      </div>
+    );
+  };
 
   return (
     <div ref={sidebarRef} className="flex flex-col h-full bg-[#111111] text-gray-200" onClick={() => setContextMenu(null)}>
@@ -597,9 +793,25 @@ export function Sidebar() {
           {services.map((service, index) => (
             <div key={service.id} className="border-b border-gray-900/70">
               <div
-                className="group flex cursor-pointer items-center px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-gray-900/60"
+                className={`group flex cursor-pointer items-center px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-gray-900/60 ${
+                  dragOverServiceId === service.id ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70' : ''
+                }`}
                 onClick={() => toggleCollapse(service.id)}
                 onContextMenu={(e) => handleContextMenu(e, 'service', service.id)}
+                onDragOver={(event) => {
+                  if (!draggingRequestId) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                  setDragOverServiceId(service.id);
+                  setDragOverFolderId(null);
+                  setDragOverRequestId(null);
+                }}
+                onDragLeave={(event) => {
+                  if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
+                    setDragOverServiceId((current) => current === service.id ? null : current);
+                  }
+                }}
+                onDrop={(event) => handleDropOnService(event, service.id)}
               >
                 <svg
                   className={`mr-1.5 h-3 w-3 text-gray-500 transition-transform ${collapsedServices.has(service.id) ? '' : 'rotate-90'}`}
@@ -657,7 +869,7 @@ export function Sidebar() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setShowCollectionRunner(service.id);
+                      setShowCollectionRunner({ serviceId: service.id });
                     }}
                     className="p-0.5 text-gray-500 hover:bg-gray-800 hover:text-emerald-400"
                     title="Run collection"
@@ -697,6 +909,7 @@ export function Sidebar() {
                   onClick={(e) => {
                     e.stopPropagation();
                     setCollapsedServices((prev) => { const next = new Set(prev); next.delete(service.id); return next; });
+                    setAddingRequestToFolder(null);
                     setAddingRequestToService(service.id);
                     setNewRequestName('');
                   }}
@@ -709,55 +922,106 @@ export function Sidebar() {
                 </button>
               </div>
 
-              {/* Requests */}
-              {!collapsedServices.has(service.id) && service.requests.map((req) => {
-                if (renamingRequestId === req.id) {
-                  return (
-                    <div key={req.id} className="pl-8 pr-3 py-1.5">
-                      <input
-                        autoFocus
-                        value={renamingRequestName}
-                        onChange={(event) => setRenamingRequestName(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            void commitRenameRequest(req.id, event.currentTarget.value);
-                          }
-
-                          if (event.key === 'Escape') {
-                            cancelRenameRequest();
-                          }
-                        }}
-                        onBlur={(event) => {
-                          void commitRenameRequest(req.id, event.currentTarget.value);
-                        }}
-                        className="w-full border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
-                        placeholder="Request name"
-                      />
-                    </div>
-                  );
-                }
-
+              {/* Request folders and direct service requests */}
+              {!collapsedServices.has(service.id) && service.folders.map((folder) => {
+                const folderRequests = service.requests.filter((request) => request.folderId === folder.id);
+                const folderCollapsed = collapsedFolders.has(folder.id);
                 return (
-                  <button
-                    key={req.id}
-                  onClick={() => { setServiceSettingsServiceId(null); setActiveScriptFile(null); void selectRequest(req.id); }}
-                    onContextMenu={(e) => handleContextMenu(e, 'request', req.id)}
-                    className={`w-full text-left pl-8 pr-3 py-1.5 text-xs flex items-center gap-2 ${
-                      activeRequestId === req.id
-                        ? 'bg-gray-800/70 text-gray-100'
-                        : 'text-gray-400 hover:bg-gray-900/50'
-                    }`}
-                  >
-                    <span className={`font-mono text-[10px] font-bold w-10 ${METHOD_COLORS[req.method]}`}>
-                      {req.method}
-                    </span>
-                    <span className="truncate">{req.name}</span>
-                    {isRequestDirty(req.id) && (
-                      <span className="ml-auto inline-block h-2 w-2 rounded-full bg-amber-500 flex-shrink-0" title="Unsaved changes" />
+                  <div key={folder.id}>
+                    <div
+                      className={`group flex cursor-pointer items-center gap-1.5 px-6 py-1.5 text-xs text-gray-300 hover:bg-gray-900/60 ${
+                        dragOverFolderId === folder.id ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70' : ''
+                      }`}
+                      onClick={() => setCollapsedFolders((previous) => {
+                        const next = new Set(previous);
+                        if (next.has(folder.id)) next.delete(folder.id);
+                        else next.add(folder.id);
+                        return next;
+                      })}
+                      onContextMenu={(event) => handleContextMenu(event, 'folder', folder.id)}
+                      onDragOver={(event) => {
+                        if (!draggingRequestId) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                        setDragOverFolderId(folder.id);
+                        setDragOverServiceId(null);
+                        setDragOverRequestId(null);
+                      }}
+                      onDragLeave={(event) => {
+                        if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
+                          setDragOverFolderId((current) => current === folder.id ? null : current);
+                        }
+                      }}
+                      onDrop={(event) => handleDropOnFolder(event, folder.id)}
+                    >
+                      <svg className={`h-3 w-3 flex-shrink-0 text-gray-500 transition-transform ${folderCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                      <svg className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                        <path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                      </svg>
+                      <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+                      {!compact && <span className="text-[10px] text-gray-500">{folderRequests.length}</span>}
+                      {!compact && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setCollapsedFolders((previous) => { const next = new Set(previous); next.delete(folder.id); return next; });
+                            setAddingRequestToService(null);
+                            setAddingRequestToFolder({ serviceId: service.id, folderId: folder.id });
+                            setNewRequestName('');
+                          }}
+                          className="p-0.5 text-gray-500 hover:text-gray-200"
+                          title="Add request to folder"
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
+                        </button>
+                      )}
+                      {!compact && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const bounds = event.currentTarget.getBoundingClientRect();
+                            setContextMenu({ type: 'folder', id: folder.id, x: bounds.right, y: bounds.bottom });
+                          }}
+                          className="p-0.5 text-gray-500 hover:text-gray-300"
+                          title="Folder menu"
+                          aria-label={`Open ${folder.name} menu`}
+                        >
+                          <span className="text-sm leading-none">⋯</span>
+                        </button>
+                      )}
+                    </div>
+                    {!folderCollapsed && folderRequests.map((request) => renderRequest(request, 'pl-10'))}
+                    {!folderCollapsed && addingRequestToFolder?.serviceId === service.id && addingRequestToFolder.folderId === folder.id && (
+                      <div className="pl-10 pr-3 py-1">
+                        <input
+                          autoFocus
+                          className="w-full border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
+                          placeholder="Request name (Enter to add)"
+                          value={newRequestName}
+                          onChange={(event) => setNewRequestName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') void handleAddRequest(service.id, folder.id);
+                            if (event.key === 'Escape') setAddingRequestToFolder(null);
+                          }}
+                          onBlur={() => {
+                            setTimeout(() => {
+                              if (!addRequestSubmitting.current) setAddingRequestToFolder(null);
+                            }, 150);
+                          }}
+                        />
+                      </div>
                     )}
-                  </button>
+                  </div>
                 );
               })}
+
+              {!collapsedServices.has(service.id) && service.requests
+                .filter((request) => !request.folderId)
+                .map((request) => renderRequest(request))}
 
               {/* Collection JavaScript files */}
               {!collapsedServices.has(service.id) && scriptFiles
@@ -818,7 +1082,7 @@ export function Sidebar() {
         <div
           ref={contextMenuRef}
           role="menu"
-          aria-label={contextMenu.type === 'request' ? 'Request actions' : contextMenu.type === 'script' ? 'JavaScript file actions' : 'Collection actions'}
+          aria-label={contextMenu.type === 'request' ? 'Request actions' : contextMenu.type === 'folder' ? 'Folder actions' : contextMenu.type === 'script' ? 'JavaScript file actions' : 'Collection actions'}
           className="fixed z-50 max-h-[calc(100vh-1rem)] min-w-[210px] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-gray-700/80 bg-[#1b1b1b] p-1 shadow-[0_16px_36px_rgba(0,0,0,0.55)] ring-1 ring-black/40"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
@@ -835,6 +1099,9 @@ export function Sidebar() {
               </ContextMenuItem>
               <ContextMenuItem icon="rename" onClick={() => { startRenameRequest(contextMenu.id); setContextMenu(null); }}>
                 Rename
+              </ContextMenuItem>
+              <ContextMenuItem icon="folder" onClick={() => { setMoveRequestId(contextMenu.id); setContextMenu(null); }}>
+                Move to Folder…
               </ContextMenuItem>
               <ContextMenuItem
                 icon="code"
@@ -884,6 +1151,7 @@ export function Sidebar() {
                 icon="plus"
                 onClick={() => {
                   setCollapsedServices((prev) => { const next = new Set(prev); next.delete(contextMenu.id); return next; });
+                  setAddingRequestToFolder(null);
                   setAddingRequestToService(contextMenu.id);
                   setNewRequestName('');
                   setContextMenu(null);
@@ -891,14 +1159,21 @@ export function Sidebar() {
               >
                 New Request
               </ContextMenuItem>
-              <ContextMenuItem icon="folder-plus" onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'folder'); }}>
-                New Folder
+              {settings?.storageMode === 'json' && (
+                <ContextMenuItem icon="folder-plus" onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'folder'); }}>
+                  New File Folder
+                </ContextMenuItem>
+              )}
+              <ContextMenuItem icon="folder-plus" onClick={() => { openCreateFolderDialog(contextMenu.id); }}>
+                New Request Folder
               </ContextMenuItem>
-              <ContextMenuItem icon="file-code" onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'js'); }}>
-                New JS File
-              </ContextMenuItem>
+              {settings?.storageMode === 'json' && (
+                <ContextMenuItem icon="file-code" onClick={() => { void handleCreateCollectionAsset(contextMenu.id, 'js'); }}>
+                  New JS File
+                </ContextMenuItem>
+              )}
               <div role="separator" className="my-1.5 border-t border-gray-800/80" />
-              <ContextMenuItem icon="play" onClick={() => { setShowCollectionRunner(contextMenu.id); setContextMenu(null); }}>
+              <ContextMenuItem icon="play" onClick={() => { setShowCollectionRunner({ serviceId: contextMenu.id }); setContextMenu(null); }}>
                 Run
               </ContextMenuItem>
               <ContextMenuItem icon="clone" onClick={() => { void duplicateService(activeWorkspaceId, contextMenu.id); setContextMenu(null); }}>
@@ -957,6 +1232,46 @@ export function Sidebar() {
               </ContextMenuItem>
             </>
           )}
+          {contextMenu.type === 'folder' && (() => {
+            const service = services.find((row) => row.folders.some((folder) => folder.id === contextMenu.id));
+            const folder = service?.folders.find((row) => row.id === contextMenu.id);
+            if (!service || !folder) return null;
+
+            return (
+              <>
+                <ContextMenuItem
+                  icon="plus"
+                  onClick={() => {
+                    setCollapsedServices((previous) => { const next = new Set(previous); next.delete(service.id); return next; });
+                    setCollapsedFolders((previous) => { const next = new Set(previous); next.delete(folder.id); return next; });
+                    setAddingRequestToService(null);
+                    setAddingRequestToFolder({ serviceId: service.id, folderId: folder.id });
+                    setNewRequestName('');
+                    setContextMenu(null);
+                  }}
+                >
+                  New Request
+                </ContextMenuItem>
+                <ContextMenuItem icon="play" onClick={() => { setShowCollectionRunner({ serviceId: service.id, folderId: folder.id }); setContextMenu(null); }}>
+                  Run Folder
+                </ContextMenuItem>
+                <ContextMenuItem icon="rename" onClick={() => { openRenameFolderDialog(service.id, folder.id, folder.name); }}>
+                  Rename
+                </ContextMenuItem>
+                <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+                <ContextMenuItem
+                  icon="trash"
+                  danger
+                  onClick={() => {
+                    setContextMenu(null);
+                    setFolderToDelete({ serviceId: service.id, id: folder.id, name: folder.name });
+                  }}
+                >
+                  Delete Folder
+                </ContextMenuItem>
+              </>
+            );
+          })()}
           {contextMenu.type === 'script' && (() => {
             const file = scriptFiles.find((item) => item.key === contextMenu.id);
             if (!file) return null;
@@ -1004,6 +1319,52 @@ export function Sidebar() {
         />
       )}
 
+      {folderDialog && (
+        <TextInputModal
+          title={folderDialog.mode === 'create' ? 'Create request folder' : 'Rename request folder'}
+          label="Folder name"
+          placeholder="e.g. Users"
+          initialValue={folderDialog.initialValue}
+          confirmLabel={folderDialog.mode === 'create' ? 'Create' : 'Save'}
+          onConfirm={handleFolderDialogSubmit}
+          onClose={() => setFolderDialog(null)}
+        />
+      )}
+
+      {folderToDelete && (
+        <ConfirmModal
+          title="Delete request folder"
+          message={`Delete ${folderToDelete.name}? Requests will remain in the service root.`}
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={() => { void handleDeleteFolder(); }}
+          onClose={() => setFolderToDelete(null)}
+        />
+      )}
+
+      {moveRequestId && (() => {
+        const request = services.flatMap((service) => service.requests).find((item) => item.id === moveRequestId);
+        const service = services.find((item) => item.requests.some((itemRequest) => itemRequest.id === moveRequestId));
+        if (!request || !service) return null;
+
+        return (
+          <MoveRequestFolderModal
+            requestName={request.name}
+            folders={service.folders}
+            currentFolderId={request.folderId}
+            onConfirm={async (folderId) => {
+              try {
+                await moveRequestToFolder(request.id, folderId);
+                setMoveRequestId(null);
+              } catch (error) {
+                setAlertMessage(error instanceof Error ? error.message : 'Failed to move request');
+              }
+            }}
+            onClose={() => setMoveRequestId(null)}
+          />
+        );
+      })()}
+
       {scriptToDelete && (
         <ConfirmModal
           title="Delete JavaScript file"
@@ -1020,7 +1381,8 @@ export function Sidebar() {
       {showCollectionRunner && (
         <CollectionRunnerModal
           onClose={() => setShowCollectionRunner(null)}
-          serviceId={showCollectionRunner}
+          serviceId={showCollectionRunner.serviceId}
+          folderId={showCollectionRunner.folderId}
         />
       )}
 

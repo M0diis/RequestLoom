@@ -98,6 +98,123 @@ public class JsonServiceRepository : IServiceRepository
         return Task.FromResult(updated == null ? null : Clone(updated));
     }
 
+    public Task<RequestFolder?> CreateFolderAsync(string workspaceId, string serviceId, string name)
+    {
+        RequestFolder? created = null;
+        string? serviceName = null;
+        string? storagePath = null;
+        _store.Mutate(doc =>
+        {
+            var service = doc.Services.FirstOrDefault(row => row.Id == serviceId && row.WorkspaceId == workspaceId);
+            if (service == null) return;
+
+            serviceName = service.Name;
+            storagePath = service.StoragePath;
+
+            var maxOrder = doc.RequestFolders
+                .Where(folder => folder.ServiceId == serviceId)
+                .Select(folder => (int?)folder.SortOrder)
+                .Max() ?? -1;
+
+            created = new RequestFolder
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                ServiceId = serviceId,
+                Name = name,
+                SortOrder = maxOrder + 1,
+                CreatedAt = JsonDataStore.Now(),
+            };
+            doc.RequestFolders.Add(created);
+        });
+
+        if (created != null)
+        {
+            _store.EnsureRequestFolderDirectory(serviceId, serviceName ?? "collection", storagePath, created.Name);
+        }
+
+        return Task.FromResult(created == null ? null : CloneFolder(created));
+    }
+
+    public Task<RequestFolder?> UpdateFolderAsync(string workspaceId, string serviceId, string folderId, string name)
+    {
+        RequestFolder? updated = null;
+        string? serviceName = null;
+        string? storagePath = null;
+        string? oldName = null;
+        _store.Mutate(doc =>
+        {
+            var service = doc.Services.FirstOrDefault(row => row.Id == serviceId && row.WorkspaceId == workspaceId);
+            var folder = doc.RequestFolders.FirstOrDefault(row => row.Id == folderId && row.ServiceId == serviceId);
+            if (service == null || folder == null) return;
+
+            serviceName = service.Name;
+            storagePath = service.StoragePath;
+            oldName = folder.Name;
+            folder.Name = name;
+            updated = folder;
+        });
+
+        if (updated != null)
+        {
+            _store.RenameRequestFolderDirectory(
+                serviceId,
+                serviceName ?? "collection",
+                storagePath,
+                oldName ?? updated.Name,
+                updated.Name);
+        }
+
+        return Task.FromResult(updated == null ? null : CloneFolder(updated));
+    }
+
+    public Task<bool> DeleteFolderAsync(string workspaceId, string serviceId, string folderId)
+    {
+        var deleted = false;
+        string? serviceName = null;
+        string? storagePath = null;
+        string? folderName = null;
+        _store.Mutate(doc =>
+        {
+            var service = doc.Services.FirstOrDefault(row => row.Id == serviceId && row.WorkspaceId == workspaceId);
+            var folder = doc.RequestFolders.FirstOrDefault(row => row.Id == folderId && row.ServiceId == serviceId);
+            if (service == null || folder == null) return;
+
+            serviceName = service.Name;
+            storagePath = service.StoragePath;
+            folderName = folder.Name;
+            foreach (var request in doc.Requests.Where(request => request.FolderId == folderId))
+                request.FolderId = null;
+            deleted = doc.RequestFolders.Remove(folder);
+        });
+
+        if (deleted)
+        {
+            _store.DeleteRequestFolderDirectory(
+                serviceId,
+                serviceName ?? "collection",
+                storagePath,
+                folderName ?? "folder");
+        }
+
+        return Task.FromResult(deleted);
+    }
+
+    public Task<bool> ReorderFoldersAsync(string workspaceId, string serviceId, List<string> folderIds)
+    {
+        _store.Mutate(doc =>
+        {
+            if (!doc.Services.Any(row => row.Id == serviceId && row.WorkspaceId == workspaceId)) return;
+
+            for (var i = 0; i < folderIds.Count; i++)
+            {
+                var folder = doc.RequestFolders.FirstOrDefault(row => row.Id == folderIds[i] && row.ServiceId == serviceId);
+                if (folder != null) folder.SortOrder = i;
+            }
+        });
+
+        return Task.FromResult(true);
+    }
+
     public Task<bool> ReorderAsync(string workspaceId, List<string> serviceIds)
     {
         _store.Mutate(doc =>
@@ -125,6 +242,7 @@ public class JsonServiceRepository : IServiceRepository
 
             doc.Services.Remove(service);
             doc.Requests.RemoveAll(r => r.ServiceId == id);
+            doc.RequestFolders.RemoveAll(folder => folder.ServiceId == id);
             doc.ServiceVariables.RemoveAll(v => v.ServiceId == id);
             deleted = true;
         });
@@ -151,6 +269,11 @@ public class JsonServiceRepository : IServiceRepository
             AuthType = service.Auth.AuthType,
             ConfigJson = service.Auth.ConfigJson
         };
+        result.Folders = doc.RequestFolders
+            .Where(folder => folder.ServiceId == service.Id)
+            .OrderBy(folder => folder.SortOrder)
+            .Select(CloneFolder)
+            .ToList();
         return result;
     }
 
@@ -196,7 +319,20 @@ public class JsonServiceRepository : IServiceRepository
             Description = service.Description,
             StoragePath = service.StoragePath,
             SortOrder = service.SortOrder,
-            CreatedAt = service.CreatedAt
+            CreatedAt = service.CreatedAt,
+            Folders = service.Folders.Select(CloneFolder).ToList(),
+        };
+    }
+
+    private static RequestFolder CloneFolder(RequestFolder folder)
+    {
+        return new RequestFolder
+        {
+            Id = folder.Id,
+            ServiceId = folder.ServiceId,
+            Name = folder.Name,
+            SortOrder = folder.SortOrder,
+            CreatedAt = folder.CreatedAt,
         };
     }
 }

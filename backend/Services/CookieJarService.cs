@@ -31,6 +31,8 @@ public sealed class CookieJarService
         _filePath = Path.Combine(storageDirectory, "requestloom-cookie-jar.json");
     }
 
+    public string FilePath => _filePath;
+
     public string GetCookieHeader(string workspaceId, Uri requestUri)
     {
         lock (_lock)
