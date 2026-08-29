@@ -666,6 +666,19 @@ export function Sidebar() {
       );
     }
 
+    const trimMethodName = (method: string) => {
+      switch (method.toUpperCase()) {
+        case 'DELETE':
+          return 'DEL';
+        case 'CONNECT':
+          return 'CONN';
+        case 'OPTIONS':
+          return 'OPT';
+        default:
+          return method.toUpperCase();
+      } 
+    };
+
     return (
       <div
         key={request.id}
@@ -712,8 +725,8 @@ export function Sidebar() {
           >
             ⠿
           </span>
-          <span className={`w-10 font-mono text-[10px] font-bold ${METHOD_COLORS[request.method]}`}>
-            {request.method}
+          <span className={`w-7 font-mono text-[10px] font-bold ${METHOD_COLORS[request.method]}`}>
+            {trimMethodName(request.method)}
           </span>
           <span className="truncate">{request.name}</span>
           {isRequestDirty(request.id) && (
