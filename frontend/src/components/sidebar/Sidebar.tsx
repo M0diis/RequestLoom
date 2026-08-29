@@ -136,6 +136,7 @@ export function Sidebar() {
     toggleFavorite,
     isRequestDirty,
     moveService,
+    reorderServices,
     createFolder,
     updateFolder,
     deleteFolder,
@@ -193,10 +194,12 @@ export function Sidebar() {
   const [deletingScript, setDeletingScript] = useState(false);
   const [draggingRequestId, setDraggingRequestId] = useState<string | null>(null);
   const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null);
+  const [draggingServiceId, setDraggingServiceId] = useState<string | null>(null);
   const [dragOverRequestId, setDragOverRequestId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [dragOverFolderOrderId, setDragOverFolderOrderId] = useState<string | null>(null);
   const [dragOverServiceId, setDragOverServiceId] = useState<string | null>(null);
+  const [dragOverServiceOrderId, setDragOverServiceOrderId] = useState<string | null>(null);
   const addRequestSubmitting = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -391,10 +394,12 @@ export function Sidebar() {
   const clearDragState = () => {
     setDraggingRequestId(null);
     setDraggingFolderId(null);
+    setDraggingServiceId(null);
     setDragOverRequestId(null);
     setDragOverFolderId(null);
     setDragOverFolderOrderId(null);
     setDragOverServiceId(null);
+    setDragOverServiceOrderId(null);
   };
 
   const getDraggedRequestId = (event: React.DragEvent) =>
@@ -402,6 +407,9 @@ export function Sidebar() {
 
   const getDraggedFolderId = (event: React.DragEvent) =>
     event.dataTransfer.getData('application/x-requestloom-folder') || draggingFolderId;
+
+  const getDraggedServiceId = (event: React.DragEvent) =>
+    event.dataTransfer.getData('application/x-requestloom-service') || draggingServiceId;
 
   const handleDropOnRequest = (event: React.DragEvent, target: ApiRequest) => {
     event.preventDefault();
@@ -456,6 +464,30 @@ export function Sidebar() {
 
     void reorderFolders(activeWorkspaceId, serviceId, nextFolderIds)
       .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to reorder folders'))
+      .finally(clearDragState);
+  };
+
+  const handleDropOnServiceOrder = (event: React.DragEvent, targetServiceId: string) => {
+    event.preventDefault();
+    const sourceServiceId = getDraggedServiceId(event);
+    if (!sourceServiceId || sourceServiceId === targetServiceId) {
+      clearDragState();
+      return;
+    }
+
+    const nextServiceIds = services.map((service) => service.id).filter((id) => id !== sourceServiceId);
+    const targetIndex = nextServiceIds.indexOf(targetServiceId);
+    if (targetIndex < 0) {
+      clearDragState();
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const insertIndex = targetIndex + (event.clientY >= bounds.top + bounds.height / 2 ? 1 : 0);
+    nextServiceIds.splice(insertIndex, 0, sourceServiceId);
+
+    void reorderServices(activeWorkspaceId, nextServiceIds)
+      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to reorder services'))
       .finally(clearDragState);
   };
 
@@ -828,29 +860,69 @@ export function Sidebar() {
           )}
 
           {/* Services tree */}
-          {services.map((service, index) => (
+          {services.map((service) => (
             <div key={service.id} className="border-b border-gray-900/70">
               <div
-                className={`group flex cursor-pointer items-center px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-gray-900/60 ${
-                  dragOverServiceId === service.id ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70' : ''
+                draggable
+                className={`group flex cursor-pointer items-center px-3 py-2 text-xs font-semibold text-gray-200 transition-colors hover:bg-gray-900/60 ${
+                  dragOverServiceOrderId === service.id
+                    ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
+                    : dragOverServiceId === service.id
+                      ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
+                      : draggingServiceId === service.id
+                        ? 'opacity-50'
+                        : ''
                 }`}
-                onClick={() => toggleCollapse(service.id)}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData('application/x-requestloom-service', service.id);
+                  event.dataTransfer.effectAllowed = 'move';
+                  setDraggingServiceId(service.id);
+                  setDraggingRequestId(null);
+                  setDraggingFolderId(null);
+                }}
+                onDragEnd={clearDragState}
+                onClick={() => {
+                  if (draggingServiceId) return;
+                  toggleCollapse(service.id);
+                }}
                 onContextMenu={(e) => handleContextMenu(e, 'service', service.id)}
                 onDragOver={(event) => {
+                  if (draggingServiceId) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    setDragOverServiceOrderId(service.id);
+                    setDragOverServiceId(null);
+                    setDragOverFolderId(null);
+                    setDragOverFolderOrderId(null);
+                    setDragOverRequestId(null);
+                    return;
+                  }
                   if (!draggingRequestId) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = 'move';
                   setDragOverServiceId(service.id);
+                  setDragOverServiceOrderId(null);
                   setDragOverFolderId(null);
                   setDragOverRequestId(null);
                 }}
                 onDragLeave={(event) => {
                   if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
                     setDragOverServiceId((current) => current === service.id ? null : current);
+                    setDragOverServiceOrderId((current) => current === service.id ? null : current);
                   }
                 }}
-                onDrop={(event) => handleDropOnService(event, service.id)}
+                onDrop={(event) => {
+                  if (getDraggedServiceId(event)) handleDropOnServiceOrder(event, service.id);
+                  else handleDropOnService(event, service.id);
+                }}
               >
+                <span
+                  aria-hidden="true"
+                  className="mr-1.5 w-3 cursor-grab select-none text-[13px] leading-none text-gray-600 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-hover:text-gray-400 active:cursor-grabbing"
+                  title="Drag to reorder services"
+                >
+                  ⠿
+                </span>
                 <svg
                   className={`mr-1.5 h-3 w-3 text-gray-500 transition-transform ${collapsedServices.has(service.id) ? '' : 'rotate-90'}`}
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -877,32 +949,6 @@ export function Sidebar() {
                   <span className="truncate flex-1">{service.name}</span>
                 )}
                 {!compact && <span className="mr-1 text-[10px] text-gray-500">{service.requests.length}</span>}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void moveService(activeWorkspaceId, service.id, -1);
-                  }}
-                  disabled={index === 0}
-                  className="p-0.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-gray-800"
-                  title="Move service up"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
-                  </svg>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void moveService(activeWorkspaceId, service.id, 1);
-                  }}
-                  disabled={index === services.length - 1}
-                  className="p-0.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-gray-800"
-                  title="Move service down"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
                 {!compact && (
                   <button
                     onClick={(e) => {

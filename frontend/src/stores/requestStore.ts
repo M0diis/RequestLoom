@@ -79,6 +79,7 @@ interface RequestState {
   ) => Promise<void>;
   deleteService: (workspaceId: string, id: string) => Promise<void>;
   moveService: (workspaceId: string, id: string, direction: -1 | 1) => Promise<void>;
+  reorderServices: (workspaceId: string, serviceIds: string[]) => Promise<void>;
   createFolder: (workspaceId: string, serviceId: string, name: string) => Promise<RequestFolder>;
   updateFolder: (workspaceId: string, serviceId: string, folderId: string, name: string) => Promise<void>;
   deleteFolder: (workspaceId: string, serviceId: string, folderId: string) => Promise<void>;
@@ -269,6 +270,33 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       await servicesApi.reorder(workspaceId, next.map((svc) => svc.id));
     } catch (err) {
       console.error('Failed to persist service order', err);
+    }
+  },
+
+  reorderServices: async (workspaceId, serviceIds) => {
+    const services = get().services;
+    const knownServiceIds = new Set(services.map((service) => service.id));
+    const orderedIds = [
+      ...serviceIds.filter((serviceId) => knownServiceIds.has(serviceId)),
+      ...services
+        .map((service) => service.id)
+        .filter((serviceId) => !serviceIds.includes(serviceId)),
+    ];
+    const serviceById = new Map(services.map((service) => [service.id, service]));
+    const nextServices = orderedIds
+      .map((serviceId, index) => {
+        const service = serviceById.get(serviceId);
+        return service ? { ...service, sortOrder: index } : null;
+      })
+      .filter((service): service is Service => service !== null);
+
+    set({ services: nextServices });
+
+    try {
+      await servicesApi.reorder(workspaceId, orderedIds);
+    } catch (error) {
+      await get().loadServices(workspaceId);
+      throw error;
     }
   },
 
