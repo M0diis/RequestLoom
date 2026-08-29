@@ -128,7 +128,7 @@ export function VariableManagerPage() {
   );
 
   const selectedEnv = useMemo(() => environments.find((e) => e.id === selectedEnvId), [environments, selectedEnvId]);
-  const canDeleteEnv = Boolean(selectedEnv) && environments.length > 1 && !selectedEnv?.isActive;
+  const canDeleteEnv = Boolean(selectedEnv);
 
   // Dirty tracking
   const globalDirty = useMemo(() => {
@@ -603,7 +603,7 @@ export function VariableManagerPage() {
               type="button"
               onClick={() => void handleDeleteEnv()}
               disabled={saving || !canDeleteEnv}
-              title={!canDeleteEnv ? 'Cannot delete the active or last environment' : 'Delete environment'}
+              title={!canDeleteEnv ? 'Select an environment to delete' : 'Delete environment'}
               className="border border-rose-900/60 bg-rose-950/10 px-2.5 py-1 text-xs text-rose-400 hover:bg-rose-950/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               Delete

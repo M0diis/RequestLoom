@@ -276,19 +276,21 @@ export function TopBar() {
         </button>
       </div>
 
-      <div className="relative z-20 flex items-center gap-1.5">
-        <CustomDropdown
-          value={activeEnvironmentId}
-          options={environmentOptions}
-          onChange={(environmentId) => {
-            void handleEnvironmentChange(environmentId);
-          }}
-          disabled={busy || environmentOptions.length === 0}
-          placeholder="Select environment"
-          title="Environment"
-          className="titlebar-no-drag min-w-[170px] max-lg:min-w-[130px] max-md:min-w-[110px] max-sm:min-w-[90px]"
-        />
-      </div>
+      {environments.length > 0 && (
+        <div className="relative z-20 flex items-center gap-1.5">
+          <CustomDropdown
+            value={activeEnvironmentId}
+            options={environmentOptions}
+            onChange={(environmentId) => {
+              void handleEnvironmentChange(environmentId);
+            }}
+            disabled={busy}
+            placeholder="Select environment"
+            title="Environment"
+            className="titlebar-no-drag min-w-[170px] max-lg:min-w-[130px] max-md:min-w-[110px] max-sm:min-w-[90px]"
+          />
+        </div>
+      )}
 
       <div className={desktopShell ? 'relative z-10 flex-1 px-3 text-center text-[11px] uppercase tracking-[0.16em] text-gray-500' : 'flex-1'}>
         {desktopShell ? <span className="max-lg:hidden">RequestLoom Desktop</span> : null}

@@ -646,7 +646,7 @@ export function Sidebar() {
     };
   }, [contextMenu]);
 
-  const renderRequest = (request: ApiRequest, indentation = 'pl-4') => {
+  const renderRequest = (request: ApiRequest, indentation = 'pl-2') => {
     if (renamingRequestId === request.id) {
       return (
         <div key={request.id} className={`${indentation} pr-3 py-1`}>
@@ -1007,7 +1007,7 @@ export function Sidebar() {
                   <div key={folder.id}>
                     <div
                       draggable
-                      className={`group flex cursor-pointer items-center gap-1.5 px-6 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-900/60 ${
+                      className={`group flex cursor-pointer items-center gap-1.5 px-3 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-900/60 ${
                         dragOverFolderOrderId === folder.id
                           ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
                           : dragOverFolderId === folder.id
@@ -1075,7 +1075,12 @@ export function Sidebar() {
                         <path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                       </svg>
                       <span className="min-w-0 flex-1 truncate">{folder.name}</span>
-                      {!compact && <span className="text-[10px] text-gray-500">{folderRequests.length}</span>}
+                      <span
+                        className="ml-auto min-w-5 text-right text-[10px] text-gray-500"
+                        title={`${folderRequests.length} request${folderRequests.length === 1 ? '' : 's'}`}
+                      >
+                        {folderRequests.length}
+                      </span>
                       {!compact && (
                         <button
                           type="button"
