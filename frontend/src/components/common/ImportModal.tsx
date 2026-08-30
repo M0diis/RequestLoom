@@ -223,8 +223,10 @@ export function ImportModal({ onClose, workspaceId }: Props) {
             ))}
           </div>
           <div className="flex-1" />
-          <DocumentationLink section="imports" onNavigate={close} />
-          <DocHelpButton section="imports" onNavigate={close} />
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">
+            <DocumentationLink section="imports" onNavigate={close} />
+            <DocHelpButton section="imports" onNavigate={close} />
+          </div>
           <button onClick={close} className="px-3 py-2.5 text-gray-500 hover:text-gray-300" disabled={busy}>
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
