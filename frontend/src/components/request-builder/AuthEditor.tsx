@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import type { ApiRequest } from '../../types';
+import type { ApiRequest, ServiceAuth } from '../../types';
 import { AutocompleteInput } from '../common/AutocompleteInput';
 import { OAuth2AuthFields } from '../common/OAuth2AuthFields';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   request: ApiRequest;
+  serviceAuth?: ServiceAuth | null;
   onUpdate: (id: string, data: Partial<ApiRequest>) => Promise<void>;
   dynamicSuggestions?: string[];
 }
@@ -34,7 +35,12 @@ function normalizeAuthType(authType: string | null | undefined): RequestAuthOpti
   return 'none';
 }
 
-export function AuthEditor({ request, onUpdate, dynamicSuggestions = [] }: Props) {
+function getAuthTypeLabel(authType: string | null | undefined): string {
+  const normalized = authType?.trim().toLowerCase();
+  return AUTH_TYPES.find((type) => type.value === normalized)?.label ?? 'None';
+}
+
+export function AuthEditor({ request, serviceAuth = null, onUpdate, dynamicSuggestions = [] }: Props) {
   const authType = normalizeAuthType(request.auth?.authType);
   const [config, setConfig] = useState<Record<string, string>>({});
 
@@ -116,8 +122,13 @@ export function AuthEditor({ request, onUpdate, dynamicSuggestions = [] }: Props
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1"><span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Auth type</span><DocHelpButton section="http" title="Open authentication documentation" /></div>
-        <DocumentationLink section="http" />
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Auth type</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <DocumentationLink section="http" />
+          <DocHelpButton section="http" title="Open authentication documentation" />
+        </div>
       </div>
       <div className="flex flex-wrap gap-2">
         {AUTH_TYPES.map((at) => (
@@ -191,7 +202,15 @@ export function AuthEditor({ request, onUpdate, dynamicSuggestions = [] }: Props
       )}
 
       {authType === 'inherit' && (
-        <p className="text-xs text-gray-400">Inherit authentication from service settings.</p>
+        <div className="border border-gray-800 bg-gray-900/50 px-3 py-2 text-xs">
+          <p className="text-gray-400">Inherit authentication from service settings.</p>
+          <p className="mt-1 text-gray-300">
+            Using: <span className="font-medium text-gray-100">{getAuthTypeLabel(serviceAuth?.authType)}</span>
+          </p>
+          {(!serviceAuth || normalizeAuthType(serviceAuth.authType) === 'none') && (
+            <p className="mt-1 text-[11px] text-gray-500">No authentication will be sent with this request.</p>
+          )}
+        </div>
       )}
 
       {authType === 'none' && (

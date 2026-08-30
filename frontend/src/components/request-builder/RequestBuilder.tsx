@@ -191,6 +191,7 @@ function buildScopedWorkspaceLookup(
 export function RequestBuilder() {
   const {
     activeRequest,
+    services,
     updateRequest,
     selectRequest,
     duplicateRequest,
@@ -459,6 +460,8 @@ export function RequestBuilder() {
     );
   }
 
+  const serviceAuth = services.find((service) => service.id === activeRequest.serviceId)?.auth ?? null;
+
   const handleSend = () => sendRequest(activeWorkspaceId);
 
   const handleClone = async () => {
@@ -699,7 +702,12 @@ export function RequestBuilder() {
           />
         )}
         {activeRequestTab === 'auth' && (
-          <AuthEditor request={activeRequest} onUpdate={updateRequest} dynamicSuggestions={dynamicSuggestions} />
+          <AuthEditor
+            request={activeRequest}
+            serviceAuth={serviceAuth}
+            onUpdate={updateRequest}
+            dynamicSuggestions={dynamicSuggestions}
+          />
         )}
         {activeRequestTab === 'pre-script' && (
           <RequestScriptEditor request={activeRequest} stage="pre" onUpdate={updateRequest} />

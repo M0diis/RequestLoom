@@ -374,7 +374,7 @@ export function DocumentationPage({ section, onSectionChange }: DocumentationPag
               : candidate === 'imports'
                 ? IMPORT_FORMATS.map((item) => `${item.format} ${item.input} ${item.result}`).join(' ')
                 : '';
-    const searchable = `${SECTION_META[candidate].label} ${SECTION_META[candidate].title} ${SECTION_META[candidate].description} ${candidate === 'overview' ? 'quick start build organize send inspect' : ''} ${candidate === 'requestloom' ? 'workspace environment service collection response history import export settings' : ''} ${sectionData}`;
+    const searchable = `${SECTION_META[candidate].label} ${SECTION_META[candidate].title} ${SECTION_META[candidate].description} ${candidate === 'overview' ? 'quick start build organize send inspect' : ''} ${candidate === 'requestloom' ? 'workspace environment service collection response history import export settings request settings proxy redirects timeout TLS SSL cookies service defaults' : ''} ${sectionData}`;
     return searchable.toLowerCase().includes(normalizedQuery);
   };
 
@@ -762,6 +762,21 @@ function RequestLoomContent({ onSectionChange }: { onSectionChange: (section: Do
             ].map(([title, text]) => <div key={title} className="flex gap-3 border border-gray-800 bg-gray-950/40 p-3"><span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 bg-gray-600" /><div><div className="text-xs font-semibold text-gray-200">{title}</div><div className="mt-1 text-[11px] leading-5 text-gray-500">{text}</div></div></div>)}
           </div>
         </div>
+      </section>
+
+      <section>
+        <SectionHeading eyebrow="Request settings" title="Control how each request travels." />
+        <div className="grid gap-px border border-gray-800 bg-gray-800 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            ['Redirects', 'Follow 3xx responses automatically, or disable following to inspect the redirect. Max redirects is capped at 50 per request.'],
+            ['Timeout', 'Set a per-request timeout in seconds. Leave it empty to inherit the global timeout from Settings.'],
+            ['Proxy', 'Inherit the global proxy, provide a custom proxy URL with optional credentials, or disable proxying for this request.'],
+            ['TLS / SSL', 'Enable “Ignore TLS/SSL certificate errors” only for controlled development endpoints with self-signed certificates.'],
+            ['Cookies', 'Use the workspace cookie jar to inspect, add, and clear cookies that travel with requests.'],
+            ['Service defaults', 'Service headers, variables, and default authorization are inherited by requests unless a request-level value overrides or suppresses them.'],
+          ].map(([title, text]) => <div key={title} className="bg-[#141414] p-4"><div className="text-xs font-semibold text-gray-200">{title}</div><p className="mt-1.5 text-[11px] leading-5 text-gray-500">{text}</p></div>)}
+        </div>
+        <div className="mt-3 border border-gray-800 bg-gray-950/40 px-3 py-2.5 text-[11px] leading-5 text-gray-500"><span className="font-semibold text-gray-300">Precedence.</span> Request settings win over global settings when explicitly configured. “Inherit” and an empty timeout intentionally fall back to the global value.</div>
       </section>
 
       <section>
