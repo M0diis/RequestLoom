@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { AutocompleteInput } from './AutocompleteInput';
 import type { KeyValueEntry } from '../../types';
+import type { DocumentationSection } from '../../stores/uiStore';
+import { DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   entries: KeyValueEntry[];
@@ -10,6 +12,8 @@ interface Props {
   keySuggestions?: string[];
   valueSuggestionsMap?: Record<string, string[]>;
   dynamicSuggestions?: string[];
+  helpSection?: DocumentationSection;
+  helpTitle?: string;
 }
 
 const GRID_COLS = 'grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)] gap-2 items-center';
@@ -17,7 +21,7 @@ const GRID_COLS = 'grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)] gap-2 items
 const iconButtonClass = 'flex h-[26px] w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-700 hover:text-gray-200 disabled:cursor-default disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-gray-500';
 const deleteButtonClass = 'flex h-[26px] w-7 items-center justify-center rounded text-gray-500 hover:bg-rose-500/20 hover:text-rose-300';
 
-export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valuePlaceholder = 'Value', keySuggestions, valueSuggestionsMap, dynamicSuggestions = [] }: Props) {
+export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valuePlaceholder = 'Value', keySuggestions, valueSuggestionsMap, dynamicSuggestions = [], helpSection, helpTitle }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const nextPlaceholderId = useRef(1);
   const lastFocus = useRef<{ id: string; field: string } | null>(null);
@@ -93,7 +97,7 @@ export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valu
       <div className={`${GRID_COLS} border-b border-gray-800 bg-gray-900/70 px-2 py-1.5`}>
         <span className="text-center text-[10px] font-semibold uppercase tracking-wide text-gray-500"></span>
         <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Name</span>
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Value</span>
+        <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Value {helpSection ? <DocHelpButton section={helpSection} title={helpTitle ?? 'Open related documentation'} /> : null}</span>
       </div>
       <div ref={containerRef} className="divide-y divide-gray-800">
         {entries.map((entry, i) => {

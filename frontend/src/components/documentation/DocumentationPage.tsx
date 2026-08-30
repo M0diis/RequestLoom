@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { DocumentationSection } from '../../stores/uiStore';
 
 interface DocumentationPageProps {
@@ -31,6 +31,30 @@ const SECTION_META: Record<DocumentationSection, { label: string; eyebrow: strin
     title: 'Turn a request into a workflow.',
     description: 'Reuse values, prepare requests, assert responses, run collections, and mock endpoints without leaving the app.',
   },
+  'mock-servers': {
+    label: 'Mock servers',
+    eyebrow: 'REQUESTLOOM / MOCK SERVERS',
+    title: 'A dependable API stand-in.',
+    description: 'Create local endpoints with predictable responses, realistic latency, custom headers, and optional JavaScript behavior.',
+  },
+  scripting: {
+    label: 'Scripts & tests',
+    eyebrow: 'REQUESTLOOM / SCRIPTING',
+    title: 'Shape requests. Prove responses.',
+    description: 'Use JavaScript hooks to prepare requests, extract values, and turn response expectations into named test results.',
+  },
+  storage: {
+    label: 'Storage & backups',
+    eyebrow: 'REQUESTLOOM / STORAGE',
+    title: 'Keep the workspace portable.',
+    description: 'Choose SQLite or readable JSON, understand migrations, and keep collection data backed up as your workspace grows.',
+  },
+  imports: {
+    label: 'Import & export',
+    eyebrow: 'REQUESTLOOM / INTERCHANGE',
+    title: 'Bring your API work with you.',
+    description: 'Move requests in and out of RequestLoom with OpenAPI, Swagger, Postman, cURL, Bruno, WSDL, and workspace JSON.',
+  },
 };
 
 const SECTIONS = Object.keys(SECTION_META) as DocumentationSection[];
@@ -47,25 +71,35 @@ const METHODS = [
 
 const HEADER_CATEGORIES = ['all', 'Request', 'Representation', 'Response', 'Caching', 'Conditional', 'Cookies', 'CORS', 'Proxy'] as const;
 
-const HEADERS = [
-  { name: 'Accept', category: 'Request', direction: 'request', meaning: 'Media types the client can process.', example: 'application/json' },
-  { name: 'Accept-Charset', category: 'Request', direction: 'request', meaning: 'Character encodings the client supports.', example: 'utf-8' },
-  { name: 'Accept-Encoding', category: 'Request', direction: 'request', meaning: 'Content encodings the client supports.', example: 'gzip, br' },
-  { name: 'Accept-Language', category: 'Request', direction: 'request', meaning: 'Preferred natural languages for the response.', example: 'en-US,en;q=0.9' },
-  { name: 'Authorization', category: 'Request', direction: 'request', meaning: 'Credentials for authenticating the request.', example: 'Bearer <token>' },
-  { name: 'Cache-Control', category: 'Caching', direction: 'both', meaning: 'Caching directives for a request or response.', example: 'no-cache' },
-  { name: 'Connection', category: 'Proxy', direction: 'both', meaning: 'Connection-specific options such as keep-alive.', example: 'keep-alive' },
-  { name: 'Content-Disposition', category: 'Representation', direction: 'response', meaning: 'How a representation should be displayed or downloaded.', example: 'attachment; filename="report.csv"' },
-  { name: 'Content-Encoding', category: 'Representation', direction: 'both', meaning: 'Encoding applied to the representation body.', example: 'gzip' },
+interface HeaderDoc {
+  name: string;
+  category: string;
+  direction: string;
+  meaning: string;
+  example: string;
+  possibleValues?: readonly string[];
+  valueLabel?: string;
+}
+
+const HEADERS: readonly HeaderDoc[] = [
+  { name: 'Accept', category: 'Request', direction: 'request', meaning: 'Media types the client can process.', example: 'application/json', possibleValues: ['application/json', 'application/xml', 'text/html', 'text/plain', 'application/*', '*/*'] },
+  { name: 'Accept-Charset', category: 'Request', direction: 'request', meaning: 'Character encodings the client supports.', example: 'utf-8', possibleValues: ['utf-8', 'iso-8859-1', '*'] },
+  { name: 'Accept-Encoding', category: 'Request', direction: 'request', meaning: 'Content encodings the client supports.', example: 'gzip, br', possibleValues: ['gzip', 'deflate', 'br', 'zstd', 'identity', '*'] },
+  { name: 'Accept-Language', category: 'Request', direction: 'request', meaning: 'Preferred natural languages for the response.', example: 'en-US,en;q=0.9', possibleValues: ['en-US', 'en-GB', 'de-DE', 'fr-FR', '*'] },
+  { name: 'Authorization', category: 'Request', direction: 'request', meaning: 'Credentials for authenticating the request.', example: 'Bearer <token>', possibleValues: ['Bearer <token>', 'Basic <base64>', 'Digest username="…", realm="…"'], valueLabel: 'Common schemes' },
+  { name: 'Cache-Control', category: 'Caching', direction: 'both', meaning: 'Caching directives for a request or response.', example: 'no-cache', possibleValues: ['no-cache', 'no-store', 'max-age=0', 'max-age=<seconds>', 'must-revalidate', 'public', 'private'] },
+  { name: 'Connection', category: 'Proxy', direction: 'both', meaning: 'Connection-specific options such as keep-alive.', example: 'keep-alive', possibleValues: ['keep-alive', 'close'] },
+  { name: 'Content-Disposition', category: 'Representation', direction: 'response', meaning: 'How a representation should be displayed or downloaded.', example: 'attachment; filename="report.csv"', possibleValues: ['inline', 'attachment', 'attachment; filename="file.ext"'] },
+  { name: 'Content-Encoding', category: 'Representation', direction: 'both', meaning: 'Encoding applied to the representation body.', example: 'gzip', possibleValues: ['gzip', 'deflate', 'br', 'zstd', 'identity'] },
   { name: 'Content-Language', category: 'Representation', direction: 'both', meaning: 'Natural language of the representation.', example: 'en-US' },
   { name: 'Content-Length', category: 'Representation', direction: 'both', meaning: 'Body size in bytes.', example: '1024' },
   { name: 'Content-Location', category: 'Representation', direction: 'both', meaning: 'A more specific location for the representation.', example: '/users/42' },
   { name: 'Content-Range', category: 'Representation', direction: 'response', meaning: 'The byte range returned in a partial response.', example: 'bytes 0-1023/4096' },
-  { name: 'Content-Type', category: 'Representation', direction: 'both', meaning: 'Media type and optional parameters of the body.', example: 'application/json; charset=utf-8' },
+  { name: 'Content-Type', category: 'Representation', direction: 'both', meaning: 'Media type and optional parameters of the body.', example: 'application/json; charset=utf-8', possibleValues: ['application/json', 'application/xml', 'application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain', 'text/html'], valueLabel: 'Common media types' },
   { name: 'Cookie', category: 'Cookies', direction: 'request', meaning: 'Cookies sent back to the server.', example: 'session=abc123' },
   { name: 'Date', category: 'Response', direction: 'response', meaning: 'Date and time the message was created.', example: 'Tue, 15 Nov 1994 08:12:31 GMT' },
-  { name: 'ETag', category: 'Conditional', direction: 'response', meaning: 'Opaque version identifier for a representation.', example: '"v7-4f2a"' },
-  { name: 'Expect', category: 'Request', direction: 'request', meaning: 'Expectation the server should fulfill.', example: '100-continue' },
+  { name: 'ETag', category: 'Conditional', direction: 'response', meaning: 'Opaque version identifier for a representation.', example: '"v7-4f2a"', possibleValues: ['"<opaque-tag>"', 'W/"<weak-tag>"'] },
+  { name: 'Expect', category: 'Request', direction: 'request', meaning: 'Expectation the server should fulfill.', example: '100-continue', possibleValues: ['100-continue'] },
   { name: 'Host', category: 'Request', direction: 'request', meaning: 'Target host and optional port.', example: 'api.example.com' },
   { name: 'If-Match', category: 'Conditional', direction: 'request', meaning: 'Only perform the request if the entity tag matches.', example: '"v7-4f2a"' },
   { name: 'If-Modified-Since', category: 'Conditional', direction: 'request', meaning: 'Return a body only when the resource changed after this date.', example: 'Wed, 21 Oct 2015 07:28:00 GMT' },
@@ -76,32 +110,32 @@ const HEADERS = [
   { name: 'Location', category: 'Response', direction: 'response', meaning: 'URL to follow or location of a newly created resource.', example: '/users/42' },
   { name: 'Origin', category: 'CORS', direction: 'request', meaning: 'Origin that initiated a cross-origin request.', example: 'https://app.example.com' },
   { name: 'Pragma', category: 'Caching', direction: 'both', meaning: 'Legacy cache directive, commonly no-cache.', example: 'no-cache' },
-  { name: 'Range', category: 'Request', direction: 'request', meaning: 'Requests part of a representation.', example: 'bytes=0-1023' },
+  { name: 'Range', category: 'Request', direction: 'request', meaning: 'Requests part of a representation.', example: 'bytes=0-1023', possibleValues: ['bytes=0-1023', 'bytes=1024-', 'bytes=-500'] },
   { name: 'Referer', category: 'Request', direction: 'request', meaning: 'URL of the resource that led to this request.', example: 'https://app.example.com/' },
   { name: 'Retry-After', category: 'Response', direction: 'response', meaning: 'How long to wait before retrying a request.', example: '120' },
   { name: 'Server', category: 'Response', direction: 'response', meaning: 'Information about the server software.', example: 'api-gateway' },
   { name: 'Set-Cookie', category: 'Cookies', direction: 'response', meaning: 'Creates or updates a cookie in the client.', example: 'session=abc123; Secure; HttpOnly' },
-  { name: 'Transfer-Encoding', category: 'Proxy', direction: 'both', meaning: 'Transfer coding used for the message body.', example: 'chunked' },
-  { name: 'Upgrade', category: 'Proxy', direction: 'both', meaning: 'Requests or confirms a protocol switch.', example: 'websocket' },
+  { name: 'Transfer-Encoding', category: 'Proxy', direction: 'both', meaning: 'Transfer coding used for the message body.', example: 'chunked', possibleValues: ['chunked'] },
+  { name: 'Upgrade', category: 'Proxy', direction: 'both', meaning: 'Requests or confirms a protocol switch.', example: 'websocket', possibleValues: ['websocket', 'h2c'] },
   { name: 'User-Agent', category: 'Request', direction: 'request', meaning: 'Client software identification.', example: 'RequestLoom/1.0' },
   { name: 'Vary', category: 'Caching', direction: 'response', meaning: 'Request fields that influence the selected representation.', example: 'Accept-Encoding' },
   { name: 'Via', category: 'Proxy', direction: 'both', meaning: 'Proxies or gateways a message passed through.', example: '1.1 proxy.example.com' },
   { name: 'WWW-Authenticate', category: 'Response', direction: 'response', meaning: 'Authentication schemes accepted by the server.', example: 'Bearer realm="api"' },
-  { name: 'Access-Control-Allow-Credentials', category: 'CORS', direction: 'response', meaning: 'Whether the browser may expose a response to credentialed requests.', example: 'true' },
+  { name: 'Access-Control-Allow-Credentials', category: 'CORS', direction: 'response', meaning: 'Whether the browser may expose a response to credentialed requests.', example: 'true', possibleValues: ['true', 'false'] },
   { name: 'Access-Control-Allow-Headers', category: 'CORS', direction: 'response', meaning: 'Headers permitted in a CORS request.', example: 'Authorization, Content-Type' },
-  { name: 'Access-Control-Allow-Methods', category: 'CORS', direction: 'response', meaning: 'Methods permitted in a CORS request.', example: 'GET, POST, OPTIONS' },
+  { name: 'Access-Control-Allow-Methods', category: 'CORS', direction: 'response', meaning: 'Methods permitted in a CORS request.', example: 'GET, POST, OPTIONS', possibleValues: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'] },
   { name: 'Access-Control-Allow-Origin', category: 'CORS', direction: 'response', meaning: 'Origins permitted to read the response.', example: 'https://app.example.com' },
   { name: 'Access-Control-Expose-Headers', category: 'CORS', direction: 'response', meaning: 'Response headers browser code may read.', example: 'X-Request-ID' },
-  { name: 'Access-Control-Max-Age', category: 'CORS', direction: 'response', meaning: 'How long a preflight result may be cached.', example: '86400' },
+  { name: 'Access-Control-Max-Age', category: 'CORS', direction: 'response', meaning: 'How long a preflight result may be cached.', example: '86400', possibleValues: ['0', '600', '86400'], valueLabel: 'Common durations (seconds)' },
   { name: 'Access-Control-Request-Headers', category: 'CORS', direction: 'request', meaning: 'Headers requested during a CORS preflight.', example: 'Authorization, Content-Type' },
-  { name: 'Access-Control-Request-Method', category: 'CORS', direction: 'request', meaning: 'Method requested during a CORS preflight.', example: 'POST' },
+  { name: 'Access-Control-Request-Method', category: 'CORS', direction: 'request', meaning: 'Method requested during a CORS preflight.', example: 'POST', possibleValues: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'] },
   { name: 'X-Correlation-ID', category: 'Proxy', direction: 'both', meaning: 'Application trace identifier used across services.', example: '4f2a-91c0' },
   { name: 'X-Forwarded-For', category: 'Proxy', direction: 'request', meaning: 'Original client IP forwarded by a proxy.', example: '203.0.113.42' },
   { name: 'X-Forwarded-Host', category: 'Proxy', direction: 'request', meaning: 'Original host requested by the client.', example: 'api.example.com' },
   { name: 'X-Forwarded-Proto', category: 'Proxy', direction: 'request', meaning: 'Original protocol used by the client.', example: 'https' },
   { name: 'X-API-Key', category: 'Request', direction: 'request', meaning: 'Common custom header name for an API key.', example: 'your-api-key' },
   { name: 'X-Request-ID', category: 'Proxy', direction: 'both', meaning: 'Request identifier for logs and diagnostics.', example: 'req_01HZX...' },
-  { name: 'X-Requested-With', category: 'Request', direction: 'request', meaning: 'Legacy hint often used to identify XMLHttpRequest clients.', example: 'XMLHttpRequest' },
+  { name: 'X-Requested-With', category: 'Request', direction: 'request', meaning: 'Legacy hint often used to identify XMLHttpRequest clients.', example: 'XMLHttpRequest', possibleValues: ['XMLHttpRequest'] },
 ] as const;
 
 const AUTH_TYPES = [
@@ -177,7 +211,7 @@ const FEATURE_CARDS = [
   { title: 'Workspaces', text: 'Keep services, environments, variables, history, and mocks isolated by project or team.', target: 'requestloom' as DocumentationSection, icon: '◈' },
   { title: 'Request builder', text: 'Compose URL, params, headers, body, auth, files, and scripts from one request tab.', target: 'requestloom' as DocumentationSection, icon: '↗' },
   { title: 'Response inspector', text: 'Read formatted or raw bodies, headers, timing, size, script logs, and test results.', target: 'requestloom' as DocumentationSection, icon: '◌' },
-  { title: 'Mock servers', text: 'Create a local route with a status, headers, body, delay, and optional response script.', target: 'automation' as DocumentationSection, icon: '◇' },
+  { title: 'Mock servers', text: 'Create a local route with a status, headers, body, delay, and optional response script.', target: 'mock-servers' as DocumentationSection, icon: '◇' },
 ] as const;
 
 const AUTOMATION_CARDS = [
@@ -185,6 +219,62 @@ const AUTOMATION_CARDS = [
   { title: 'Pre-request scripts', text: 'Run before the request to set variables, change the URL or method, and update headers, params, or body.', code: 'setHeader("Authorization", "Bearer " + getVar("token"));' },
   { title: 'Post-request scripts', text: 'Run after a response to extract values and prepare the next request in a chain.', code: 'setVar("user_id", JSON.parse(getResponseBody()).id);' },
   { title: 'Tests', text: 'Add named assertions that run after the response and appear beside the response details.', code: 'test("Created", () => expect(response.status).toBe(201));' },
+] as const;
+
+const SCRIPT_API = [
+  { fn: 'setVar(key, value)', stage: 'pre · post', desc: 'Create or update a runtime variable for this request session.' },
+  { fn: 'getVar(key)', stage: 'pre · post', desc: 'Read a resolved variable value.' },
+  { fn: 'unsetVar(key)', stage: 'pre · post', desc: 'Remove a runtime variable.' },
+  { fn: 'setHeader(key, value)', stage: 'pre', desc: 'Add or replace an outgoing request header.' },
+  { fn: 'removeHeader(key)', stage: 'pre', desc: 'Remove an outgoing request header.' },
+  { fn: 'setParam(key, value)', stage: 'pre', desc: 'Add or replace a query parameter.' },
+  { fn: 'removeParam(key)', stage: 'pre', desc: 'Remove a query parameter.' },
+  { fn: 'setUrl(url)', stage: 'pre', desc: 'Replace the outgoing request URL.' },
+  { fn: 'setMethod(method)', stage: 'pre', desc: 'Replace the outgoing HTTP method.' },
+  { fn: 'setBody(body)', stage: 'pre', desc: 'Set the request body; objects are serialized as JSON.' },
+  { fn: 'getResponseStatus()', stage: 'post · test', desc: 'Read the numeric HTTP response status.' },
+  { fn: 'getResponseBody()', stage: 'post · test', desc: 'Read the response body as a string.' },
+  { fn: 'getResponseHeader(name)', stage: 'post · test', desc: 'Read one response header value.' },
+  { fn: 'log(value)', stage: 'pre · post · test', desc: 'Write a diagnostic value to the request script output.' },
+] as const;
+
+const TEST_API = [
+  { fn: 'test(name, callback)', desc: 'Register a named test. It passes when the callback completes without throwing.' },
+  { fn: 'expect(value).toBe(expected)', desc: 'Assert strict equality.' },
+  { fn: 'expect(value).toContain(value)', desc: 'Assert that a string or collection contains a value.' },
+  { fn: 'expect(value).toBeGreaterThan(number)', desc: 'Assert a numeric value is greater than the expected number.' },
+  { fn: 'expect(value).toBeLessThan(number)', desc: 'Assert a numeric value is less than the expected number.' },
+  { fn: 'expect(value).not.toBe(expected)', desc: 'Negate an equality assertion.' },
+  { fn: 'response.status', desc: 'Numeric status available inside test callbacks.' },
+  { fn: 'response.body', desc: 'Response body text available inside test callbacks.' },
+  { fn: 'response.headers', desc: 'Response headers available inside test callbacks.' },
+  { fn: 'response.contentType · response.time', desc: 'Convenient response metadata for assertions.' },
+] as const;
+
+const MOCK_SERVER_FIELDS = [
+  ['Slug', 'The URL-safe name after /mock/. Leave blank to use the generated server ID.'],
+  ['Method + path', 'The route that matches the incoming request, including {param} placeholders.'],
+  ['Status', 'The HTTP status returned by the endpoint, such as 200, 201, or 404.'],
+  ['Response body', 'Static text or JSON returned when the endpoint is called.'],
+  ['Response headers', 'Custom metadata sent with the mock response, such as Content-Type or X-Request-ID.'],
+  ['Delay', 'Artificial response latency in milliseconds for loading and timeout scenarios.'],
+  ['Dynamic response', 'Optional Jint JavaScript that reads request and mutates response.'],
+] as const;
+
+const STORAGE_MODES = [
+  { name: 'SQLite', detail: 'A single transactional database file. Best for everyday use, larger workspaces, and fast search.', fit: 'Default / active storage' },
+  { name: 'JSON — single file', detail: 'All workspace data in one readable JSON document. Useful for inspection, syncing, and simple manual backups.', fit: 'Portable snapshot' },
+  { name: 'JSON — per collection', detail: 'Each service collection and its requests is stored separately, with workspace-level data kept alongside it.', fit: 'Git-friendly collections' },
+] as const;
+
+const IMPORT_FORMATS = [
+  { format: 'OpenAPI', input: 'URL, JSON, or YAML', result: 'Creates a service and requests from paths, methods, parameters, request bodies, and examples.' },
+  { format: 'Swagger', input: 'Swagger 2.0 JSON/YAML', result: 'Uses the OpenAPI importer; Swagger 2.0 definitions are converted into RequestLoom requests.' },
+  { format: 'Postman', input: 'Collection JSON file or pasted JSON', result: 'Imports folders, request methods, URLs, headers, bodies, and common auth settings.' },
+  { format: 'cURL', input: 'A pasted command', result: 'Parses method, URL, headers, body, and auth into a request you can review before sending.' },
+  { format: 'Bruno', input: 'One or more .bru files', result: 'Imports Bruno request files, including files selected from nested collection folders.' },
+  { format: 'WSDL', input: 'URL, XML, or local-compatible source', result: 'Discovers SOAP operations and creates request-ready service entries.' },
+  { format: 'RequestLoom JSON', input: 'Workspace export file', result: 'Restores a workspace, service, or request export into a new workspace or the current one.' },
 ] as const;
 
 function DocIcon({ name }: { name: 'search' | 'arrow' | 'check' }) {
@@ -272,10 +362,18 @@ export function DocumentationPage({ section, onSectionChange }: DocumentationPag
   const sectionMatches = (candidate: DocumentationSection) => {
     if (!normalizedQuery) return true;
     const sectionData = candidate === 'http'
-      ? `${METHODS.map((item) => `${item.method} ${item.purpose} ${item.detail}`).join(' ')} ${STATUS_CODES.map((item) => `${item.code} ${item.name} ${item.meaning}`).join(' ')} ${HEADERS.map((item) => `${item.name} ${item.meaning} ${item.example}`).join(' ')} ${AUTH_TYPES.map((item) => `${item.name} ${item.description}`).join(' ')}`
+      ? `${METHODS.map((item) => `${item.method} ${item.purpose} ${item.detail}`).join(' ')} ${STATUS_CODES.map((item) => `${item.code} ${item.name} ${item.meaning}`).join(' ')} ${HEADERS.map((item) => `${item.name} ${item.meaning} ${item.example} ${item.possibleValues?.join(' ') ?? ''}`).join(' ')} ${AUTH_TYPES.map((item) => `${item.name} ${item.description}`).join(' ')}`
       : candidate === 'automation'
         ? `${AUTOMATION_CARDS.map((item) => `${item.title} ${item.text} ${item.code}`).join(' ')} ${BUILT_IN_VARIABLES.map((item) => `${item.category} ${item.tokens} ${item.description}`).join(' ')}`
-        : '';
+        : candidate === 'mock-servers'
+          ? `${MOCK_SERVER_FIELDS.flat().join(' ')} static response route endpoint delay dynamic request response headers`
+          : candidate === 'scripting'
+            ? `${SCRIPT_API.map((item) => `${item.fn} ${item.stage} ${item.desc}`).join(' ')} ${TEST_API.map((item) => `${item.fn} ${item.desc}`).join(' ')} pre-request post-request tests JavaScript`
+            : candidate === 'storage'
+              ? `${STORAGE_MODES.map((item) => `${item.name} ${item.detail} ${item.fit}`).join(' ')} migration backup restore SQLite JSON collection folders`
+              : candidate === 'imports'
+                ? IMPORT_FORMATS.map((item) => `${item.format} ${item.input} ${item.result}`).join(' ')
+                : '';
     const searchable = `${SECTION_META[candidate].label} ${SECTION_META[candidate].title} ${SECTION_META[candidate].description} ${candidate === 'overview' ? 'quick start build organize send inspect' : ''} ${candidate === 'requestloom' ? 'workspace environment service collection response history import export settings' : ''} ${sectionData}`;
     return searchable.toLowerCase().includes(normalizedQuery);
   };
@@ -293,7 +391,7 @@ export function DocumentationPage({ section, onSectionChange }: DocumentationPag
 
   const filteredHeaders = useMemo(() => HEADERS.filter((item) => {
     const categoryMatches = headerCategory === 'all' || item.category === headerCategory;
-    const queryMatches = !normalizedQuery || `${item.name} ${item.category} ${item.direction} ${item.meaning} ${item.example}`.toLowerCase().includes(normalizedQuery);
+    const queryMatches = !normalizedQuery || `${item.name} ${item.category} ${item.direction} ${item.meaning} ${item.example} ${item.possibleValues?.join(' ') ?? ''}`.toLowerCase().includes(normalizedQuery);
     return categoryMatches && queryMatches;
   }), [headerCategory, normalizedQuery]);
 
@@ -383,6 +481,10 @@ export function DocumentationPage({ section, onSectionChange }: DocumentationPag
 
         {section === 'requestloom' ? <RequestLoomContent onSectionChange={goTo} /> : null}
         {section === 'automation' ? <AutomationContent /> : null}
+        {section === 'mock-servers' ? <MockServersContent onSectionChange={goTo} /> : null}
+        {section === 'scripting' ? <ScriptingContent onSectionChange={goTo} /> : null}
+        {section === 'storage' ? <StorageContent onSectionChange={goTo} /> : null}
+        {section === 'imports' ? <ImportsContent onSectionChange={goTo} /> : null}
       </div>
     </div>
   );
@@ -474,6 +576,8 @@ function HttpContent({
   headerCategory: (typeof HEADER_CATEGORIES)[number];
   onHeaderCategoryChange: (category: (typeof HEADER_CATEGORIES)[number]) => void;
 }) {
+  const [expandedHeader, setExpandedHeader] = useState<string | null>(null);
+
   return (
     <div className="space-y-7">
       <section>
@@ -548,18 +652,44 @@ function HttpContent({
             </thead>
             <tbody>
               {headers.map((item) => (
-                <tr key={item.name} className="border-t border-gray-800/80 align-top hover:bg-gray-900/40">
-                  <td className="px-3 py-2.5"><code className="font-mono text-[11px] text-[#ffbca3]">{item.name}</code><div className="mt-1 text-[9px] uppercase tracking-wide text-gray-700">{item.category}</div></td>
-                  <td className="px-3 py-2.5 text-[10px] text-gray-500">{item.direction}</td>
-                  <td className="px-3 py-2.5 text-xs leading-5 text-gray-400">{item.meaning}</td>
-                  <td className="max-w-xs px-3 py-2.5 font-mono text-[10px] leading-5 text-gray-600">{item.example}</td>
-                </tr>
+                <Fragment key={item.name}>
+                  <tr className="border-t border-gray-800/80 align-top hover:bg-gray-900/40">
+                    <td className="px-3 py-2.5"><code className="font-mono text-[11px] text-[#ffbca3]">{item.name}</code><div className="mt-1 text-[9px] uppercase tracking-wide text-gray-700">{item.category}</div></td>
+                    <td className="px-3 py-2.5 text-[10px] text-gray-500">{item.direction}</td>
+                    <td className="px-3 py-2.5 text-xs leading-5 text-gray-400">{item.meaning}</td>
+                    <td className="max-w-xs px-3 py-2.5 font-mono text-[10px] leading-5 text-gray-600">
+                      <div className="flex flex-col items-start gap-1.5">
+                        <code className="break-all">{item.example}</code>
+                        {item.possibleValues ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedHeader((current) => current === item.name ? null : item.name)}
+                            aria-expanded={expandedHeader === item.name}
+                            className="font-sans text-[9px] font-semibold uppercase tracking-wide text-gray-500 hover:text-[#ffbca3]"
+                          >
+                            {expandedHeader === item.name ? 'Hide values' : `Show ${item.valueLabel ?? 'possible values'} (${item.possibleValues.length})`}
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedHeader === item.name && item.possibleValues ? (
+                    <tr className="bg-gray-950/50">
+                      <td colSpan={4} className="px-3 py-3">
+                        <div className="mb-2 text-[9px] font-semibold uppercase tracking-wide text-gray-600">{item.valueLabel ?? 'Possible values'} for {item.name}</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {item.possibleValues.map((value) => <code key={value} className="max-w-full break-all border border-gray-800 bg-[#141414] px-2 py-1 font-mono text-[10px] text-[#ffbca3]">{value}</code>)}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
               ))}
             </tbody>
           </table>
           {headers.length === 0 ? <div className="p-5 text-xs text-gray-500">No headers match this search.</div> : null}
         </div>
-        <p className="mt-2 text-[10px] leading-4 text-gray-600">This is the common working set, including the headers suggested by the editor. Header names are case-insensitive; add an application-specific or custom header directly in the Headers tab.</p>
+        <p className="mt-2 text-[10px] leading-4 text-gray-600">This is the common working set, including the headers suggested by the editor. Expand an example where the protocol has a finite or useful set of values; media types, language tags, and custom headers remain open-ended. Header names are case-insensitive.</p>
       </section>
 
       <section>
@@ -749,6 +879,157 @@ function AutomationContent() {
           ].map(([shortcut, action]) => <div key={shortcut} className="flex items-center justify-between gap-4 border-b border-gray-800/80 py-2.5"><kbd className="border border-gray-700 bg-gray-900 px-1.5 py-1 font-mono text-[10px] text-gray-300">{shortcut}</kbd><span className="text-right text-[11px] text-gray-500">{action}</span></div>)}
         </div>
       </section>
+    </div>
+  );
+}
+
+function DocsSectionLink({ section, label, onSectionChange }: { section: DocumentationSection; label: string; onSectionChange: (section: DocumentationSection) => void }) {
+  return <button type="button" onClick={() => onSectionChange(section)} className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 hover:text-[#ffbca3]">{label} <DocIcon name="arrow" /></button>;
+}
+
+function MockServersContent({ onSectionChange }: { onSectionChange: (section: DocumentationSection) => void }) {
+  return (
+    <div className="space-y-7">
+      <section className="grid gap-px border border-gray-800 bg-gray-800 md:grid-cols-3">
+        {[
+          ['01', 'Create a server', 'Give the server a name and optional slug. Its base URL is /mock/{slug}.'],
+          ['02', 'Add an endpoint', 'Choose a method, route, status, response body, headers, and artificial delay.'],
+          ['03', 'Run the contract', 'Start the server, copy an endpoint URL, and point a client or request at it.'],
+        ].map(([number, title, text]) => <div key={number} className="bg-[#141414] p-4"><span className="font-mono text-[10px] text-[#ffbca3]">{number}</span><div className="mt-3 text-sm font-semibold text-gray-100">{title}</div><p className="mt-1.5 text-[11px] leading-5 text-gray-500">{text}</p></div>)}
+      </section>
+
+      <section>
+        <SectionHeading eyebrow="Endpoint configuration" title="Every response detail stays visible." />
+        <div className="overflow-x-auto border border-gray-800">
+          <table className="w-full min-w-[680px] border-collapse text-left">
+            <thead className="bg-[#181818] text-[10px] uppercase tracking-wide text-gray-600"><tr><th className="px-3 py-2.5 font-semibold">Field</th><th className="px-3 py-2.5 font-semibold">How it behaves</th></tr></thead>
+            <tbody>{MOCK_SERVER_FIELDS.map(([field, text]) => <tr key={field} className="border-t border-gray-800/80 align-top"><td className="px-3 py-3 text-xs font-medium text-[#ffbca3]">{field}</td><td className="px-3 py-3 text-xs leading-5 text-gray-500">{text}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="border border-gray-800 bg-[#141414] p-5">
+          <SectionHeading eyebrow="Dynamic response" title="Use request context when static data is not enough." />
+          <p className="text-xs leading-5 text-gray-500">Enable the endpoint script to inspect <code className="font-mono text-[#ffbca3]">request</code> and write to <code className="font-mono text-[#ffbca3]">response</code>. The script runs on the backend with Jint.</p>
+          <pre className="mt-4 overflow-x-auto border border-gray-800 bg-gray-950/70 p-3 font-mono text-[11px] leading-5 text-emerald-300">{`// request.method, request.path, request.body
+// request.headers, request.queryParams
+// response.statusCode, response.body, response.headers
+response.body = JSON.stringify({
+  method: request.method,
+  path: request.path,
+  ok: true
+});`}</pre>
+        </div>
+        <div className="border border-gray-800 bg-[#141414] p-5">
+          <SectionHeading eyebrow="Useful checks" title="Test the unhappy paths too." />
+          <div className="space-y-2 text-[11px]">{['Use 401 and 403 responses to exercise auth handling.', 'Add a delay to verify timeout and loading states.', 'Return malformed JSON to test parser failures.', 'Keep a stable slug when a client integrates with the mock.'].map((item) => <div key={item} className="flex items-start gap-2 border border-gray-800 bg-gray-950/40 px-3 py-2.5 text-gray-400"><DocIcon name="check" /><span>{item}</span></div>)}</div>
+          <div className="mt-4"><DocsSectionLink section="scripting" label="Read response scripting API" onSectionChange={onSectionChange} /></div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ScriptingContent({ onSectionChange }: { onSectionChange: (section: DocumentationSection) => void }) {
+  return (
+    <div className="space-y-7">
+      <section>
+        <SectionHeading eyebrow="Three hooks" title="Prepare, observe, assert." />
+        <div className="grid gap-3 md:grid-cols-3">
+          <InfoCard title="Pre-request" text="Runs before the HTTP call. Resolve or create variables, then change URL, method, headers, query parameters, or body." />
+          <InfoCard title="Post-request" text="Runs after the response arrives. Read response data and store values for a later request in the same run." />
+          <InfoCard title="Tests" text="Runs after the post-request script. Register named assertions; failures are shown with the response and collection results." />
+        </div>
+      </section>
+
+      <section>
+        <SectionHeading eyebrow="Script API" title="Functions available in request scripts.">
+          <DocsSectionLink section="automation" label="Variables guide" onSectionChange={onSectionChange} />
+        </SectionHeading>
+        <div className="max-h-[520px] overflow-auto border border-gray-800">
+          <table className="w-full min-w-[720px] border-collapse text-left">
+            <thead className="sticky top-0 z-10 bg-[#181818] text-[10px] uppercase tracking-wide text-gray-600"><tr><th className="px-3 py-2.5 font-semibold">Function</th><th className="px-3 py-2.5 font-semibold">Stage</th><th className="px-3 py-2.5 font-semibold">Purpose</th></tr></thead>
+            <tbody>{SCRIPT_API.map((item) => <tr key={item.fn} className="border-t border-gray-800/80 align-top"><td className="px-3 py-2.5"><code className="font-mono text-[10px] text-[#ffbca3]">{item.fn}</code></td><td className="px-3 py-2.5 text-[10px] text-gray-600">{item.stage}</td><td className="px-3 py-2.5 text-[11px] leading-5 text-gray-500">{item.desc}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="border border-gray-800 bg-[#141414] p-5">
+          <SectionHeading eyebrow="Test API" title="Assertions that explain failure." />
+          <div className="overflow-x-auto border border-gray-800"><table className="w-full min-w-[650px] border-collapse text-left"><thead className="bg-[#181818] text-[10px] uppercase tracking-wide text-gray-600"><tr><th className="px-3 py-2.5 font-semibold">API</th><th className="px-3 py-2.5 font-semibold">Behavior</th></tr></thead><tbody>{TEST_API.map((item) => <tr key={item.fn} className="border-t border-gray-800/80 align-top"><td className="px-3 py-2.5"><code className="font-mono text-[10px] text-[#ffbca3]">{item.fn}</code></td><td className="px-3 py-2.5 text-[11px] leading-5 text-gray-500">{item.desc}</td></tr>)}</tbody></table></div>
+        </div>
+        <div className="border border-gray-800 bg-[#141414] p-5">
+          <SectionHeading eyebrow="Example" title="A small contract test." />
+          <pre className="border border-gray-800 bg-gray-950/70 p-3 font-mono text-[11px] leading-5 text-emerald-300">{`test("Created user", () => {
+  expect(response.status).toBe(201);
+  expect(response.contentType).toContain("json");
+  expect(response.time).toBeLessThan(5000);
+});`}</pre>
+          <p className="mt-3 text-[11px] leading-5 text-gray-500">Keep names specific: collection runs can then point directly to the failing expectation.</p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StorageContent({ onSectionChange }: { onSectionChange: (section: DocumentationSection) => void }) {
+  return (
+    <div className="space-y-7">
+      <section>
+        <SectionHeading eyebrow="Storage modes" title="Pick the shape that fits the work." />
+        <div className="grid gap-px border border-gray-800 bg-gray-800 md:grid-cols-3">{STORAGE_MODES.map((item) => <div key={item.name} className="bg-[#141414] p-4"><div className="text-sm font-semibold text-gray-100">{item.name}</div><div className="mt-2 text-[10px] uppercase tracking-wide text-[#ffbca3]">{item.fit}</div><p className="mt-2 text-[11px] leading-5 text-gray-500">{item.detail}</p></div>)}</div>
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="border border-gray-800 bg-[#141414] p-5">
+          <SectionHeading eyebrow="Migration" title="Changing storage is a deliberate move." />
+          <div className="space-y-0">{[
+            ['01', 'Choose a target', 'Select SQLite, one JSON file, or JSON per collection in Settings.'],
+            ['02', 'Review the warning', 'RequestLoom explains the target and the existing data that will be replaced.'],
+            ['03', 'Confirm migration', 'The current workspace data is copied into the target format.'],
+            ['04', 'Reload the app', 'The new provider is activated after migration so every view reads the same store.'],
+          ].map(([number, title, text]) => <div key={number} className="flex gap-3 border-b border-gray-800/80 py-3 last:border-0"><span className="font-mono text-[10px] text-[#ffbca3]">{number}</span><div><div className="text-xs font-semibold text-gray-200">{title}</div><div className="mt-1 text-[11px] leading-5 text-gray-500">{text}</div></div></div>)}</div>
+        </div>
+        <div className="border border-gray-800 bg-[#141414] p-5">
+          <SectionHeading eyebrow="Backups" title="Keep a recoverable copy." />
+          <div className="space-y-2 text-[11px] text-gray-500">{['Export a RequestLoom JSON workspace before a large migration.', 'The migration flow backs up the target before replacing it.', 'Back up the SQLite file while RequestLoom is closed to avoid a partial copy.', 'Treat JSON per collection folders as source-controlled data, but keep secrets out of shared repositories.'].map((item) => <div key={item} className="flex items-start gap-2 border border-gray-800 bg-gray-950/40 px-3 py-2.5"><DocIcon name="check" /><span>{item}</span></div>)}</div>
+          <div className="mt-4"><DocsSectionLink section="imports" label="Read import and export guide" onSectionChange={onSectionChange} /></div>
+        </div>
+      </section>
+
+      <section className="border border-gray-800 bg-gray-950/40 p-4 text-xs leading-6 text-gray-500"><span className="font-semibold text-gray-300">Collection folders.</span> A folder is an organizational group inside a service. In JSON-per-collection mode, the collection’s requests travel together, while workspace-level environments, variables, history, and mock servers remain part of the workspace data.</section>
+    </div>
+  );
+}
+
+function ImportsContent({ onSectionChange }: { onSectionChange: (section: DocumentationSection) => void }) {
+  return (
+    <div className="space-y-7">
+      <section>
+        <SectionHeading eyebrow="Supported formats" title="Import what you already have." />
+        <div className="overflow-x-auto border border-gray-800"><table className="w-full min-w-[820px] border-collapse text-left"><thead className="bg-[#181818] text-[10px] uppercase tracking-wide text-gray-600"><tr><th className="px-3 py-2.5 font-semibold">Format</th><th className="px-3 py-2.5 font-semibold">Input</th><th className="px-3 py-2.5 font-semibold">What RequestLoom creates</th></tr></thead><tbody>{IMPORT_FORMATS.map((item) => <tr key={item.format} className="border-t border-gray-800/80 align-top"><td className="px-3 py-3 text-xs font-medium text-[#ffbca3]">{item.format}</td><td className="px-3 py-3 text-[11px] text-gray-500">{item.input}</td><td className="px-3 py-3 text-[11px] leading-5 text-gray-500">{item.result}</td></tr>)}</tbody></table></div>
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-2">
+        <div className="border border-gray-800 bg-[#141414] p-5">
+          <SectionHeading eyebrow="Import flow" title="Preview before you commit." />
+          <div className="space-y-2 text-[11px] text-gray-500">{['Open Import from the top bar.', 'Choose a format and provide its URL, text, or files.', 'Review the parser result and warnings.', 'Choose a new workspace or the current workspace when the format supports it.', 'Run the imported request once and normalize variables or auth before sharing.'].map((item, index) => <div key={item} className="flex gap-3 border-b border-gray-800/80 py-2.5 last:border-0"><span className="font-mono text-[10px] text-[#ffbca3]">0{index + 1}</span><span>{item}</span></div>)}</div>
+        </div>
+        <div className="border border-gray-800 bg-[#141414] p-5">
+          <SectionHeading eyebrow="Export flow" title="Move a useful boundary." />
+          <p className="text-xs leading-6 text-gray-500">Export a whole workspace, one service, or a single request as RequestLoom JSON. The export includes the selected request configuration and its related data; use it for handoff, backups, or moving between SQLite and JSON storage.</p>
+          <pre className="mt-4 overflow-x-auto border border-gray-800 bg-gray-950/70 p-3 font-mono text-[11px] leading-5 text-[#ffbca3]">{`workspace.json
+  workspaces
+  services / folders / requests
+  environments / variables
+  mock servers / history`}</pre>
+          <div className="mt-4"><DocsSectionLink section="storage" label="Read storage and backup guide" onSectionChange={onSectionChange} /></div>
+        </div>
+      </section>
+
+      <section className="border border-gray-800 bg-gray-950/40 p-4 text-xs leading-6 text-gray-500"><span className="font-semibold text-gray-300">After import.</span> Imported definitions are a starting point. Check base URLs, variable names, auth secrets, generated folders, and body content before running against a real environment.</section>
     </div>
   );
 }

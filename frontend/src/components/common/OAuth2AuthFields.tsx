@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { oauthApi } from '../../services/api';
 import type { OAuth2Configuration, OAuthTokenStatus } from '../../types';
+import { DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   config: Record<string, string>;
@@ -235,14 +236,17 @@ export function OAuth2AuthFields({ config, onChange, ownerKey }: Props) {
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-2">
-        <input
-          className={inputClass}
-          placeholder="OIDC issuer (optional)"
-          value={config.issuer ?? ''}
-          onChange={(event) => update('issuer', event.target.value)}
-          aria-label="OIDC issuer"
-        />
+      <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <input
+            className={inputClass}
+            placeholder="OIDC issuer (optional)"
+            value={config.issuer ?? ''}
+            onChange={(event) => update('issuer', event.target.value)}
+            aria-label="OIDC issuer"
+          />
+          <DocHelpButton section="http" title="Open OAuth2 and authentication documentation" />
+        </div>
         <button
           type="button"
           onClick={() => { void discover(); }}

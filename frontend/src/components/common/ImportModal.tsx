@@ -3,6 +3,7 @@ import axios from 'axios';
 import { toolsApi, importsApi } from '../../services/api';
 import { useRequestStore } from '../../stores/requestStore';
 import type { CurlParseResult } from '../../types';
+import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   onClose: () => void;
@@ -222,6 +223,8 @@ export function ImportModal({ onClose, workspaceId }: Props) {
             ))}
           </div>
           <div className="flex-1" />
+          <DocumentationLink section="imports" onNavigate={close} />
+          <DocHelpButton section="imports" onNavigate={close} />
           <button onClick={close} className="px-3 py-2.5 text-gray-500 hover:text-gray-300" disabled={busy}>
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />

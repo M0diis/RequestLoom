@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useMockServerStore } from '../../stores/mockServerStore';
+import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 import type { HttpMethod, KeyValuePairRequest } from '../../types';
 
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
@@ -250,6 +251,8 @@ export function MockEndpointDetail() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          <DocumentationLink section="mock-servers" className="text-zinc-400 hover:text-zinc-100" />
+          <DocHelpButton section="mock-servers" />
           {!editing && !isNew && (
             <>
               <button onClick={copyMockUrl} className="text-xs px-2 py-1 rounded border border-zinc-600 text-zinc-400 hover:text-purple-400 hover:border-purple-500/50 transition-colors">
@@ -290,7 +293,7 @@ export function MockEndpointDetail() {
                 </select>
               </div>
               <div className="flex-1">
-                <label className="block text-xs text-zinc-400 mb-1">Path ({`{param}`} for path params)</label>
+                <div className="mb-1 flex items-center gap-1"><label className="text-xs text-zinc-400">Path ({`{param}`} for path params)</label><DocHelpButton section="mock-servers" title="Open mock route documentation" /></div>
                 <input type="text" value={epPath} onChange={(e) => setEpPath(e.target.value)}
                   placeholder="/api/users/{id}"
                   className="w-full bg-zinc-700/50 border border-zinc-600 rounded-md px-3 py-2 text-sm font-mono text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-purple-500/50" />
@@ -304,7 +307,7 @@ export function MockEndpointDetail() {
                   className="w-full bg-zinc-700/50 border border-zinc-600 rounded-md px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-purple-500/50" />
               </div>
               <div className="flex-1">
-                <label className="block text-xs text-zinc-400 mb-1">Content-Type</label>
+                <div className="mb-1 flex items-center gap-1"><label className="text-xs text-zinc-400">Content-Type</label><DocHelpButton section="http" title="Open HTTP header documentation" /></div>
                 <select value={epContentType} onChange={(e) => setEpContentType(e.target.value)}
                   className="w-full bg-zinc-700/50 border border-zinc-600 rounded-md px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-purple-500/50">
                   {CONTENT_TYPES.map((ct) => (<option key={ct} value={ct}>{ct}</option>))}
@@ -319,7 +322,7 @@ export function MockEndpointDetail() {
 
             {/* Response Body */}
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">Response Body</label>
+              <div className="mb-1 flex items-center gap-1"><label className="text-xs text-zinc-400">Response Body</label><DocHelpButton section="mock-servers" title="Open mock response documentation" /></div>
               <textarea value={epResponseBody} onChange={(e) => setEpResponseBody(e.target.value)} rows={8}
                 spellCheck={false}
                 className="w-full bg-zinc-700/50 border border-zinc-600 rounded-md px-3 py-2 text-sm font-mono text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 resize-y" />
@@ -328,7 +331,7 @@ export function MockEndpointDetail() {
             {/* Response Headers */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs text-zinc-400">Response Headers</label>
+                <div className="flex items-center gap-1"><label className="text-xs text-zinc-400">Response Headers</label><DocHelpButton section="http" title="Open HTTP header documentation" /></div>
                 <button onClick={addHeader} className="text-xs text-purple-400 hover:text-purple-300">+ Add</button>
               </div>
               {epHeaders.length === 0 ? (
@@ -359,11 +362,14 @@ export function MockEndpointDetail() {
             {/* Dynamic Script */}
             <div className="border border-zinc-600/40 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={epScriptEnabled} onChange={(e) => setEpScriptEnabled(e.target.checked)}
-                    className="rounded bg-zinc-700 border-zinc-600" />
-                  <span className="text-xs text-zinc-300">Dynamic Response (JavaScript)</span>
-                </label>
+                <div className="flex items-center gap-1">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input type="checkbox" checked={epScriptEnabled} onChange={(e) => setEpScriptEnabled(e.target.checked)}
+                      className="rounded bg-zinc-700 border-zinc-600" />
+                    <span className="text-xs text-zinc-300">Dynamic Response (JavaScript)</span>
+                  </label>
+                  <DocHelpButton section="mock-servers" title="Open mock response scripting documentation" />
+                </div>
                 {epScriptEnabled && <span className="text-[10px] px-2 py-0.5 rounded bg-amber-400/10 text-amber-400">Jint JS</span>}
               </div>
               {epScriptEnabled && (

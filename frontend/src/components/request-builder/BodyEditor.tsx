@@ -2,6 +2,7 @@ import type { BodyType } from '../../types';
 import { CodeEditor } from '../common/CodeEditor';
 import { MultipartFormEditor } from './MultipartFormEditor';
 import { createEmptyMultipartBody } from './multipartUtils';
+import { DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   body: string | null;
@@ -43,20 +44,26 @@ export function BodyEditor({ body, bodyType, requestId, onChange, dynamicSuggest
   if (bodyType === 'none') {
     return (
       <div>
-        <div className="flex gap-2 mb-3">
-          {BODY_TYPES.map((bt) => (
-            <button
-              key={bt.value}
-              onClick={() => changeBodyType(bt.value)}
-              className={`border px-3 py-1 text-xs font-medium ${
-                bodyType === bt.value
-                  ? 'border-gray-600 bg-gray-700 text-gray-100'
-                  : 'border-gray-700 bg-gray-900 text-gray-400 hover:bg-gray-800'
-              }`}
-            >
-              {bt.label}
-            </button>
-          ))}
+        <div className="flex justify-between">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {BODY_TYPES.map((bt) => (
+              <button
+                key={bt.value}
+                onClick={() => changeBodyType(bt.value)}
+                className={`border px-3 py-1 text-xs font-medium ${bodyType === bt.value
+                    ? 'border-gray-600 bg-gray-700 text-gray-100'
+                    : 'border-gray-700 bg-gray-900 text-gray-400 hover:bg-gray-800'
+                  }`}
+              >
+                {bt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Body type</span>
+            <DocHelpButton section="http" title="Open request body documentation" />
+          </div>
         </div>
         <p className="text-xs text-gray-400">This request does not have a body.</p>
       </div>
@@ -65,7 +72,9 @@ export function BodyEditor({ body, bodyType, requestId, onChange, dynamicSuggest
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex gap-2 mb-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Body type</span>
+          <DocHelpButton section="http" title="Open request body documentation" />
           {BODY_TYPES.map((bt) => (
             <button
               key={bt.value}

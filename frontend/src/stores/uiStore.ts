@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 export type DevToolTab = 'console' | 'network' | 'performance' | 'terminal';
-export type DocumentationSection = 'overview' | 'http' | 'requestloom' | 'automation';
+export type DocumentationSection = 'overview' | 'http' | 'requestloom' | 'automation' | 'mock-servers' | 'scripting' | 'storage' | 'imports';
 
 interface UiState {
   darkMode: boolean;

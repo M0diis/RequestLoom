@@ -9,6 +9,7 @@ import { CustomDropdown, type DropdownOption } from '../common/CustomDropdown';
 import { AutocompleteInput } from '../common/AutocompleteInput';
 import { DEFAULT_DYNAMIC_VALUE_SUGGESTIONS } from '../../lib/dynamicValues';
 import { OAuth2AuthFields } from '../common/OAuth2AuthFields';
+import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 import type {
   ServiceVariable,
   KeyValueEntry,
@@ -432,13 +433,16 @@ export function ServiceSettingsPage({ serviceId }: Props) {
       )}
 
       <section className="border border-gray-800 bg-[#1a1a1a] p-4 space-y-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">Service Settings</h2>
-          {metaDirty && (
-            <span className="inline-block rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
-              Unsaved
-            </span>
-          )}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">Service Settings</h2>
+            {metaDirty && (
+              <span className="inline-block rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                Unsaved
+              </span>
+            )}
+          </div>
+          <DocumentationLink section="requestloom" />
         </div>
 
         <div>
@@ -462,7 +466,7 @@ export function ServiceSettingsPage({ serviceId }: Props) {
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Default Headers</h3>
+            <h3 className="flex items-center gap-1 text-xs uppercase tracking-wide text-gray-500 font-semibold">Default Headers <DocHelpButton section="http" title="Open HTTP header documentation" /></h3>
             <span className="text-[11px] text-gray-400">
               Disabled request header with the same key removes inherited default.
             </span>
@@ -475,12 +479,14 @@ export function ServiceSettingsPage({ serviceId }: Props) {
             keySuggestions={HEADER_KEY_SUGGESTIONS}
             valueSuggestionsMap={HEADER_VALUE_MAP}
             dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
+            helpSection="http"
+            helpTitle="Open HTTP header documentation"
           />
         </div>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Default Authorization</h3>
+            <div className="flex items-center gap-2"><h3 className="flex items-center gap-1 text-xs uppercase tracking-wide text-gray-500 font-semibold">Default Authorization <DocHelpButton section="http" title="Open authentication documentation" /></h3><DocumentationLink section="http" /></div>
             <span className="text-[11px] text-gray-400">Used when request auth is set to inherit.</span>
           </div>
 

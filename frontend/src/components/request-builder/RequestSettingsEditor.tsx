@@ -3,6 +3,7 @@ import { requestsApi } from '../../services/api';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { ApiRequestSettings, RequestProxyMode } from '../../types';
 import CookieJarPanel from './CookieJarPanel';
+import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 interface RequestSettingsEditorProps {
   requestId: string;
@@ -132,7 +133,7 @@ export default function RequestSettingsEditor({ requestId, workspaceId }: Reques
   return (
     <div className="space-y-4">
       <section>
-        <label className={SECTION_LABEL}>Execution</label>
+        <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-1"><label className={SECTION_LABEL}>Execution</label><DocHelpButton section="requestloom" title="Open request settings documentation" /></div><DocumentationLink section="requestloom" /></div>
         <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-300">
           <input
             type="checkbox"
@@ -189,7 +190,7 @@ export default function RequestSettingsEditor({ requestId, workspaceId }: Reques
       </section>
 
       <section>
-        <label className={SECTION_LABEL}>Proxy</label>
+        <div className="flex items-center gap-1"><label className={SECTION_LABEL}>Proxy</label><DocHelpButton section="requestloom" title="Open request settings documentation" /></div>
         <label className="block text-[11px] text-gray-400" htmlFor="request-proxy-mode">
           Proxy behavior
         </label>
@@ -254,7 +255,7 @@ export default function RequestSettingsEditor({ requestId, workspaceId }: Reques
       </section>
 
       <section>
-        <label className={SECTION_LABEL}>Timeout</label>
+        <div className="flex items-center gap-1"><label className={SECTION_LABEL}>Timeout</label><DocHelpButton section="requestloom" title="Open request settings documentation" /></div>
         <input
           type="number"
           min={0}

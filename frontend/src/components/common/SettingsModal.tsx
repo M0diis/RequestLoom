@@ -3,6 +3,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { JsonStorageStrategy, StorageMode, SettingsUpdate } from '../../types';
 import { ConfirmModal } from './ConfirmModal';
+import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   onClose: () => void;
@@ -216,9 +217,12 @@ export function SettingsModal({ onClose }: Props) {
       }}
     >
       <div className="flex h-[min(540px,85vh)] w-full max-w-md flex-col border border-gray-700 bg-[#141414] shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
-        <div className="border-b border-gray-800 px-4 py-3">
-          <h3 className="text-sm font-semibold text-gray-100">Settings</h3>
-          <p className="mt-1 text-xs text-gray-500">Application preferences and storage options.</p>
+        <div className="flex items-start justify-between gap-3 border-b border-gray-800 px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-100">Settings</h3>
+            <p className="mt-1 text-xs text-gray-500">Application preferences and storage options.</p>
+          </div>
+          <DocumentationLink section="storage" onNavigate={onClose} />
         </div>
 
         <div className="flex gap-1 border-b border-gray-800 px-2 pt-1">
@@ -245,7 +249,7 @@ export function SettingsModal({ onClose }: Props) {
             <div className="space-y-5">
               {activeTab === 'general' && (
                 <section>
-                  <label className={SECTION_LABEL}>Storage</label>
+                  <div className="flex items-center gap-1"><label className={SECTION_LABEL}>Storage</label><DocHelpButton section="storage" onNavigate={onClose} /></div>
                   <div className="space-y-2">
                     {MODE_OPTIONS.map((option) => (
                       <button
@@ -272,7 +276,7 @@ export function SettingsModal({ onClose }: Props) {
 
                   {selectedMode === 'json' && (
                     <div className="mt-3 space-y-2">
-                      <label className={SECTION_LABEL}>JSON layout</label>
+                      <div className="flex items-center gap-1"><label className={SECTION_LABEL}>JSON layout</label><DocHelpButton section="storage" onNavigate={onClose} /></div>
                       {JSON_STRATEGY_OPTIONS.map((option) => (
                         <button
                           key={option.value}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { ApiRequest } from '../../types';
 import { AutocompleteInput } from '../common/AutocompleteInput';
 import { OAuth2AuthFields } from '../common/OAuth2AuthFields';
+import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   request: ApiRequest;
@@ -114,6 +115,10 @@ export function AuthEditor({ request, onUpdate, dynamicSuggestions = [] }: Props
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1"><span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Auth type</span><DocHelpButton section="http" title="Open authentication documentation" /></div>
+        <DocumentationLink section="http" />
+      </div>
       <div className="flex flex-wrap gap-2">
         {AUTH_TYPES.map((at) => (
           <button

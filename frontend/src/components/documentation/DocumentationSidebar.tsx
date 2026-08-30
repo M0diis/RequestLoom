@@ -4,7 +4,11 @@ const SECTIONS: Array<{ id: DocumentationSection; label: string; description: st
   { id: 'overview', label: 'Overview', description: 'Start here' },
   { id: 'http', label: 'HTTP reference', description: 'Methods & status codes' },
   { id: 'requestloom', label: 'How RequestLoom works', description: 'The app in one flow' },
-  { id: 'automation', label: 'Automation', description: 'Variables, scripts & mocks' },
+  { id: 'automation', label: 'Automation', description: 'Variables & workflows' },
+  { id: 'mock-servers', label: 'Mock servers', description: 'Local endpoints & responses' },
+  { id: 'scripting', label: 'Scripts & tests', description: 'Execution and API reference' },
+  { id: 'storage', label: 'Storage & backups', description: 'SQLite, JSON & migration' },
+  { id: 'imports', label: 'Import & export', description: 'Formats and workflows' },
 ];
 
 function SectionIcon({ section }: { section: DocumentationSection }) {
@@ -28,6 +32,14 @@ function SectionIcon({ section }: { section: DocumentationSection }) {
       return <svg {...props}><circle cx="12" cy="12" r="8.5" /><path d="M8 12h8M12 8v8" /><path d="M16.5 5.5l2-2M18.5 18.5l2 2M5.5 5.5l-2-2M5.5 18.5l-2 2" /></svg>;
     case 'automation':
       return <svg {...props}><path d="M8 4h8M9 2h6v4H9zM6 6h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2z" /><path d="M8 11h8M8 15h5" /></svg>;
+    case 'mock-servers':
+      return <svg {...props}><path d="M4 5h16v14H4z" /><path d="M8 9h8M8 13h5M8 17h3" /></svg>;
+    case 'scripting':
+      return <svg {...props}><path d="M7 5l-4 7 4 7M17 5l4 7-4 7M14 3l-4 18" /></svg>;
+    case 'storage':
+      return <svg {...props}><ellipse cx="12" cy="5" rx="7" ry="3" /><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7" /></svg>;
+    case 'imports':
+      return <svg {...props}><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>;
   }
 }
 
@@ -41,7 +53,7 @@ export function DocumentationSidebar() {
           <span className="h-1.5 w-1.5 bg-[#ff6c37]" />
           Docs
         </div>
-        <p className="mt-2 text-[11px] leading-4 text-gray-500">A compact reference for HTTP and the workspace.</p>
+        <p className="mt-2 text-[11px] leading-4 text-gray-500">HTTP, workflows, mocks, storage, and interchange in one place.</p>
       </div>
 
       <nav className="space-y-0.5 p-2" aria-label="Documentation sections">

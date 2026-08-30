@@ -3,6 +3,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useRequestStore } from '../../stores/requestStore';
 import { exportImportApi } from '../../services/api';
 import type { WorkspaceExport } from '../../types';
+import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   onClose: () => void;
@@ -207,6 +208,10 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
             Import
           </button>
           <div className="flex-1" />
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">
+            <DocumentationLink section="imports" onNavigate={onClose} />
+            <DocHelpButton section="imports" onNavigate={onClose} />
+          </div>
           <button
             onClick={onClose}
             className="px-3 py-2 text-gray-500 hover:text-gray-300"

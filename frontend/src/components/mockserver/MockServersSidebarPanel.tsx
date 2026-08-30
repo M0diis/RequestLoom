@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useMockServerStore } from '../../stores/mockServerStore';
 import type { MockServer } from '../../types';
+import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 const METHOD_COLORS: Record<string, string> = {
   GET: 'text-emerald-400',
@@ -111,6 +112,10 @@ export function MockServersSidebarPanel() {
 
   return (
     <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between gap-2 border-b border-gray-800 px-3 py-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Mock servers</span>
+        <div className="flex items-center gap-2"><DocumentationLink section="mock-servers" /><DocHelpButton section="mock-servers" /></div>
+      </div>
       {/* Server tree */}
       <div className="flex-1 overflow-y-auto">
         {servers.map((server) => (
@@ -249,9 +254,10 @@ export function MockServersSidebarPanel() {
       {showServerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowServerModal(false)}>
           <div className="bg-zinc-800 border border-zinc-600/60 rounded-xl w-full max-w-md p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-semibold text-zinc-100 mb-4">
-              {editingServerId ? 'Edit Mock Server' : 'New Mock Server'}
-            </h3>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-zinc-100">{editingServerId ? 'Edit Mock Server' : 'New Mock Server'}</h3>
+              <DocHelpButton section="mock-servers" />
+            </div>
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">Name</label>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DocumentationLink } from '../documentation/DocumentationLink';
 
 interface Props {
   onClose: () => void;
@@ -153,6 +154,7 @@ export function ScriptHelpModal({ onClose, initialTab = 'pre' }: Props) {
             </button>
           ))}
           <div className="flex-1" />
+          <DocumentationLink section="scripting" onNavigate={onClose} />
           <button onClick={onClose} className="px-3 py-2.5 text-gray-500 hover:text-gray-300">
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />

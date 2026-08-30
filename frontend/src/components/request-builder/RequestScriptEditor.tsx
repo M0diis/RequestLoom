@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CodeEditor } from '../common/CodeEditor';
 import { ScriptHelpModal } from '../common/ScriptHelpModal';
 import type { ApiRequest } from '../../types';
+import { DocumentationLink } from '../documentation/DocumentationLink';
 
 interface Props {
   request: ApiRequest;
@@ -53,6 +54,7 @@ export function RequestScriptEditor({ request, onUpdate, stage }: Props) {
         ? 'border-violet-900/60 bg-violet-950/20 text-violet-200'
         : 'border-emerald-900/60 bg-emerald-950/20 text-emerald-200'}`}>
         <span className="flex-1">{stage === 'pre' ? PRE_REQUEST_HELP : stage === 'post' ? POST_REQUEST_HELP : TEST_HELP}</span>
+        <DocumentationLink section="scripting" className="mt-0.5 whitespace-nowrap text-gray-400 hover:text-gray-100" />
         <button
           onClick={() => setShowHelp(true)}
           className="flex-shrink-0 rounded-full border border-gray-600 px-1.5 text-[11px] text-gray-400 hover:bg-gray-700 hover:text-gray-200"

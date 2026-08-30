@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { RequestVariable } from '../../types';
 import { AutocompleteInput } from './AutocompleteInput';
+import { DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   entries: RequestVariable[];
@@ -93,7 +94,7 @@ export function RequestVariableEditor({ entries, onChange, dynamicSuggestions = 
         <div className={`${GRID_COLS} border-b border-gray-800 bg-gray-900/70 px-2 py-1.5`}>
           <span className="text-center text-[10px] font-semibold uppercase tracking-wide text-gray-500"></span>
           <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Name</span>
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Value</span>
+          <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Value <DocHelpButton section="automation" title="Open variables documentation" /></span>
         </div>
         <div ref={containerRef} className="divide-y divide-gray-800">
           {entries.map((entry, i) => (

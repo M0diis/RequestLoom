@@ -665,6 +665,8 @@ export function RequestBuilder() {
             keyPlaceholder="Parameter name"
             valuePlaceholder="Value"
             dynamicSuggestions={dynamicSuggestions}
+            helpSection="http"
+            helpTitle="Open query parameter documentation"
           />
         )}
         {activeRequestTab === 'headers' && (
@@ -676,6 +678,8 @@ export function RequestBuilder() {
             keySuggestions={HEADER_KEY_SUGGESTIONS}
             valueSuggestionsMap={HEADER_VALUE_MAP}
             dynamicSuggestions={dynamicSuggestions}
+            helpSection="http"
+            helpTitle="Open header documentation"
           />
         )}
         {activeRequestTab === 'variables' && (
