@@ -267,12 +267,13 @@ export function TopBar() {
         <span className="mx-0.5 h-5 w-px bg-gray-700" />
         <button
           onClick={() => setImportExportModalOpen(true)}
-          className="titlebar-no-drag flex items-center gap-1.5 border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-[11px] text-gray-200 hover:bg-gray-800 disabled:opacity-50 max-lg:px-2"
+          className="titlebar-no-drag flex items-center gap-1.5 border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-[11px] text-gray-200 hover:bg-gray-800 disabled:opacity-50 max-xl:gap-0 max-xl:px-2"
           disabled={busy || !activeWorkspaceId}
+          aria-label="Export / Import data"
           title="Export / Import data"
         >
-          <span className="max-lg:hidden">Export / Import</span>
-          <svg className="h-3.5 w-3.5 lg:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <span className="hidden whitespace-nowrap xl:inline">Export / Import</span>
+          <svg className="h-3.5 w-3.5 xl:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
           </svg>
         </button>
@@ -295,7 +296,7 @@ export function TopBar() {
       )}
 
       <div className={desktopShell ? 'relative z-10 flex-1 px-3 text-center text-[11px] uppercase tracking-[0.16em] text-gray-500' : 'flex-1'}>
-        {desktopShell ? <span className="max-lg:hidden">RequestLoom Desktop</span> : null}
+        {desktopShell ? <span className="max-lg:hidden">RequestLoom</span> : null}
       </div>
 
       <div className="titlebar-no-drag relative z-20 flex items-center gap-1 max-lg:gap-0.5">
@@ -384,7 +385,7 @@ export function TopBar() {
       </div>
 
       {desktopShell ? (
-        <div className="titlebar-no-drag relative z-20 -my-px ml-1 flex h-11 items-stretch border-l border-gray-800">
+        <div className="titlebar-no-drag relative z-20 -my-px ml-auto -mr-3 flex h-11 flex-shrink-0 items-stretch border-l border-gray-800 max-lg:-mr-2">
           <button
             onClick={() => {
               void desktopShell.minimize();
