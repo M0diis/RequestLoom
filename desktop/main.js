@@ -51,23 +51,36 @@ function registerWindowControlHandlers() {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed() || win.isMaximized()) return false;
 
-    const [winX, winY] = win.getPosition();
+    const bounds = win.getBounds();
     const { x: startX, y: startY } = screen.getCursorScreenPoint();
-    activeDrag = { win, winX, winY, startX, startY };
+    activeDrag = {
+      win,
+      winX: bounds.x,
+      winY: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      startX,
+      startY,
+    };
     return true;
   });
 
   ipcMain.on('window:drag-move', () => {
     if (!activeDrag) return;
 
-    const { win, winX, winY, startX, startY } = activeDrag;
+    const { win, winX, winY, width, height, startX, startY } = activeDrag;
     if (win.isDestroyed()) {
       activeDrag = null;
       return;
     }
 
     const { x, y } = screen.getCursorScreenPoint();
-    win.setPosition(Math.round(winX + (x - startX)), Math.round(winY + (y - startY)));
+    win.setBounds({
+      x: Math.round(winX + (x - startX)),
+      y: Math.round(winY + (y - startY)),
+      width,
+      height,
+    }, false);
   });
 
   ipcMain.handle('window:stop-drag', () => {
@@ -380,6 +393,9 @@ function createMainWindow() {
     height: 920,
     minWidth: 1024,
     minHeight: 680,
+    // Keep native resizing enabled. Resize messages are blocked below only
+    // while the custom titlebar drag is active.
+    resizable: true,
     frame: false,
     show: false,
     autoHideMenuBar: true,
@@ -398,6 +414,8 @@ function createMainWindow() {
 
   const win = new BrowserWindow(windowOptions);
 
+  // Only suppress native resize messages while our custom titlebar drag is
+  // active. Normal edge/corner resizing must remain available to the user.
   win.on('will-resize', (event) => {
     if (activeDrag?.win === win) {
       event.preventDefault();
