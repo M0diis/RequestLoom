@@ -43,14 +43,7 @@ function appendLog(message) {
 }
 
 function stopActiveDrag() {
-  if (!activeDrag) return;
-
-  const { win, wasResizable } = activeDrag;
   activeDrag = null;
-
-  if (!win.isDestroyed() && win.isResizable() !== wasResizable) {
-    win.setResizable(wasResizable);
-  }
 }
 
 function registerWindowControlHandlers() {
@@ -58,19 +51,9 @@ function registerWindowControlHandlers() {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed() || win.isMaximized()) return false;
 
-    stopActiveDrag();
-
     const [winX, winY] = win.getPosition();
     const { x: startX, y: startY } = screen.getCursorScreenPoint();
-    const wasResizable = win.isResizable();
-    activeDrag = { win, winX, winY, startX, startY, wasResizable };
-
-    // Disable edge hit-testing for the short manual drag so moving the window
-    // cannot also begin a native resize operation.
-    if (wasResizable) {
-      win.setResizable(false);
-    }
-
+    activeDrag = { win, winX, winY, startX, startY };
     return true;
   });
 
@@ -400,7 +383,8 @@ function createMainWindow() {
     frame: false,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#0f172a',
+    // Match the titlebar color in the native top resize area.
+    backgroundColor: '#1a1a1a',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -414,6 +398,11 @@ function createMainWindow() {
 
   const win = new BrowserWindow(windowOptions);
 
+  win.on('will-resize', (event) => {
+    if (activeDrag?.win === win) {
+      event.preventDefault();
+    }
+  });
   win.on('closed', stopActiveDrag);
   win.on('maximize', () => broadcastMaximizedState(win));
   win.on('unmaximize', () => broadcastMaximizedState(win));

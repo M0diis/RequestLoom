@@ -46,6 +46,7 @@ export function TopBar() {
     if ((event.target as HTMLElement).closest('.titlebar-no-drag')) return;
 
     event.preventDefault();
+    event.stopPropagation();
 
     const titlebar = event.currentTarget;
     const pointerId = event.pointerId;
@@ -69,7 +70,7 @@ export function TopBar() {
     };
 
     try {
-      event.currentTarget.setPointerCapture(event.pointerId);
+      titlebar.setPointerCapture(pointerId);
     } catch {
       // Pointer capture is not available in every Electron/Windows combination.
     }
@@ -230,7 +231,7 @@ export function TopBar() {
   return (
     <>
       <div
-        className={`relative z-30 flex h-11 flex-shrink-0 items-center gap-3 overflow-x-auto overflow-y-hidden border-b border-gray-800 bg-[#1a1a1a] px-3 max-lg:gap-2 max-lg:px-2 scrollbar-slim-x ${desktopShell ? 'select-none' : ''}`}
+        className={`relative z-30 flex h-11 flex-shrink-0 items-center gap-3 overflow-x-auto overflow-y-hidden border-b border-gray-800 bg-[#1a1a1a] px-3 max-lg:gap-2 max-lg:px-2 scrollbar-slim-x ${desktopShell ? 'titlebar-manual-drag select-none' : ''}`}
         onPointerDown={desktopShell ? handleTitlebarPointerDown : undefined}
       >
       <div className="relative z-20 flex items-center gap-2 max-lg:gap-1.5">
