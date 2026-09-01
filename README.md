@@ -33,7 +33,7 @@ RequestLoom runs three ways:
 | --- | --- |
 | Frontend | React 19, TypeScript, Vite 8, Tailwind CSS 4, Monaco Editor, Zustand, React Router, Axios |
 | Backend | .NET 10 (ASP.NET Core), SQLite + JSON storage via Entity Framework Core 10, Jint, YamlDotNet, OpenAPI Readers |
-| Desktop | Electron 31, electron-packager |
+| Desktop | Electron 44, electron-packager |
 | Linting | oxlint (frontend) |
 
 ## Project structure

@@ -9,7 +9,7 @@
     "package:linux": "ELECTRON_PLATFORM=linux node scripts/package-win.js"
   },
   "devDependencies": {
-    "electron": "31.7.7",
+    "electron": "44.1.0",
     "electron-packager": "17.1.2"
   }
 }
