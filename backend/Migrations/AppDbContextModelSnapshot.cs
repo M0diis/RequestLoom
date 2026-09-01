@@ -264,6 +264,16 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("delay_ms");
 
+                    b.Property<string>("Behavior")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("behavior");
+
+                    b.Property<string>("BehaviorConfigJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("behavior_config_json");
+
                     b.Property<string>("Method")
                         .IsRequired()
                         .HasColumnType("TEXT")

@@ -150,7 +150,12 @@ app.Use(async (context, next) =>
         }
 
         var response = await mockService.HandleRequestAsync(
-            serverId, context.Request.Method, restPath, body, context.Request.Headers);
+            serverId,
+            context.Request.Method,
+            restPath,
+            body,
+            context.Request.Headers,
+            $"{context.Request.Scheme}://{context.Request.Host}");
 
         context.Response.StatusCode = response.StatusCode;
 

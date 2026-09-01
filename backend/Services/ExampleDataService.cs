@@ -23,6 +23,7 @@ public class ExampleDataService
     private readonly AppDbContext? _db;
     private readonly JsonDataStore? _jsonStore;
     private readonly SettingsService _settings;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<ExampleDataService> _logger;
 
     public ExampleDataService(
@@ -35,6 +36,7 @@ public class ExampleDataService
         IMockServerRepository mockRepo,
         IHistoryRepository historyRepo,
         SettingsService settings,
+        IConfiguration configuration,
         IServiceProvider sp,
         ILogger<ExampleDataService> logger)
     {
@@ -47,6 +49,7 @@ public class ExampleDataService
         _mockRepo = mockRepo;
         _historyRepo = historyRepo;
         _settings = settings;
+        _configuration = configuration;
         _logger = logger;
 
         if (_settings.UseJson)
@@ -71,6 +74,7 @@ public class ExampleDataService
             var mockServers = await _mockRepo.GetByWorkspaceAsync(existingSandbox.Id);
             if (services.Count() >= 3 && mockServers.Count() >= 3)
             {
+                await RepairSandboxMockUrlsAsync(existingSandbox.Id, services, mockServers);
                 _logger.LogInformation("Sandbox example data already exists: workspace={WorkspaceId}", existingSandbox.Id);
                 return existingSandbox.Id;
             }
@@ -121,7 +125,7 @@ public class ExampleDataService
     {
         var mockSlug = await GetAvailableMockSlugAsync("sandbox-users");
         // Mock servers are accessed via the app's /mock/{slug} middleware, not a separate port
-        var baseUrl = $"http://localhost:5173/mock/{mockSlug}";
+        var baseUrl = GetMockBaseUrl(mockSlug);
 
         // Mock server
         var mockServer = await _mockRepo.CreateAsync(workspaceId,
@@ -350,7 +354,7 @@ test('Response contains updated user', () => {
     private async Task<Service> CreatePostsExample(string workspaceId, string devEnvId)
     {
         var mockSlug = await GetAvailableMockSlugAsync("sandbox-posts");
-        var baseUrl = $"http://localhost:5173/mock/{mockSlug}";
+        var baseUrl = GetMockBaseUrl(mockSlug);
 
         // Mock server
         var mockServer = await _mockRepo.CreateAsync(workspaceId,
@@ -497,13 +501,62 @@ test('Post has comments', () => {
     private async Task<Service> CreateAuthExample(string workspaceId, string devEnvId)
     {
         var mockSlug = await GetAvailableMockSlugAsync("sandbox-auth");
-        var baseUrl = $"http://localhost:5173/mock/{mockSlug}";
+        var baseUrl = GetMockBaseUrl(mockSlug);
 
         // Mock server
         var mockServer = await _mockRepo.CreateAsync(workspaceId,
             "Sandbox Auth Mock",
-            $"Mock server for the Auth API example. Simulates login, registration, and profile endpoints with token responses. Accessed at /mock/{mockSlug}",
+            $"Mock server for the Auth API example. Simulates login, registration, profile, OAuth2 authorization-code, and OIDC discovery endpoints. Accessed at /mock/{mockSlug}",
             mockSlug, 0);
+
+        var oauthConfig = JsonSerializer.Serialize(new
+        {
+            issuer = baseUrl,
+            clientId = "requestloom-sandbox-client",
+            clientSecret = "requestloom-sandbox-secret",
+            scope = "openid profile email",
+            subject = "sandbox-user",
+            name = "Jane Doe",
+            preferredUsername = "jane.doe",
+            email = "jane@example.com",
+            tokenTtlSeconds = 3600,
+        });
+
+        await _mockRepo.CreateEndpointAsync(mockServer.Id, new CreateMockEndpointRequest
+        {
+            Method = "GET", Path = "/.well-known/openid-configuration",
+            ContentType = "application/json",
+            Behavior = MockEndpointBehaviors.OidcDiscovery,
+            BehaviorConfigJson = oauthConfig,
+        });
+        await _mockRepo.CreateEndpointAsync(mockServer.Id, new CreateMockEndpointRequest
+        {
+            Method = "GET", Path = "/oauth/authorize",
+            ContentType = "text/plain",
+            Behavior = MockEndpointBehaviors.OAuth2Authorization,
+            BehaviorConfigJson = oauthConfig,
+        });
+        await _mockRepo.CreateEndpointAsync(mockServer.Id, new CreateMockEndpointRequest
+        {
+            Method = "POST", Path = "/oauth/token",
+            ContentType = "application/json",
+            Behavior = MockEndpointBehaviors.OAuth2Token,
+            BehaviorConfigJson = oauthConfig,
+        });
+        await _mockRepo.CreateEndpointAsync(mockServer.Id, new CreateMockEndpointRequest
+        {
+            Method = "GET", Path = "/userinfo",
+            ContentType = "application/json",
+            Behavior = MockEndpointBehaviors.OidcUserInfo,
+            BehaviorConfigJson = oauthConfig,
+        });
+        await _mockRepo.CreateEndpointAsync(mockServer.Id, new CreateMockEndpointRequest
+        {
+            Method = "GET", Path = "/.well-known/jwks.json",
+            ContentType = "application/json",
+            Behavior = MockEndpointBehaviors.OidcJwks,
+            BehaviorConfigJson = oauthConfig,
+        });
 
         var loginResponse = JsonSerializer.Serialize(new
         {
@@ -575,6 +628,12 @@ if (!auth || !auth.startsWith('Bearer ')) {
             null);
 
         await _svcVarRepo.UpsertAsync(service.Id, null, "base_url", baseUrl, false, true, devEnvId);
+        await _svcVarRepo.UpsertAsync(service.Id, null, "oidc_issuer", baseUrl, false, true, devEnvId);
+        await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_client_id", "requestloom-sandbox-client", false, true, devEnvId);
+        await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_client_secret", "requestloom-sandbox-secret", true, true, devEnvId);
+        await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_scope", "openid profile email", false, true, devEnvId);
+        await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_redirect_uri", "http://localhost:5173/oauth/callback", false, true, devEnvId);
+        await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_code_verifier", "requestloom-sandbox-pkce", false, true, devEnvId);
 
         // Login (form-urlencoded body)
         var loginReq = await _requestRepo.CreateAsync(service.Id, new CreateApiRequestRequest
@@ -597,8 +656,8 @@ if (!auth || !auth.startsWith('Bearer ')) {
             PostRequestScript = @"// Extract token from login response and store it as a variable
 const json = JSON.parse(response.body);
 if (json.access_token) {
-    setVar('access_token', json.access_token);
-    setVar('refresh_token', json.refresh_token);
+    setVar('access_token', String(json.access_token));
+    setVar('refresh_token', String(json.refresh_token || ''));
     log('Token stored for subsequent requests');
 }",
             TestScript = @"test('Login successful', () => {
@@ -620,13 +679,39 @@ test('Returns access token', () => {
             BodyType = "json"
         });
 
-        // Get Current User Profile
-        await _requestRepo.CreateAsync(service.Id, new CreateApiRequestRequest
+        // Get Current User Profile using the token extracted by Login
+        var profileReq = await _requestRepo.CreateAsync(service.Id, new CreateApiRequestRequest
         {
             Name = "Get My Profile", Method = "GET",
             Url = "{{base_url}}/api/auth/me",
             Body = null, BodyType = "none"
         });
+        await _requestRepo.UpdateAsync(profileReq.Id, new UpdateApiRequestRequest
+        {
+            Name = "Get My Profile", Method = "GET",
+            Url = "{{base_url}}/api/auth/me",
+            Body = null, BodyType = "none",
+            Headers = new List<KeyValuePairRequest>(),
+            Params = new List<KeyValuePairRequest>(),
+            Variables = new List<RequestVariableRequest>
+            {
+                new() { Key = "access_token", Value = "", Enabled = true }
+            },
+            Auth = new AuthRequest
+            {
+                AuthType = "bearer",
+                ConfigJson = JsonSerializer.Serialize(new { token = "{{access_token}}" })
+            },
+            TestScript = @"test('Profile request authenticated', () => {
+    expect(response.status).toBe(200);
+});
+test('Returns the current user', () => {
+    const json = JSON.parse(response.body);
+    expect(json.username).toBe('johndoe');
+});"
+        });
+
+        await EnsureSandboxOAuthRequestsAsync(service);
 
         return service;
     }
@@ -641,6 +726,357 @@ test('Returns access token', () => {
 
         var suffix = Guid.NewGuid().ToString("N")[..8];
         return $"{normalizedSlug}-{suffix}";
+    }
+
+    private string GetMockBaseUrl(string slug)
+    {
+        var configured = _configuration["RequestLoom:PublicUrl"] ??
+            System.Environment.GetEnvironmentVariable("REQUESTLOOM_PUBLIC_URL");
+        var baseUrl = NormalizePublicUrl(configured);
+
+        if (baseUrl == null)
+        {
+            var urls = System.Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
+            baseUrl = urls.Select(NormalizePublicUrl).FirstOrDefault(url => url != null);
+        }
+
+        return $"{(baseUrl ?? "http://localhost:5056").TrimEnd('/')}/mock/{slug}";
+    }
+
+    private async Task RepairSandboxMockUrlsAsync(
+        string workspaceId,
+        IEnumerable<Service> services,
+        IEnumerable<MockServer> mockServers)
+    {
+        var environments = (await _envRepo.GetByWorkspaceAsync(workspaceId)).ToList();
+        var environmentIds = environments
+            .Where(environment => environment.Name is "DEV" or "STG")
+            .Select(environment => environment.Id)
+            .ToList();
+
+        var sandboxMocks = mockServers
+            .Where(server => server.Slug.StartsWith("sandbox-", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var authMock = sandboxMocks.FirstOrDefault(server =>
+            server.Slug.StartsWith("sandbox-auth", StringComparison.OrdinalIgnoreCase));
+        if (authMock != null)
+        {
+            await EnsureSandboxOAuthEndpointsAsync(authMock);
+        }
+
+        foreach (var service in services)
+        {
+            var mock = sandboxMocks.FirstOrDefault(server =>
+                service.Name switch
+                {
+                    "Users API" => server.Slug.StartsWith("sandbox-users", StringComparison.OrdinalIgnoreCase),
+                    "Posts API" => server.Slug.StartsWith("sandbox-posts", StringComparison.OrdinalIgnoreCase),
+                    "Auth API" => server.Slug.StartsWith("sandbox-auth", StringComparison.OrdinalIgnoreCase),
+                    _ => false,
+                });
+            if (mock == null) continue;
+
+            foreach (var environmentId in environmentIds)
+            {
+                await _svcVarRepo.UpsertAsync(
+                    service.Id,
+                    null,
+                    "base_url",
+                    GetMockBaseUrl(mock.Slug),
+                    false,
+                    true,
+                    environmentId);
+
+                if (service.Name == "Auth API")
+                {
+                    var authBaseUrl = GetMockBaseUrl(mock.Slug);
+                    await _svcVarRepo.UpsertAsync(service.Id, null, "oidc_issuer", authBaseUrl, false, true, environmentId);
+                    await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_client_id", "requestloom-sandbox-client", false, true, environmentId);
+                    await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_client_secret", "requestloom-sandbox-secret", true, true, environmentId);
+                    await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_scope", "openid profile email", false, true, environmentId);
+                    await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_redirect_uri", "http://localhost:5173/oauth/callback", false, true, environmentId);
+                    await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_code_verifier", "requestloom-sandbox-pkce", false, true, environmentId);
+                    await EnsureSandboxOAuthRequestsAsync(service);
+                }
+            }
+        }
+    }
+
+    private async Task EnsureSandboxOAuthEndpointsAsync(MockServer mockServer)
+    {
+        var endpoints = (await _mockRepo.GetEndpointsAsync(mockServer.Id)).ToList();
+        var config = JsonSerializer.Serialize(new
+        {
+            issuer = GetMockBaseUrl(mockServer.Slug),
+            clientId = "requestloom-sandbox-client",
+            clientSecret = "requestloom-sandbox-secret",
+            scope = "openid profile email",
+            subject = "sandbox-user",
+            name = "Jane Doe",
+            preferredUsername = "jane.doe",
+            email = "jane@example.com",
+            tokenTtlSeconds = 3600,
+        });
+
+        var builtIns = new (string method, string path, string behavior)[]
+        {
+            ("GET", "/.well-known/openid-configuration", MockEndpointBehaviors.OidcDiscovery),
+            ("GET", "/oauth/authorize", MockEndpointBehaviors.OAuth2Authorization),
+            ("POST", "/oauth/token", MockEndpointBehaviors.OAuth2Token),
+            ("GET", "/userinfo", MockEndpointBehaviors.OidcUserInfo),
+            ("GET", "/.well-known/jwks.json", MockEndpointBehaviors.OidcJwks),
+        };
+
+        foreach (var (method, path, behavior) in builtIns)
+        {
+            if (endpoints.Any(endpoint =>
+                    endpoint.Method.Equals(method, StringComparison.OrdinalIgnoreCase) &&
+                    endpoint.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            await _mockRepo.CreateEndpointAsync(mockServer.Id, new CreateMockEndpointRequest
+            {
+                Method = method,
+                Path = path,
+                ContentType = "application/json",
+                Behavior = behavior,
+                BehaviorConfigJson = config,
+            });
+        }
+    }
+
+    private async Task EnsureSandboxOAuthRequestsAsync(Service service)
+    {
+        var requests = await _requestRepo.GetByServiceIdAsync(service.Id);
+
+        var profile = requests.FirstOrDefault(request =>
+            request.Name.Equals("Get My Profile", StringComparison.OrdinalIgnoreCase));
+        if (profile != null && profile.Auth == null &&
+            !profile.Variables.Any(variable => variable.Key.Equals("access_token", StringComparison.OrdinalIgnoreCase)))
+        {
+            await _requestRepo.UpdateAsync(profile.Id, new UpdateApiRequestRequest
+            {
+                Name = profile.Name,
+                Method = profile.Method,
+                Url = profile.Url,
+                Body = profile.Body,
+                BodyType = profile.BodyType,
+                PreRequestScript = profile.PreRequestScript,
+                PostRequestScript = profile.PostRequestScript,
+                TestScript = string.IsNullOrWhiteSpace(profile.TestScript)
+                    ? @"test('Profile request authenticated', () => {
+    expect(response.status).toBe(200);
+});"
+                    : profile.TestScript,
+                Notes = profile.Notes,
+                Headers = profile.Headers.Select(header => new KeyValuePairRequest
+                {
+                    Key = header.Key, Value = header.Value, Enabled = header.Enabled
+                }).ToList(),
+                Params = profile.Params.Select(param => new KeyValuePairRequest
+                {
+                    Key = param.Key, Value = param.Value, Enabled = param.Enabled
+                }).ToList(),
+                Variables = profile.Variables.Select(variable => new RequestVariableRequest
+                {
+                    Key = variable.Key, Value = variable.Value, Enabled = variable.Enabled
+                }).Append(new RequestVariableRequest
+                {
+                    Key = "access_token", Value = "", Enabled = true
+                }).ToList(),
+                Auth = new AuthRequest
+                {
+                    AuthType = "bearer",
+                    ConfigJson = JsonSerializer.Serialize(new { token = "{{access_token}}" })
+                }
+            });
+        }
+
+        var existingNames = requests
+            .Select(request => request.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!existingNames.Contains("OIDC Discovery"))
+        {
+            var request = await _requestRepo.CreateAsync(service.Id, new CreateApiRequestRequest
+            {
+                Name = "OIDC Discovery",
+                Method = "GET",
+                Url = "{{oidc_issuer}}/.well-known/openid-configuration",
+                BodyType = "none"
+            });
+            await _requestRepo.UpdateAsync(request.Id, new UpdateApiRequestRequest
+            {
+                Name = "OIDC Discovery",
+                Method = "GET",
+                Url = "{{oidc_issuer}}/.well-known/openid-configuration",
+                BodyType = "none",
+                Headers = new List<KeyValuePairRequest>(),
+                Params = new List<KeyValuePairRequest>(),
+                Variables = new List<RequestVariableRequest>(),
+                Auth = new AuthRequest { AuthType = "none", ConfigJson = "{}" },
+                TestScript = @"test('OIDC discovery is available', () => {
+    expect(response.status).toBe(200);
+});
+test('Publishes OAuth2 endpoints', () => {
+    const json = JSON.parse(response.body);
+    expect(json.authorization_endpoint).toContain('/oauth/authorize');
+    expect(json.token_endpoint).toContain('/oauth/token');
+    expect(json.userinfo_endpoint).toContain('/userinfo');
+});"
+            });
+        }
+
+        if (!existingNames.Contains("OAuth2 Authorize (PKCE)"))
+        {
+            var request = await _requestRepo.CreateAsync(service.Id, new CreateApiRequestRequest
+            {
+                Name = "OAuth2 Authorize (PKCE)",
+                Method = "GET",
+                Url = "{{base_url}}/oauth/authorize",
+                BodyType = "none"
+            });
+            await _requestRepo.UpdateAsync(request.Id, new UpdateApiRequestRequest
+            {
+                Name = "OAuth2 Authorize (PKCE)",
+                Method = "GET",
+                Url = "{{base_url}}/oauth/authorize",
+                BodyType = "none",
+                Headers = new List<KeyValuePairRequest>(),
+                Params = new List<KeyValuePairRequest>
+                {
+                    new() { Key = "response_type", Value = "code", Enabled = true },
+                    new() { Key = "client_id", Value = "{{oauth_client_id}}", Enabled = true },
+                    new() { Key = "redirect_uri", Value = "{{oauth_redirect_uri}}", Enabled = true },
+                    new() { Key = "scope", Value = "{{oauth_scope}}", Enabled = true },
+                    new() { Key = "state", Value = "sandbox-state", Enabled = true },
+                    new() { Key = "code_challenge", Value = "{{oauth_code_verifier}}", Enabled = true },
+                    new() { Key = "code_challenge_method", Value = "plain", Enabled = true }
+                },
+                Variables = new List<RequestVariableRequest>(),
+                Auth = new AuthRequest { AuthType = "none", ConfigJson = "{}" },
+                PostRequestScript = @"const location = getResponseHeader('Location') || '';
+const match = /[?&]code=([^&]+)/.exec(location);
+if (match) {
+    setVar('oauth_code', decodeURIComponent(match[1]));
+    log('Authorization code stored for token exchange');
+} else {
+    log('Authorization response did not contain a code');
+}",
+                TestScript = @"test('Authorization request returned a code redirect', () => {
+    expect(response.status).toBe(302);
+});
+test('Authorization response contains a code', () => {
+    expect(response.headers['Location'] || response.headers['location']).toContain('code=');
+});"
+            });
+            await _requestRepo.SaveSettingsAsync(request.Id, new ApiRequestSettings
+            {
+                RequestId = request.Id,
+                FollowRedirects = false,
+                MaxRedirects = 10
+            });
+        }
+
+        if (!existingNames.Contains("OAuth2 Token Exchange"))
+        {
+            var request = await _requestRepo.CreateAsync(service.Id, new CreateApiRequestRequest
+            {
+                Name = "OAuth2 Token Exchange",
+                Method = "POST",
+                Url = "{{base_url}}/oauth/token",
+                Body = "grant_type=authorization_code&code={{oauth_code}}&redirect_uri={{oauth_redirect_uri}}&client_id={{oauth_client_id}}&client_secret={{oauth_client_secret}}&code_verifier={{oauth_code_verifier}}",
+                BodyType = "form"
+            });
+            await _requestRepo.UpdateAsync(request.Id, new UpdateApiRequestRequest
+            {
+                Name = "OAuth2 Token Exchange",
+                Method = "POST",
+                Url = "{{base_url}}/oauth/token",
+                Body = "grant_type=authorization_code&code={{oauth_code}}&redirect_uri={{oauth_redirect_uri}}&client_id={{oauth_client_id}}&client_secret={{oauth_client_secret}}&code_verifier={{oauth_code_verifier}}",
+                BodyType = "form",
+                Headers = new List<KeyValuePairRequest>
+                {
+                    new() { Key = "Content-Type", Value = "application/x-www-form-urlencoded", Enabled = true }
+                },
+                Params = new List<KeyValuePairRequest>(),
+                Variables = new List<RequestVariableRequest>
+                {
+                    new() { Key = "oauth_code", Value = "", Enabled = true }
+                },
+                Auth = new AuthRequest { AuthType = "none", ConfigJson = "{}" },
+                PostRequestScript = @"const json = JSON.parse(response.body);
+if (json.access_token) {
+    setVar('access_token', String(json.access_token));
+    setVar('id_token', String(json.id_token || ''));
+    setVar('refresh_token', String(json.refresh_token || ''));
+    log('OAuth2 access token and OIDC ID token stored');
+}",
+                TestScript = @"test('Token exchange succeeded', () => {
+    expect(response.status).toBe(200);
+});
+test('Returns OAuth2 and OIDC tokens', () => {
+    const json = JSON.parse(response.body);
+    expect(json.token_type).toBe('Bearer');
+    expect(typeof json.access_token).toBe('string');
+    expect(typeof json.id_token).toBe('string');
+});"
+            });
+        }
+
+        if (!existingNames.Contains("OIDC UserInfo"))
+        {
+            var request = await _requestRepo.CreateAsync(service.Id, new CreateApiRequestRequest
+            {
+                Name = "OIDC UserInfo",
+                Method = "GET",
+                Url = "{{base_url}}/userinfo",
+                BodyType = "none"
+            });
+            await _requestRepo.UpdateAsync(request.Id, new UpdateApiRequestRequest
+            {
+                Name = "OIDC UserInfo",
+                Method = "GET",
+                Url = "{{base_url}}/userinfo",
+                BodyType = "none",
+                Headers = new List<KeyValuePairRequest>(),
+                Params = new List<KeyValuePairRequest>(),
+                Variables = new List<RequestVariableRequest>
+                {
+                    new() { Key = "access_token", Value = "", Enabled = true }
+                },
+                Auth = new AuthRequest
+                {
+                    AuthType = "bearer",
+                    ConfigJson = JsonSerializer.Serialize(new { token = "{{access_token}}" })
+                },
+                TestScript = @"test('UserInfo accepts the OAuth2 access token', () => {
+    expect(response.status).toBe(200);
+});
+test('Returns OIDC claims', () => {
+    const json = JSON.parse(response.body);
+    expect(json.sub).toBe('sandbox-user');
+    expect(json.email).toBe('jane@example.com');
+});"
+            });
+        }
+    }
+
+    private static string? NormalizePublicUrl(string? value)
+    {
+        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            return null;
+
+        var host = uri.Host switch
+        {
+            "0.0.0.0" or "*" or "+" => "localhost",
+            _ => uri.Host,
+        };
+        var builder = new UriBuilder(uri.Scheme, host, uri.Port);
+        return builder.Uri.GetLeftPart(UriPartial.Authority);
     }
 
     /// <summary>

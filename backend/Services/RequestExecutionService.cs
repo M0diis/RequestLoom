@@ -678,9 +678,15 @@ public class RequestExecutionService
 
                 engine.SetValue("response", new Dictionary<string, object?>
                 {
+                    ["status"] = responseState.StatusCode,
                     ["statusCode"] = responseState.StatusCode,
                     ["statusText"] = responseState.StatusText,
-                    ["contentType"] = responseState.ContentType
+                    ["body"] = responseState.Body,
+                    ["contentType"] = responseState.ContentType,
+                    ["headers"] = responseState.Headers.ToDictionary(
+                        header => header.Key,
+                        header => (object)string.Join(", ", header.Value),
+                        StringComparer.OrdinalIgnoreCase)
                 });
             }
 

@@ -259,6 +259,7 @@ const MOCK_SERVER_FIELDS = [
   ['Response headers', 'Custom metadata sent with the mock response, such as Content-Type or X-Request-ID.'],
   ['Delay', 'Artificial response latency in milliseconds for loading and timeout scenarios.'],
   ['Dynamic response', 'Optional Jint JavaScript that reads request and mutates response.'],
+  ['Built-in OAuth2/OIDC', 'Use OAuth2 authorization, token, OIDC discovery, userinfo, or JWKS behavior for local integration tests. Configure client and user values as JSON.'],
 ] as const;
 
 const STORAGE_MODES = [
@@ -366,7 +367,7 @@ export function DocumentationPage({ section, onSectionChange }: DocumentationPag
       : candidate === 'automation'
         ? `${AUTOMATION_CARDS.map((item) => `${item.title} ${item.text} ${item.code}`).join(' ')} ${BUILT_IN_VARIABLES.map((item) => `${item.category} ${item.tokens} ${item.description}`).join(' ')}`
         : candidate === 'mock-servers'
-          ? `${MOCK_SERVER_FIELDS.flat().join(' ')} static response route endpoint delay dynamic request response headers`
+          ? `${MOCK_SERVER_FIELDS.flat().join(' ')} static response route endpoint delay dynamic request response headers oauth2 oidc authorization token discovery userinfo jwks`
           : candidate === 'scripting'
             ? `${SCRIPT_API.map((item) => `${item.fn} ${item.stage} ${item.desc}`).join(' ')} ${TEST_API.map((item) => `${item.fn} ${item.desc}`).join(' ')} pre-request post-request tests JavaScript`
             : candidate === 'storage'
@@ -926,7 +927,7 @@ function MockServersContent({ onSectionChange }: { onSectionChange: (section: Do
       <section className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="border border-gray-800 bg-[#141414] p-5">
           <SectionHeading eyebrow="Dynamic response" title="Use request context when static data is not enough." />
-          <p className="text-xs leading-5 text-gray-500">Enable the endpoint script to inspect <code className="font-mono text-[#ffbca3]">request</code> and write to <code className="font-mono text-[#ffbca3]">response</code>. The script runs on the backend with Jint.</p>
+          <p className="text-xs leading-5 text-gray-500">Enable the endpoint script to inspect <code className="font-mono text-[#ffbca3]">request</code> and write to <code className="font-mono text-[#ffbca3]">response</code>. The script runs on the backend with Jint. Built-in OAuth2/OIDC behaviors can simulate authorization-code + PKCE, token, discovery, userinfo, and JWKS endpoints.</p>
           <pre className="mt-4 overflow-x-auto border border-gray-800 bg-gray-950/70 p-3 font-mono text-[11px] leading-5 text-emerald-300">{`// request.method, request.path, request.body
 // request.headers, request.queryParams
 // response.statusCode, response.body, response.headers

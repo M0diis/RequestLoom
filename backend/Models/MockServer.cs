@@ -26,6 +26,8 @@ public class MockServerEndpoint
     public string ResponseHeadersJson { get; set; } = "[]";
     public bool ScriptEnabled { get; set; }
     public string Script { get; set; } = "";
+    public string Behavior { get; set; } = MockEndpointBehaviors.Static;
+    public string BehaviorConfigJson { get; set; } = "{}";
     public int DelayMs { get; set; }
     public int SortOrder { get; set; }
     public string CreatedAt { get; set; } = "";
@@ -57,6 +59,8 @@ public class CreateMockEndpointRequest
     public List<KeyValuePairRequest> ResponseHeaders { get; set; } = [];
     public bool ScriptEnabled { get; set; }
     public string Script { get; set; } = "";
+    public string Behavior { get; set; } = MockEndpointBehaviors.Static;
+    public string BehaviorConfigJson { get; set; } = "{}";
     public int DelayMs { get; set; }
 }
 
@@ -70,6 +74,8 @@ public class UpdateMockEndpointRequest
     public List<KeyValuePairRequest> ResponseHeaders { get; set; } = [];
     public bool ScriptEnabled { get; set; }
     public string Script { get; set; } = "";
+    public string Behavior { get; set; } = MockEndpointBehaviors.Static;
+    public string BehaviorConfigJson { get; set; } = "{}";
     public int DelayMs { get; set; }
 }
 
@@ -81,4 +87,29 @@ public class MockServerResponse
     public List<KeyValuePair> Headers { get; set; } = [];
     public bool Matched { get; set; }
     public string MatchedEndpointId { get; set; } = "";
+}
+
+public static class MockEndpointBehaviors
+{
+    public const string Static = "static";
+    public const string OAuth2Authorization = "oauth2-authorization";
+    public const string OAuth2Token = "oauth2-token";
+    public const string OidcDiscovery = "oidc-discovery";
+    public const string OidcUserInfo = "oidc-userinfo";
+    public const string OidcJwks = "oidc-jwks";
+
+    public static bool IsBuiltIn(string? behavior) => behavior is
+        OAuth2Authorization or OAuth2Token or OidcDiscovery or OidcUserInfo or OidcJwks;
+
+    public static string Normalize(string? behavior) => string.IsNullOrWhiteSpace(behavior)
+        ? Static
+        : behavior.Trim().ToLowerInvariant() switch
+        {
+            OAuth2Authorization => OAuth2Authorization,
+            OAuth2Token => OAuth2Token,
+            OidcDiscovery => OidcDiscovery,
+            OidcUserInfo => OidcUserInfo,
+            OidcJwks => OidcJwks,
+            _ => Static,
+        };
 }

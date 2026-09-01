@@ -2,10 +2,29 @@ import { useState, useEffect } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useMockServerStore } from '../../stores/mockServerStore';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
-import type { HttpMethod, KeyValuePairRequest } from '../../types';
+import type { HttpMethod, KeyValuePairRequest, MockEndpointBehavior } from '../../types';
 
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
 const CONTENT_TYPES = ['application/json', 'application/xml', 'text/plain', 'text/html', 'application/x-www-form-urlencoded'];
+const BUILT_IN_BEHAVIORS: Array<{ value: MockEndpointBehavior; label: string; path: string; method: HttpMethod }> = [
+  { value: 'static', label: 'Static response', path: '/', method: 'GET' },
+  { value: 'oauth2-authorization', label: 'OAuth2 authorization', path: '/oauth/authorize', method: 'GET' },
+  { value: 'oauth2-token', label: 'OAuth2 token', path: '/oauth/token', method: 'POST' },
+  { value: 'oidc-discovery', label: 'OIDC discovery', path: '/.well-known/openid-configuration', method: 'GET' },
+  { value: 'oidc-userinfo', label: 'OIDC userinfo', path: '/userinfo', method: 'GET' },
+  { value: 'oidc-jwks', label: 'OIDC JWKS', path: '/.well-known/jwks.json', method: 'GET' },
+];
+
+const DEFAULT_BEHAVIOR_CONFIG = `{
+  "clientId": "local-client",
+  "clientSecret": "local-secret",
+  "scope": "openid profile email",
+  "subject": "user-1",
+  "name": "Jane Doe",
+  "preferredUsername": "jane.doe",
+  "email": "jane@example.com",
+  "tokenTtlSeconds": 3600
+}`;
 
 const METHOD_COLORS: Record<string, string> = {
   GET: 'text-emerald-400 bg-emerald-400/10',
@@ -39,6 +58,8 @@ export function MockEndpointDetail() {
   const [epHeaders, setEpHeaders] = useState<KeyValuePairRequest[]>([]);
   const [epScriptEnabled, setEpScriptEnabled] = useState(false);
   const [epScript, setEpScript] = useState('');
+  const [epBehavior, setEpBehavior] = useState<MockEndpointBehavior>('static');
+  const [epBehaviorConfig, setEpBehaviorConfig] = useState('{}');
   const [epDelayMs, setEpDelayMs] = useState(0);
   const [saving, setSaving] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
@@ -61,6 +82,8 @@ export function MockEndpointDetail() {
       try { setEpHeaders(JSON.parse(endpoint.responseHeadersJson || '[]')); } catch { setEpHeaders([]); }
       setEpScriptEnabled(endpoint.scriptEnabled);
       setEpScript(endpoint.script || '');
+      setEpBehavior(endpoint.behavior || 'static');
+      setEpBehaviorConfig(endpoint.behaviorConfigJson || '{}');
       setEpDelayMs(endpoint.delayMs);
     } else if (isNew && server) {
       setEditing(true);
@@ -72,6 +95,8 @@ export function MockEndpointDetail() {
       setEpHeaders([]);
       setEpScriptEnabled(false);
       setEpScript(`// Dynamic response script\n// Access: request.method, request.path, request.body, request.headers, request.queryParams\n// Modify: response.statusCode, response.body, response.headers\n\nresponse.body = JSON.stringify({\n  message: "Hello from mock server!",\n  method: request.method,\n  path: request.path,\n  timestamp: new Date().toISOString()\n});\n`);
+      setEpBehavior('static');
+      setEpBehaviorConfig('{}');
       setEpDelayMs(0);
     }
   }, [selectedEndpointId, endpoint, isNew, server]);
@@ -189,6 +214,8 @@ export function MockEndpointDetail() {
           responseHeaders: epHeaders.filter((h) => h.key.trim()),
           scriptEnabled: epScriptEnabled,
           script: epScript,
+          behavior: epBehavior,
+          behaviorConfigJson: epBehaviorConfig,
           delayMs: epDelayMs,
         });
         setSelectedEndpoint(ep.id);
@@ -203,12 +230,26 @@ export function MockEndpointDetail() {
           responseHeaders: epHeaders.filter((h) => h.key.trim()),
           scriptEnabled: epScriptEnabled,
           script: epScript,
+          behavior: epBehavior,
+          behaviorConfigJson: epBehaviorConfig,
           delayMs: epDelayMs,
         });
         setEditing(false);
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleBehaviorChange = (behavior: MockEndpointBehavior) => {
+    setEpBehavior(behavior);
+    const preset = BUILT_IN_BEHAVIORS.find((item) => item.value === behavior);
+    if (preset && epPath === '/') {
+      setEpPath(preset.path);
+      setEpMethod(preset.method);
+    }
+    if (behavior !== 'static' && epBehaviorConfig.trim() === '{}') {
+      setEpBehaviorConfig(DEFAULT_BEHAVIOR_CONFIG);
     }
   };
 
@@ -300,6 +341,27 @@ export function MockEndpointDetail() {
               </div>
             </div>
 
+            <div>
+              <div className="mb-1 flex items-center gap-1"><label className="text-xs text-zinc-400">Response behavior</label><DocHelpButton section="mock-servers" title="Open mock behavior documentation" /></div>
+              <select value={epBehavior} onChange={(e) => handleBehaviorChange(e.target.value as MockEndpointBehavior)}
+                className="w-full bg-zinc-700/50 border border-zinc-600 rounded-md px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-purple-500/50">
+                {BUILT_IN_BEHAVIORS.map((behavior) => <option key={behavior.value} value={behavior.value}>{behavior.label}</option>)}
+              </select>
+              {epBehavior !== 'static' && <p className="mt-1 text-[10px] text-amber-400/80">Built-in OAuth2/OIDC behavior handles the protocol response; the normal body, status, and script fields are ignored.</p>}
+            </div>
+
+            {epBehavior !== 'static' && (
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1"><label className="text-xs text-zinc-400">OAuth2/OIDC configuration (JSON)</label><DocHelpButton section="mock-servers" title="Open OAuth2/OIDC mock documentation" /></div>
+                  <button type="button" onClick={() => setEpBehaviorConfig(DEFAULT_BEHAVIOR_CONFIG)} className="text-[10px] text-purple-400 hover:text-purple-300">Use example</button>
+                </div>
+                <textarea value={epBehaviorConfig} onChange={(e) => setEpBehaviorConfig(e.target.value)} rows={9} spellCheck={false}
+                  className="w-full bg-zinc-900/70 border border-zinc-600 rounded-md px-3 py-2 text-xs font-mono text-emerald-300 placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 resize-y" />
+                <p className="mt-1 text-[10px] text-zinc-600">Use <code className="font-mono">issuer</code> to override the derived mock URL. Token and userinfo state is in-memory and resets when the backend restarts.</p>
+              </div>
+            )}
+
             <div className="flex gap-3">
               <div className="w-28">
                 <label className="block text-xs text-zinc-400 mb-1">Status</label>
@@ -321,15 +383,15 @@ export function MockEndpointDetail() {
             </div>
 
             {/* Response Body */}
-            <div>
+            {epBehavior === 'static' && <div>
               <div className="mb-1 flex items-center gap-1"><label className="text-xs text-zinc-400">Response Body</label><DocHelpButton section="mock-servers" title="Open mock response documentation" /></div>
               <textarea value={epResponseBody} onChange={(e) => setEpResponseBody(e.target.value)} rows={8}
                 spellCheck={false}
                 className="w-full bg-zinc-700/50 border border-zinc-600 rounded-md px-3 py-2 text-sm font-mono text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 resize-y" />
-            </div>
+            </div>}
 
             {/* Response Headers */}
-            <div>
+            {epBehavior === 'static' && <div>
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1"><label className="text-xs text-zinc-400">Response Headers</label><DocHelpButton section="http" title="Open HTTP header documentation" /></div>
                 <button onClick={addHeader} className="text-xs text-purple-400 hover:text-purple-300">+ Add</button>
@@ -357,10 +419,10 @@ export function MockEndpointDetail() {
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* Dynamic Script */}
-            <div className="border border-zinc-600/40 rounded-lg p-3">
+            {epBehavior === 'static' && <div className="border border-zinc-600/40 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1">
                   <label className="flex cursor-pointer items-center gap-2">
@@ -376,7 +438,7 @@ export function MockEndpointDetail() {
                 <textarea value={epScript} onChange={(e) => setEpScript(e.target.value)} rows={10} spellCheck={false}
                   className="w-full bg-zinc-900/70 border border-zinc-600 rounded-md px-3 py-2 text-xs font-mono text-emerald-300 placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 resize-y" />
               )}
-            </div>
+            </div>}
           </>
         ) : (
           <>
@@ -389,6 +451,7 @@ export function MockEndpointDetail() {
                   <div><span className="text-zinc-500">Type: </span><span className="text-zinc-200">{endpoint.contentType}</span></div>
                   {endpoint.delayMs > 0 && <div><span className="text-zinc-500">Delay: </span><span className="text-zinc-200">{endpoint.delayMs}ms</span></div>}
                   {endpoint.scriptEnabled && <div><span className="text-amber-400">⚡ Dynamic Script</span></div>}
+                  {endpoint.behavior && endpoint.behavior !== 'static' && <div><span className="text-purple-400">⚡ {BUILT_IN_BEHAVIORS.find((behavior) => behavior.value === endpoint.behavior)?.label || endpoint.behavior}</span></div>}
                 </div>
 
                 {/* Mock URL */}

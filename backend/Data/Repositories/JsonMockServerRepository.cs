@@ -167,6 +167,8 @@ public class JsonMockServerRepository : IMockServerRepository
                 ResponseHeadersJson = JsonSerializer.Serialize(request.ResponseHeaders),
                 ScriptEnabled = request.ScriptEnabled,
                 Script = request.Script,
+                Behavior = MockEndpointBehaviors.Normalize(request.Behavior),
+                BehaviorConfigJson = string.IsNullOrWhiteSpace(request.BehaviorConfigJson) ? "{}" : request.BehaviorConfigJson,
                 DelayMs = request.DelayMs,
                 SortOrder = maxOrder + 1,
                 CreatedAt = JsonDataStore.Now()
@@ -196,6 +198,8 @@ public class JsonMockServerRepository : IMockServerRepository
                 endpoint.ResponseHeadersJson = JsonSerializer.Serialize(request.ResponseHeaders);
                 endpoint.ScriptEnabled = request.ScriptEnabled;
                 endpoint.Script = request.Script;
+                endpoint.Behavior = MockEndpointBehaviors.Normalize(request.Behavior);
+                endpoint.BehaviorConfigJson = string.IsNullOrWhiteSpace(request.BehaviorConfigJson) ? "{}" : request.BehaviorConfigJson;
                 endpoint.DelayMs = request.DelayMs;
                 updated = endpoint;
                 break;
@@ -263,6 +267,8 @@ public class JsonMockServerRepository : IMockServerRepository
             ResponseHeadersJson = endpoint.ResponseHeadersJson,
             ScriptEnabled = endpoint.ScriptEnabled,
             Script = endpoint.Script,
+            Behavior = MockEndpointBehaviors.Normalize(endpoint.Behavior),
+            BehaviorConfigJson = string.IsNullOrWhiteSpace(endpoint.BehaviorConfigJson) ? "{}" : endpoint.BehaviorConfigJson,
             DelayMs = endpoint.DelayMs,
             SortOrder = endpoint.SortOrder,
             CreatedAt = endpoint.CreatedAt

@@ -218,6 +218,8 @@ public class MockServerEndpointRow
     [Column("response_headers_json")] public string ResponseHeadersJson { get; set; } = "[]";
     [Column("script_enabled")] public bool ScriptEnabled { get; set; }
     [Column("script")] public string Script { get; set; } = "";
+    [Column("behavior")] public string Behavior { get; set; } = "static";
+    [Column("behavior_config_json")] public string BehaviorConfigJson { get; set; } = "{}";
     [Column("delay_ms")] public int DelayMs { get; set; }
     [Column("sort_order")] public int SortOrder { get; set; }
     [Column("created_at")] public string CreatedAt { get; set; } = "";

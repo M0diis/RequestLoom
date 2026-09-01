@@ -178,6 +178,7 @@ The backend reads configuration from `appsettings.json` and environment variable
 | `FRONTEND_PORT` | `5173` | Dev launcher Vite port |
 | `DOTNET_ROOT` | `~/.dotnet` | .NET install location (dev launcher) |
 | `REQUESTLOOM_APP_URL` | `http://127.0.0.1:5056` | Backend URL used by the Electron shell |
+| `RequestLoom__PublicUrl` / `REQUESTLOOM_PUBLIC_URL` | derived from `ASPNETCORE_URLS` | Public backend origin used when generating Sandbox mock service variables |
 
 In Docker, `Database__Path` is set to `/data/RequestLoom.db` so data survives container restarts via the named volume.
 
@@ -232,7 +233,7 @@ The backend exposes a REST API under `/api`:
 | OAuth2 / OIDC | `GET /api/oauth/discover`, `POST /api/oauth/exchange`, `GET /api/oauth/status`, `DELETE /api/oauth/token` |
 | Tools | `POST /api/tools/generate` (Go, C#, Java, PHP, Ruby) |
 
-Mock server routes are served from `/mock/*` before static files, so they work in both dev and production.
+Mock server routes are served from `/mock/*` before static files, so they work in both dev and production. Endpoint behaviors can be static, scripted, or built-in OAuth2/OIDC (`oauth2-authorization`, `oauth2-token`, `oidc-discovery`, `oidc-userinfo`, and `oidc-jwks`). Built-in provider state is intentionally in-memory and suitable for local integration tests only.
 
 ## Disclaimer (LLMs)
 

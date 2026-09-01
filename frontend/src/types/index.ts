@@ -322,10 +322,20 @@ export interface MockServerEndpoint {
   responseHeadersJson: string;
   scriptEnabled: boolean;
   script: string;
+  behavior: MockEndpointBehavior;
+  behaviorConfigJson: string;
   delayMs: number;
   sortOrder: number;
   createdAt: string;
 }
+
+export type MockEndpointBehavior =
+  | 'static'
+  | 'oauth2-authorization'
+  | 'oauth2-token'
+  | 'oidc-discovery'
+  | 'oidc-userinfo'
+  | 'oidc-jwks';
 
 export interface CreateMockServerRequest {
   name: string;
@@ -350,6 +360,8 @@ export interface CreateMockEndpointRequest {
   responseHeaders: KeyValuePairRequest[];
   scriptEnabled: boolean;
   script: string;
+  behavior: MockEndpointBehavior;
+  behaviorConfigJson: string;
   delayMs: number;
 }
 
@@ -362,6 +374,8 @@ export interface UpdateMockEndpointRequest {
   responseHeaders: KeyValuePairRequest[];
   scriptEnabled: boolean;
   script: string;
+  behavior: MockEndpointBehavior;
+  behaviorConfigJson: string;
   delayMs: number;
 }
 

@@ -143,6 +143,8 @@ public class MockServerRepository : IMockServerRepository
             ResponseHeadersJson = JsonSerializer.Serialize(request.ResponseHeaders),
             ScriptEnabled = request.ScriptEnabled,
             Script = request.Script,
+            Behavior = MockEndpointBehaviors.Normalize(request.Behavior),
+            BehaviorConfigJson = string.IsNullOrWhiteSpace(request.BehaviorConfigJson) ? "{}" : request.BehaviorConfigJson,
             DelayMs = request.DelayMs,
             SortOrder = maxSort + 1,
             CreatedAt = DateTime.UtcNow.ToString("o"),
@@ -169,6 +171,8 @@ public class MockServerRepository : IMockServerRepository
         row.ResponseHeadersJson = JsonSerializer.Serialize(request.ResponseHeaders);
         row.ScriptEnabled = request.ScriptEnabled;
         row.Script = request.Script;
+        row.Behavior = MockEndpointBehaviors.Normalize(request.Behavior);
+        row.BehaviorConfigJson = string.IsNullOrWhiteSpace(request.BehaviorConfigJson) ? "{}" : request.BehaviorConfigJson;
         row.DelayMs = request.DelayMs;
         await _db.SaveChangesAsync();
 
@@ -236,6 +240,8 @@ public class MockServerRepository : IMockServerRepository
             ResponseHeadersJson = row.ResponseHeadersJson,
             ScriptEnabled = row.ScriptEnabled,
             Script = row.Script,
+            Behavior = MockEndpointBehaviors.Normalize(row.Behavior),
+            BehaviorConfigJson = string.IsNullOrWhiteSpace(row.BehaviorConfigJson) ? "{}" : row.BehaviorConfigJson,
             DelayMs = row.DelayMs,
             SortOrder = row.SortOrder,
             CreatedAt = row.CreatedAt,
