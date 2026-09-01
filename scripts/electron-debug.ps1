@@ -75,6 +75,28 @@ function Ensure-NpmDependencies {
     }
 }
 
+function Ensure-ElectronBinary {
+    $electronBinary = Join-Path $DESKTOP_DIR "node_modules\electron\dist\electron.exe"
+    if (Test-Path $electronBinary) {
+        return
+    }
+
+    Write-Host "Downloading Electron development binary..."
+    Push-Location $DESKTOP_DIR
+    try {
+        & npx --no-install install-electron --no
+        if ($LASTEXITCODE -ne 0) {
+            throw "Electron binary installation failed."
+        }
+    } finally {
+        Pop-Location
+    }
+
+    if (-not (Test-Path $electronBinary)) {
+        throw "Electron binary was not installed at $electronBinary."
+    }
+}
+
 function Assert-Command {
     param([string]$Name)
 
@@ -134,5 +156,6 @@ Copy-Item -Path (Join-Path $PUBLISH_DIR "*") -Destination $DESKTOP_RUNTIME_BACKE
 Remove-Item -Force (Join-Path $DESKTOP_RUNTIME_BACKEND_DIR "desktop-backend.log") -ErrorAction SilentlyContinue
 
 Ensure-NpmDependencies $DESKTOP_DIR
+Ensure-ElectronBinary
 
 Write-Host "Electron debug runtime ready."
