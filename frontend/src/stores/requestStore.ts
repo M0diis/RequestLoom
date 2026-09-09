@@ -12,6 +12,7 @@ import type {
 } from '../types';
 import { servicesApi, requestsApi, executeApi, serviceVariablesApi } from '../services/api';
 import { useDevToolsStore } from './devToolsStore';
+import { useSettingsStore } from './settingsStore';
 
 const requestSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const requestSaveVersions = new Map<string, number>();
@@ -47,7 +48,9 @@ function mergeRequestPatch(request: ApiRequest, patch: Partial<ApiRequest>): Api
   };
 }
 
-function findRequestById(services: Service[], id: string): ApiRequest | null {
+function findRequestById(services: Service[], topLevelRequests: ApiRequest[], id: string): ApiRequest | null {
+  const topLevel = topLevelRequests.find((request) => request.id === id);
+  if (topLevel) return topLevel;
   for (const service of services) {
     const found = service.requests.find((r) => r.id === id);
     if (found) return found;
@@ -57,6 +60,7 @@ function findRequestById(services: Service[], id: string): ApiRequest | null {
 
 interface RequestState {
   services: Service[];
+  topLevelRequests: ApiRequest[];
   activeRequestId: string | null;
   activeRequest: ApiRequest | null;
   openRequestIds: string[];
@@ -88,9 +92,13 @@ interface RequestState {
 
   selectRequest: (id: string) => Promise<void>;
   closeRequest: (id: string) => void;
-  createRequest: (serviceId: string, name: string, method: string, folderId?: string | null) => Promise<ApiRequest>;
+  createRequest: (serviceId: string, name: string, method: string, folderId?: string | null, url?: string) => Promise<ApiRequest>;
+  createTopLevelRequest: (workspaceId: string, name: string, method: string, url?: string) => Promise<ApiRequest>;
+  saveRequest: (id: string) => Promise<void>;
   updateRequest: (id: string, data: Partial<ApiRequest>) => Promise<void>;
   duplicateRequest: (id: string) => Promise<ApiRequest>;
+  moveRequestToService: (id: string, serviceId: string) => Promise<void>;
+  moveRequestToTopLevel: (id: string) => Promise<void>;
   moveRequestToFolder: (id: string, folderId: string | null) => Promise<void>;
   reorderRequest: (id: string, folderId: string | null, beforeRequestId?: string | null) => Promise<void>;
   deleteRequest: (id: string) => Promise<void>;
@@ -100,6 +108,7 @@ interface RequestState {
   setResponseFromHistory: (entry: HistoryEntry) => void;
   cancelRequest: () => void;
   clearResponse: (id: string) => void;
+  clearServiceRuntimeVariables: (serviceId: string) => void;
 
   isRequestDirty: (id: string) => boolean;
   clearDirtyRequest: (id: string) => void;
@@ -107,6 +116,7 @@ interface RequestState {
 
 export const useRequestStore = create<RequestState>((set, get) => ({
   services: [],
+  topLevelRequests: [],
   activeRequestId: null,
   activeRequest: null,
   openRequestIds: [],
@@ -119,25 +129,29 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
   loadServices: async (workspaceId) => {
     set({ loading: true });
-    const services = await servicesApi.getAll(workspaceId);
+    const [services, topLevelRequests] = await Promise.all([
+      servicesApi.getAll(workspaceId),
+      requestsApi.getTopLevel(workspaceId),
+    ]);
 
     set((state) => {
       if (!state.activeRequestId) {
-        return { services, loading: false };
+        return { services, topLevelRequests, loading: false };
       }
 
       const activeStillExists = services.some((service) =>
         service.requests.some((request) => request.id === state.activeRequestId)
-      );
+      ) || topLevelRequests.some((request) => request.id === state.activeRequestId);
 
       if (activeStillExists) {
-        return { services, loading: false };
+        return { services, topLevelRequests, loading: false };
       }
 
       const knownIds = new Set<string>();
       for (const svc of services) {
         for (const req of svc.requests) knownIds.add(req.id);
       }
+      for (const req of topLevelRequests) knownIds.add(req.id);
 
       const responses = Object.fromEntries(
         Object.entries(state.responses).filter(([rid]) => knownIds.has(rid))
@@ -145,6 +159,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
       return {
         services,
+        topLevelRequests,
         loading: false,
         activeRequestId: null,
         activeRequest: null,
@@ -326,7 +341,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       // When closing the active tab, find the replacement request in the existing services tree
       let newActiveRequest: ApiRequest | null = null;
       if (isActive && newActiveId) {
-        newActiveRequest = findRequestById(s.services, newActiveId);
+        newActiveRequest = findRequestById(s.services, s.topLevelRequests, newActiveId);
       }
 
       const responses = { ...s.responses };
@@ -409,14 +424,69 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     }
   },
 
-  createRequest: async (serviceId, name, method, folderId = null) => {
-    const request = await requestsApi.create(serviceId, { name, method, url: '', folderId });
+  createRequest: async (serviceId, name, method, folderId = null, url = '') => {
+    const request = await requestsApi.create(serviceId, { name, method, url, folderId });
     set((s) => ({
       services: s.services.map((svc) =>
         svc.id === serviceId ? { ...svc, requests: [...svc.requests, request] } : svc
       ),
     }));
     return request;
+  },
+
+  createTopLevelRequest: async (workspaceId, name, method, url = '') => {
+    const request = await requestsApi.createTopLevel(workspaceId, { name, method, url });
+    set((s) => ({ topLevelRequests: [...s.topLevelRequests, request] }));
+    return request;
+  },
+
+  saveRequest: async (id) => {
+    const existingTimer = requestSaveTimers.get(id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      requestSaveTimers.delete(id);
+    }
+
+    const currentVersion = (requestSaveVersions.get(id) ?? 0) + 1;
+    requestSaveVersions.set(id, currentVersion);
+    const state = get();
+    const latest = state.activeRequest?.id === id
+      ? state.activeRequest
+      : findRequestById(state.services, state.topLevelRequests, id);
+
+    if (!latest) return;
+
+    try {
+      const updated = await requestsApi.update(id, buildUpdatePayload(latest));
+
+      if (requestSaveVersions.get(id) !== currentVersion) return;
+
+      // Preserve stable row IDs in the UI to avoid remount/focus loss while editing.
+      const stableUpdated: ApiRequest = {
+        ...updated,
+        headers: latest.headers,
+        params: latest.params,
+        variables: latest.variables,
+      };
+
+      set((s) => {
+        const next = new Set(s.dirtyRequests);
+        next.delete(id);
+        return {
+          activeRequest: s.activeRequest?.id === id ? stableUpdated : s.activeRequest,
+          topLevelRequests: s.topLevelRequests.map((request) => (
+            request.id === id ? { ...request, ...stableUpdated } : request
+          )),
+          services: s.services.map((svc) => ({
+            ...svc,
+            requests: svc.requests.map((r) => (r.id === id ? { ...r, ...stableUpdated } : r)),
+          })),
+          dirtyRequests: next,
+        };
+      });
+    } catch (err) {
+      console.error('Failed to persist request update', err);
+    }
   },
 
   updateRequest: async (id, data) => {
@@ -430,13 +500,16 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     });
 
     set((s) => {
-      const source = (s.activeRequest?.id === id ? s.activeRequest : findRequestById(s.services, id));
+      const source = (s.activeRequest?.id === id ? s.activeRequest : findRequestById(s.services, s.topLevelRequests, id));
       if (!source) return s;
 
       mergedRequest = mergeRequestPatch(source, data);
 
       return {
         activeRequest: s.activeRequest?.id === id ? mergedRequest : s.activeRequest,
+        topLevelRequests: s.topLevelRequests.map((request) => (
+          request.id === id ? mergeRequestPatch(request, data) : request
+        )),
         services: s.services.map((svc) => ({
           ...svc,
           requests: svc.requests.map((r) => (r.id === id ? mergeRequestPatch(r, data) : r)),
@@ -446,6 +519,10 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
     if (!mergedRequest) return;
 
+    if (!useSettingsStore.getState().settings?.autoSave && useSettingsStore.getState().settings !== null) {
+      return;
+    }
+
     const currentVersion = (requestSaveVersions.get(id) ?? 0) + 1;
     requestSaveVersions.set(id, currentVersion);
 
@@ -454,48 +531,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       clearTimeout(existingTimer);
     }
 
-    const timer = setTimeout(async () => {
-      try {
-        const state = get();
-        const latest = state.activeRequest?.id === id
-          ? state.activeRequest
-          : findRequestById(state.services, id);
-
-        if (!latest) return;
-
-        const updated = await requestsApi.update(id, buildUpdatePayload(latest));
-
-        if (requestSaveVersions.get(id) !== currentVersion) {
-          return;
-        }
-
-        // Preserve stable row IDs in the UI to avoid remount/focus loss while editing.
-        const stableUpdated: ApiRequest = {
-          ...updated,
-          headers: latest.headers,
-          params: latest.params,
-          variables: latest.variables,
-        };
-
-        set((s) => {
-          const next = new Set(s.dirtyRequests);
-          next.delete(id);
-          return {
-            activeRequest: s.activeRequest?.id === id ? stableUpdated : s.activeRequest,
-            services: s.services.map((svc) => ({
-              ...svc,
-              requests: svc.requests.map((r) => (r.id === id ? { ...r, ...stableUpdated } : r)),
-            })),
-            dirtyRequests: next,
-          };
-        });
-      } catch (err) {
-        console.error('Failed to persist request update', err);
-      } finally {
-        if (requestSaveVersions.get(id) === currentVersion) {
-          requestSaveTimers.delete(id);
-        }
-      }
+    const timer = setTimeout(() => {
+      void get().saveRequest(id);
     }, 350);
 
     requestSaveTimers.set(id, timer);
@@ -504,6 +541,9 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   duplicateRequest: async (id) => {
     const duplicated = await requestsApi.duplicate(id);
     set((s) => ({
+      topLevelRequests: duplicated.serviceId === null
+        ? [...s.topLevelRequests, duplicated]
+        : s.topLevelRequests,
       services: s.services.map((svc) =>
         svc.id === duplicated.serviceId
           ? { ...svc, requests: [...svc.requests, duplicated] }
@@ -513,9 +553,46 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     return duplicated;
   },
 
+  moveRequestToService: async (id, serviceId) => {
+    await requestsApi.moveToService(id, serviceId);
+    set((s) => {
+      const sourceService = s.services.find((service) => service.requests.some((request) => request.id === id));
+      const request = s.topLevelRequests.find((item) => item.id === id)
+        ?? sourceService?.requests.find((item) => item.id === id);
+      if (!request) return s;
+      const movedRequest = { ...request, serviceId, folderId: null };
+      return {
+        topLevelRequests: s.topLevelRequests.filter((item) => item.id !== id),
+        services: s.services.map((service) => service.id === serviceId
+          ? { ...service, requests: [...service.requests.filter((item) => item.id !== id), movedRequest] }
+          : { ...service, requests: service.requests.filter((item) => item.id !== id) }),
+        activeRequest: s.activeRequest?.id === id ? movedRequest : s.activeRequest,
+      };
+    });
+  },
+
+  moveRequestToTopLevel: async (id) => {
+    await requestsApi.moveToTopLevel(id);
+    set((s) => {
+      const service = s.services.find((item) => item.requests.some((request) => request.id === id));
+      const request = service?.requests.find((item) => item.id === id);
+      if (!service || !request) return s;
+
+      const movedRequest = { ...request, serviceId: null, folderId: null };
+      return {
+        topLevelRequests: [...s.topLevelRequests, movedRequest],
+        services: s.services.map((item) => item.id === service.id
+          ? { ...item, requests: item.requests.filter((itemRequest) => itemRequest.id !== id) }
+          : item),
+        activeRequest: s.activeRequest?.id === id ? movedRequest : s.activeRequest,
+      };
+    });
+  },
+
   moveRequestToFolder: async (id, folderId) => {
     await requestsApi.moveToFolder(id, folderId);
     set((s) => ({
+      topLevelRequests: s.topLevelRequests.map((request) => request.id === id ? { ...request, folderId } : request),
       services: s.services.map((service) => ({
         ...service,
         requests: service.requests.map((request) => request.id === id ? { ...request, folderId } : request),
@@ -527,6 +604,21 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   reorderRequest: async (id, folderId, beforeRequestId = null) => {
     await requestsApi.reorder(id, folderId, beforeRequestId);
     set((s) => {
+      const topLevelRequest = s.topLevelRequests.find((item) => item.id === id);
+      if (topLevelRequest) {
+        const nextRequests = s.topLevelRequests.filter((item) => item.id !== id);
+        const movedRequest = { ...topLevelRequest, folderId: null };
+        let insertIndex = beforeRequestId
+          ? nextRequests.findIndex((item) => item.id === beforeRequestId)
+          : nextRequests.length;
+        if (insertIndex < 0) insertIndex = nextRequests.length;
+        nextRequests.splice(insertIndex, 0, movedRequest);
+        return {
+          topLevelRequests: nextRequests,
+          activeRequest: s.activeRequest?.id === id ? movedRequest : s.activeRequest,
+        };
+      }
+
       const service = s.services.find((item) => item.requests.some((request) => request.id === id));
       if (!service) return s;
 
@@ -556,6 +648,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       const responses = { ...s.responses };
       delete responses[id];
       return {
+        topLevelRequests: s.topLevelRequests.filter((request) => request.id !== id),
         services: s.services.map((svc) => ({
           ...svc,
           requests: svc.requests.filter((r) => r.id !== id),
@@ -571,6 +664,9 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   toggleFavorite: async (id) => {
     await requestsApi.toggleFavorite(id);
     set((s) => ({
+      topLevelRequests: s.topLevelRequests.map((request) =>
+        request.id === id ? { ...request, isFavorite: !request.isFavorite } : request
+      ),
       services: s.services.map((svc) => ({
         ...svc,
         requests: svc.requests.map((r) =>
@@ -615,11 +711,33 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         responses: { ...state.responses, [activeRequest.id]: response },
         sending: false,
         abortController: null,
-        runtimeScriptVariablesByRequest: {
-          ...state.runtimeScriptVariablesByRequest,
-          [activeRequest.id]: response.scriptVariables ?? {},
-        },
+        runtimeScriptVariablesByRequest: (() => {
+          const nextRuntimeVariables = { ...state.runtimeScriptVariablesByRequest };
+          const service = state.services.find((item) => item.id === activeRequest.serviceId);
+          const requestIds = service?.requests.map((request) => request.id) ?? [activeRequest.id];
+          for (const requestId of requestIds) {
+            if (requestId === activeRequest.id) {
+              nextRuntimeVariables[requestId] = response.scriptVariables ?? {};
+              continue;
+            }
+
+            const requestVariables = Object.fromEntries(
+              Object.entries(nextRuntimeVariables[requestId] ?? {})
+                .filter(([, variable]) => variable.scope !== 'service')
+            );
+            nextRuntimeVariables[requestId] = {
+              ...requestVariables,
+              ...(response.serviceScriptVariables ?? {}),
+            };
+          }
+          return nextRuntimeVariables;
+        })(),
       }));
+      if (activeRequest.serviceId && response.serviceScriptVariables) {
+        window.dispatchEvent(new CustomEvent('service-variables:updated', {
+          detail: { serviceId: activeRequest.serviceId },
+        }));
+      }
       useDevToolsStore.getState().recordNetworkEntry({
         requestId: activeRequest.id,
         method: activeRequest.method,
@@ -699,16 +817,23 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         ...s.responses,
         [activeRequestId]: {
           statusCode: entry.responseStatus,
-          statusText: '',
+          statusText: entry.statusText ?? '',
           headers: parsedHeaders,
           body: entry.responseBody ?? '',
-          contentType: parsedHeaders['Content-Type']?.[0] ?? parsedHeaders['content-type']?.[0] ?? '',
+          contentType: entry.contentType
+            || parsedHeaders['Content-Type']?.[0]
+            || parsedHeaders['content-type']?.[0]
+            || '',
           responseTimeMs: entry.responseTimeMs,
           responseSizeBytes: entry.responseSizeBytes,
-          isSoapFault: false,
-          scriptVariables: {},
-          scriptLogs: [],
-          testResults: [],
+          isTruncated: entry.isTruncated ?? false,
+          error: entry.error,
+          isSoapFault: entry.isSoapFault ?? false,
+          soapFault: entry.soapFault,
+          scriptVariables: entry.scriptVariables ?? {},
+          serviceScriptVariables: entry.serviceScriptVariables ?? {},
+          scriptLogs: entry.scriptLogs ?? [],
+          testResults: entry.testResults ?? [],
         },
       },
     }));
@@ -725,6 +850,27 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     delete responses[id];
     return { responses };
   }),
+
+  clearServiceRuntimeVariables: (serviceId: string) => {
+    set((state) => {
+      const service = state.services.find((item) => item.id === serviceId);
+      const requestIds = new Set(service?.requests.map((request) => request.id) ?? []);
+      if (requestIds.size === 0) return state;
+
+      const nextRuntimeVariables = { ...state.runtimeScriptVariablesByRequest };
+      for (const requestId of requestIds) {
+        const requestVariables = nextRuntimeVariables[requestId];
+        if (!requestVariables) continue;
+
+        nextRuntimeVariables[requestId] = Object.fromEntries(
+          Object.entries(requestVariables)
+            .filter(([, variable]) => variable.scope !== 'service')
+        );
+      }
+
+      return { runtimeScriptVariablesByRequest: nextRuntimeVariables };
+    });
+  },
 
   isRequestDirty: (id: string) => get().dirtyRequests.has(id),
 

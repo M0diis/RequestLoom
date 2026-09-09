@@ -18,8 +18,8 @@ public class ServiceVariableRepository : IServiceVariableRepository
         var rows = await _db.ServiceVariables
             .Where(v => v.ServiceId == serviceId)
             .OrderBy(v => v.Key)
-            .OrderBy(v => v.EnvironmentId == null ? 0 : 1)
-            .OrderBy(v => v.EnvironmentId)
+            .ThenBy(v => v.EnvironmentId == null ? 0 : 1)
+            .ThenBy(v => v.EnvironmentId)
             .ToListAsync();
 
         return rows.Select(Map);
@@ -40,8 +40,8 @@ public class ServiceVariableRepository : IServiceVariableRepository
 
         var rows = await query
             .OrderBy(v => v.Key)
-            .OrderBy(v => v.EnvironmentId == null ? 0 : 1)
-            .OrderBy(v => v.EnvironmentId)
+            .ThenBy(v => v.EnvironmentId == null ? 0 : 1)
+            .ThenBy(v => v.EnvironmentId)
             .ToListAsync();
 
         return rows.Select(Map);
@@ -62,8 +62,8 @@ public class ServiceVariableRepository : IServiceVariableRepository
                         v.ServiceId == serviceId &&
                         v.Key == key &&
                         v.Id != normalizedId &&
-                        ((v.EnvironmentId == null && current.EnvironmentId == null) ||
-                         (v.EnvironmentId != null && current.EnvironmentId != null && v.EnvironmentId == current.EnvironmentId)));
+                        ((v.EnvironmentId == null && normalizedEnvId == null) ||
+                         (v.EnvironmentId != null && normalizedEnvId != null && v.EnvironmentId == normalizedEnvId)));
 
                 if (conflict != null)
                 {

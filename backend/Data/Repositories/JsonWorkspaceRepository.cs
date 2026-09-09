@@ -75,8 +75,9 @@ public class JsonWorkspaceRepository : IWorkspaceRepository
             doc.Workspaces.Remove(workspace);
             doc.Environments.RemoveAll(e => e.WorkspaceId == id);
             doc.EnvironmentVariables.RemoveAll(v => doc.Environments.All(e => e.Id != v.EnvironmentId));
+            var serviceIds = doc.Services.Where(s => s.WorkspaceId == id).Select(s => s.Id).ToHashSet();
             doc.Services.RemoveAll(s => s.WorkspaceId == id);
-            doc.Requests.RemoveAll(r => doc.Services.All(s => s.Id != r.ServiceId));
+            doc.Requests.RemoveAll(r => r.WorkspaceId == id || (r.ServiceId != null && serviceIds.Contains(r.ServiceId)));
             doc.WorkspaceVariables.RemoveAll(v => v.WorkspaceId == id);
             doc.ServiceVariables.RemoveAll(v => doc.Services.All(s => s.Id != v.ServiceId));
             doc.History.RemoveAll(h => h.WorkspaceId == id);

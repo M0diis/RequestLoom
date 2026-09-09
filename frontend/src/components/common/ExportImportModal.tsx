@@ -4,6 +4,7 @@ import { useRequestStore } from '../../stores/requestStore';
 import { exportImportApi } from '../../services/api';
 import type { WorkspaceExport } from '../../types';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
+import { ImportModal } from './ImportModal';
 
 interface Props {
   onClose: () => void;
@@ -36,7 +37,7 @@ function downloadJson(data: unknown, filename: string) {
 
 export function ExportImportModal({ onClose, workspaceId }: Props) {
   const { workspaces } = useWorkspaceStore();
-  const { services } = useRequestStore();
+  const { services, topLevelRequests } = useRequestStore();
 
   const [tab, setTab] = useState<Tab>('export');
   const [busy, setBusy] = useState(false);
@@ -51,6 +52,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPreview, setImportPreview] = useState<WorkspaceExport | null>(null);
   const [importTarget, setImportTarget] = useState<'new' | 'current'>('current');
+  const [specificationImportOpen, setSpecificationImportOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const workspace = useMemo(
@@ -65,12 +67,14 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
 
   const selectedRequest = useMemo(() => {
     if (!exportRequestId) return null;
+    const topLevel = topLevelRequests.find((request) => request.id === exportRequestId);
+    if (topLevel) return topLevel;
     for (const svc of services) {
       const found = svc.requests.find((r) => r.id === exportRequestId);
       if (found) return found;
     }
     return null;
-  }, [services, exportRequestId]);
+  }, [services, topLevelRequests, exportRequestId]);
 
   // When scope changes, reset sub-selections
   const changeScope = (scope: ExportScope) => {
@@ -81,8 +85,9 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
 
   const requestsForService = useMemo(() => {
     if (!exportServiceId) return [];
+    if (exportServiceId === '__top_level__') return topLevelRequests;
     return services.find((s) => s.id === exportServiceId)?.requests ?? [];
-  }, [services, exportServiceId]);
+  }, [services, topLevelRequests, exportServiceId]);
 
   const handleExport = async () => {
     setBusy(true);
@@ -182,12 +187,13 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
     for (const svc of importPreview.services ?? []) {
       reqCount += svc.requests?.length ?? 0;
     }
-    return { svcCount, envCount, varCount, reqCount };
+    const topLevelCount = importPreview.topLevelRequests?.length ?? 0;
+    return { svcCount, envCount, varCount, reqCount: reqCount + topLevelCount, topLevelCount };
   }, [importPreview]);
 
   return (
     <div
-      className="fixed inset-0 z-[130] flex items-center justify-center bg-black/55 p-4"
+      className="titlebar-no-drag fixed inset-0 z-[130] flex items-center justify-center bg-black/55 p-4"
       onMouseDown={(e) => {
         if (e.currentTarget === e.target) onClose();
       }}
@@ -288,6 +294,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
                     className={INPUT_CLASS}
                   >
                     <option value="">Select a service first...</option>
+                    <option value="__top_level__">Top-level requests</option>
                     {services.map((svc) => (
                       <option key={svc.id} value={svc.id}>{svc.name}</option>
                     ))}
@@ -315,7 +322,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
               {/* Summary for workspace */}
               {exportScope === 'workspace' && (
                 <p className="text-[11px] text-gray-500">
-                  {services.length} service(s), all environments, variables, and history will be exported.
+                  {services.length} service(s), {topLevelRequests.length} top-level request(s), all environments, variables, and history will be exported.
                 </p>
               )}
             </div>
@@ -323,6 +330,22 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
 
           {tab === 'import' && (
             <div className="space-y-4">
+              <div className="border border-[#ff6c37]/30 bg-[#ff6c37]/5 px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold text-gray-200">Import a request source</div>
+                    <p className="mt-1 text-[11px] leading-4 text-gray-500">OpenAPI, WSDL, cURL, Postman, or Bruno files.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSpecificationImportOpen(true)}
+                    className={BTN_SECONDARY}
+                    disabled={busy}
+                  >
+                    Open importer
+                  </button>
+                </div>
+              </div>
               <p className="text-xs text-gray-500">
                 Import a previously exported JSON file.
               </p>
@@ -356,6 +379,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
                     )}
                     <div>{previewSummary.svcCount} service(s)</div>
                     <div>{previewSummary.reqCount} request(s)</div>
+                    {previewSummary.topLevelCount > 0 && <div>{previewSummary.topLevelCount} top-level request(s)</div>}
                     <div>{previewSummary.envCount} environment(s)</div>
                     <div>{previewSummary.varCount} global variable(s)</div>
                   </div>
@@ -435,6 +459,13 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
           )}
         </div>
       </div>
+
+      {specificationImportOpen && (
+        <ImportModal
+          workspaceId={workspaceId}
+          onClose={() => setSpecificationImportOpen(false)}
+        />
+      )}
     </div>
   );
 }

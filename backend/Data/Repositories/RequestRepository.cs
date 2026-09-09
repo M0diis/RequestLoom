@@ -22,6 +22,10 @@ public class RequestRepository : IRequestRepository
 
     public async Task<ApiRequest> CreateAsync(string serviceId, CreateApiRequestRequest request)
     {
+        var service = await _db.Services.FirstOrDefaultAsync(s => s.Id == serviceId);
+        if (service == null)
+            throw new InvalidOperationException("Service was not found.");
+
         if (!string.IsNullOrWhiteSpace(request.FolderId) && !await IsFolderInServiceAsync(request.FolderId, serviceId))
             throw new InvalidOperationException("Folder does not belong to the request service.");
 
@@ -34,6 +38,7 @@ public class RequestRepository : IRequestRepository
         var row = new ApiRequestRow
         {
             Id = Guid.NewGuid().ToString("N"),
+            WorkspaceId = service.WorkspaceId,
             ServiceId = serviceId,
             FolderId = string.IsNullOrWhiteSpace(request.FolderId) ? null : request.FolderId,
             Name = request.Name,
@@ -47,6 +52,38 @@ public class RequestRepository : IRequestRepository
             Notes = "",
             SortOrder = maxSort + 1,
             IsFavorite = false,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        _db.Requests.Add(row);
+        await _db.SaveChangesAsync();
+
+        return await BuildAsync(_db, row);
+    }
+
+    public async Task<ApiRequest> CreateTopLevelAsync(string workspaceId, CreateApiRequestRequest request)
+    {
+        if (!await _db.Workspaces.AnyAsync(workspace => workspace.Id == workspaceId))
+            throw new InvalidOperationException("Workspace was not found.");
+
+        var maxSort = await _db.Requests
+            .Where(r => r.WorkspaceId == workspaceId && r.ServiceId == null)
+            .Select(r => (int?)r.SortOrder)
+            .MaxAsync() ?? -1;
+
+        var now = DateTime.UtcNow.ToString("o");
+        var row = new ApiRequestRow
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            WorkspaceId = workspaceId,
+            ServiceId = null,
+            FolderId = null,
+            Name = request.Name,
+            Method = request.Method,
+            Url = request.Url,
+            Body = request.Body,
+            BodyType = request.BodyType,
+            SortOrder = maxSort + 1,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -158,7 +195,7 @@ public class RequestRepository : IRequestRepository
         }
 
         var maxSort = await _db.Requests
-            .Where(r => r.ServiceId == row.ServiceId)
+            .Where(r => r.WorkspaceId == row.WorkspaceId && r.ServiceId == row.ServiceId)
             .Select(r => (int?)r.SortOrder)
             .MaxAsync() ?? -1;
 
@@ -166,8 +203,9 @@ public class RequestRepository : IRequestRepository
         var copy = new ApiRequestRow
         {
             Id = Guid.NewGuid().ToString("N"),
+            WorkspaceId = row.WorkspaceId,
             ServiceId = row.ServiceId,
-            FolderId = row.FolderId,
+            FolderId = row.ServiceId == null ? null : row.FolderId,
             Name = row.Name + " (copy)",
             Method = row.Method,
             Url = row.Url,
@@ -242,6 +280,12 @@ public class RequestRepository : IRequestRepository
             return false;
         }
 
+        var service = await _db.Services.FirstOrDefaultAsync(item => item.Id == newServiceId);
+        if (service == null || service.WorkspaceId != row.WorkspaceId)
+        {
+            return false;
+        }
+
         var maxSort = await _db.Requests
             .Where(r => r.ServiceId == newServiceId)
             .Select(r => (int?)r.SortOrder)
@@ -255,17 +299,42 @@ public class RequestRepository : IRequestRepository
         return true;
     }
 
+    public async Task<bool> MoveToTopLevelAsync(string id)
+    {
+        var row = await _db.Requests.FindAsync(id);
+        if (row == null)
+        {
+            return false;
+        }
+
+        var maxSort = await _db.Requests
+            .Where(request => request.WorkspaceId == row.WorkspaceId && request.ServiceId == null)
+            .Select(request => (int?)request.SortOrder)
+            .MaxAsync() ?? -1;
+
+        row.ServiceId = null;
+        row.FolderId = null;
+        row.SortOrder = maxSort + 1;
+        row.UpdatedAt = DateTime.UtcNow.ToString("o");
+        await _db.SaveChangesAsync();
+
+        return true;
+    }
+
     public async Task<bool> MoveToFolderAsync(string id, string? folderId)
     {
         var row = await _db.Requests.FindAsync(id);
         if (row == null) return false;
 
-        if (!string.IsNullOrWhiteSpace(folderId) && !await IsFolderInServiceAsync(folderId, row.ServiceId))
+        if (row.ServiceId == null && !string.IsNullOrWhiteSpace(folderId)) return false;
+
+        var serviceId = row.ServiceId;
+        if (!string.IsNullOrWhiteSpace(folderId) && serviceId != null && !await IsFolderInServiceAsync(folderId, serviceId))
             return false;
 
         var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
         var maxSort = await _db.Requests
-            .Where(request => request.ServiceId == row.ServiceId && request.FolderId == targetFolderId && request.Id != id)
+            .Where(request => request.WorkspaceId == row.WorkspaceId && request.ServiceId == row.ServiceId && request.FolderId == targetFolderId && request.Id != id)
             .Select(request => (int?)request.SortOrder)
             .MaxAsync() ?? -1;
 
@@ -281,12 +350,15 @@ public class RequestRepository : IRequestRepository
         var row = await _db.Requests.FirstOrDefaultAsync(request => request.Id == id);
         if (row == null) return false;
 
+        if (row.ServiceId == null && !string.IsNullOrWhiteSpace(folderId)) return false;
+
         var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
-        if (targetFolderId != null && !await IsFolderInServiceAsync(targetFolderId, row.ServiceId))
+        var serviceId = row.ServiceId;
+        if (targetFolderId != null && serviceId != null && !await IsFolderInServiceAsync(targetFolderId, serviceId))
             return false;
 
         var rows = await _db.Requests
-            .Where(request => request.ServiceId == row.ServiceId)
+            .Where(request => request.WorkspaceId == row.WorkspaceId && request.ServiceId == row.ServiceId)
             .OrderBy(request => request.SortOrder)
             .ThenBy(request => request.Id)
             .ToListAsync();
@@ -440,6 +512,7 @@ public class RequestRepository : IRequestRepository
         var result = new ApiRequest
         {
             Id = row.Id,
+            WorkspaceId = row.WorkspaceId,
             ServiceId = row.ServiceId,
             FolderId = row.FolderId,
             Name = row.Name,
@@ -482,6 +555,22 @@ public class RequestRepository : IRequestRepository
                 AuthType = auth.AuthType,
                 ConfigJson = auth.ConfigJson,
             };
+        }
+
+        return result;
+    }
+
+    public async Task<List<ApiRequest>> GetByWorkspaceIdAsync(string workspaceId)
+    {
+        var rows = await _db.Requests
+            .Where(r => r.WorkspaceId == workspaceId && r.ServiceId == null)
+            .OrderBy(r => r.SortOrder)
+            .ToListAsync();
+
+        var result = new List<ApiRequest>();
+        foreach (var row in rows)
+        {
+            result.Add(await BuildAsync(_db, row));
         }
 
         return result;

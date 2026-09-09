@@ -11,6 +11,7 @@ public sealed class OAuth2Configuration
     public string RedirectUri { get; set; } = "";
     public string Audience { get; set; } = "";
     public string ClientAuthenticationMethod { get; set; } = "client_secret_post";
+    public string AccessTokenVariable { get; set; } = "";
 }
 
 public sealed class OAuthTokenExchangeRequest

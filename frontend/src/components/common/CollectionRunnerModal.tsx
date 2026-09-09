@@ -29,6 +29,9 @@ export function CollectionRunnerModal({ onClose, serviceId, folderId }: Props) {
         ? await collectionRunnerApi.runFolder(serviceId, folderId, stopOnFailure)
         : await collectionRunnerApi.runService(serviceId, stopOnFailure);
       setResult(r);
+      window.dispatchEvent(new CustomEvent('service-variables:updated', {
+        detail: { serviceId },
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Collection run failed');
     } finally {

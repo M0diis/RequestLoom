@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using RequestLoom.Api.Data;
@@ -292,6 +293,7 @@ public sealed class StorageMigrationService
         db.Requests.AddRange(requests.Select(request => new ApiRequestRow
         {
             Id = EnsureId(request.Id),
+            WorkspaceId = request.WorkspaceId,
             ServiceId = request.ServiceId,
             FolderId = request.FolderId,
             Name = request.Name,
@@ -368,8 +370,15 @@ public sealed class StorageMigrationService
             Id = EnsureId(entry.Id), RequestId = requests.Any(request => request.Id == entry.RequestId) ? entry.RequestId : null,
             WorkspaceId = entry.WorkspaceId, Method = entry.Method, Url = entry.Url,
             RequestHeadersJson = entry.RequestHeadersJson, RequestBody = entry.RequestBody, ResponseStatus = entry.ResponseStatus,
-            ResponseHeadersJson = entry.ResponseHeadersJson, ResponseBody = entry.ResponseBody, ResponseTimeMs = entry.ResponseTimeMs,
-            ResponseSizeBytes = entry.ResponseSizeBytes, ExecutedAt = entry.ExecutedAt,
+            StatusText = entry.StatusText, ResponseHeadersJson = entry.ResponseHeadersJson, ResponseBody = entry.ResponseBody,
+            ContentType = entry.ContentType, ResponseTimeMs = entry.ResponseTimeMs, ResponseSizeBytes = entry.ResponseSizeBytes,
+            IsTruncated = entry.IsTruncated, Error = entry.Error, IsSoapFault = entry.IsSoapFault,
+            SoapFaultJson = JsonSerializer.Serialize(entry.SoapFault),
+            ScriptVariablesJson = JsonSerializer.Serialize(entry.ScriptVariables),
+            ServiceScriptVariablesJson = JsonSerializer.Serialize(entry.ServiceScriptVariables),
+            ScriptLogsJson = JsonSerializer.Serialize(entry.ScriptLogs),
+            TestResultsJson = JsonSerializer.Serialize(entry.TestResults),
+            ExecutedAt = entry.ExecutedAt,
         }));
         db.MockServers.AddRange(document.MockServers.Select(server => new MockServerRow
         {
@@ -449,7 +458,7 @@ public sealed class StorageMigrationService
             }).ToList(),
             Requests = requests.Select(request => new ApiRequest
             {
-                Id = request.Id, ServiceId = request.ServiceId, FolderId = request.FolderId, Name = request.Name, Method = request.Method,
+                Id = request.Id, WorkspaceId = request.WorkspaceId, ServiceId = request.ServiceId, FolderId = request.FolderId, Name = request.Name, Method = request.Method,
                 Url = request.Url, Body = request.Body, BodyType = request.BodyType, PreRequestScript = request.PreRequestScript,
                  PostRequestScript = request.PostRequestScript, TestScript = request.TestScript, Notes = request.Notes, SortOrder = request.SortOrder,
                 IsFavorite = request.IsFavorite, CreatedAt = request.CreatedAt, UpdatedAt = request.UpdatedAt,
@@ -490,8 +499,15 @@ public sealed class StorageMigrationService
             {
                 Id = entry.Id, RequestId = entry.RequestId, WorkspaceId = entry.WorkspaceId, Method = entry.Method, Url = entry.Url,
                 RequestHeadersJson = entry.RequestHeadersJson, RequestBody = entry.RequestBody, ResponseStatus = entry.ResponseStatus,
-                ResponseHeadersJson = entry.ResponseHeadersJson, ResponseBody = entry.ResponseBody, ResponseTimeMs = entry.ResponseTimeMs,
-                ResponseSizeBytes = entry.ResponseSizeBytes, ExecutedAt = entry.ExecutedAt,
+                StatusText = entry.StatusText ?? "", ResponseHeadersJson = entry.ResponseHeadersJson, ResponseBody = entry.ResponseBody,
+                ContentType = entry.ContentType ?? "", ResponseTimeMs = entry.ResponseTimeMs, ResponseSizeBytes = entry.ResponseSizeBytes,
+                IsTruncated = entry.IsTruncated, Error = entry.Error, IsSoapFault = entry.IsSoapFault,
+                SoapFault = Deserialize<SoapFaultInfo>(entry.SoapFaultJson),
+                ScriptVariables = Deserialize<Dictionary<string, RuntimeScriptVariable>>(entry.ScriptVariablesJson) ?? [],
+                ServiceScriptVariables = Deserialize<Dictionary<string, RuntimeScriptVariable>>(entry.ServiceScriptVariablesJson) ?? [],
+                ScriptLogs = Deserialize<List<string>>(entry.ScriptLogsJson) ?? [],
+                TestResults = Deserialize<List<TestResult>>(entry.TestResultsJson) ?? [],
+                ExecutedAt = entry.ExecutedAt,
             }).ToList(),
             MockServers = mockServers.Select(server => new MockServer
             {
@@ -521,6 +537,20 @@ public sealed class StorageMigrationService
                document.History.Count > 0 ||
                document.MockServers.Count > 0 ||
                document.Workspaces.Any(workspace => workspace.Id != "default");
+    }
+
+    private static T? Deserialize<T>(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return default;
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(value);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
     }
 
     private static string NormalizeMode(string value)

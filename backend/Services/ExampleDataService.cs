@@ -604,11 +604,14 @@ test('Post has comments', () => {
             StatusCode = 200, ContentType = "application/json",
             ResponseBody = profileResponse, DelayMs = 50,
             ScriptEnabled = true,
-            Script = @"// Simulate auth check: return 401 if no Authorization header
-const auth = request.headers['Authorization'] || request.headers['authorization'];
-if (!auth || !auth.startsWith('Bearer ')) {
-    response.statusCode = 401;
-    response.body = JSON.stringify({ error: 'Unauthorized', message: 'Missing or invalid token' });
+             Script = @"// Simulate auth check: reject missing or unresolved bearer tokens
+ const auth = request.headers['Authorization'] || request.headers['authorization'];
+ const token = typeof auth === 'string' && auth.startsWith('Bearer ')
+     ? auth.slice(7).trim()
+     : '';
+ if (!token || token.includes('{{') || token.includes('}}')) {
+     response.statusCode = 401;
+     response.body = JSON.stringify({ error: 'Unauthorized', message: 'Missing or invalid token' });
 } else {
     response.statusCode = 200;
     response.body = JSON.stringify({
@@ -656,8 +659,8 @@ if (!auth || !auth.startsWith('Bearer ')) {
             PostRequestScript = @"// Extract token from login response and store it as a variable
 const json = JSON.parse(response.body);
 if (json.access_token) {
-    setVar('access_token', String(json.access_token));
-    setVar('refresh_token', String(json.refresh_token || ''));
+    setServiceVar('access_token', String(json.access_token), true);
+    setServiceVar('refresh_token', String(json.refresh_token || ''), true);
     log('Token stored for subsequent requests');
 }",
             TestScript = @"test('Login successful', () => {
@@ -693,10 +696,7 @@ test('Returns access token', () => {
             Body = null, BodyType = "none",
             Headers = new List<KeyValuePairRequest>(),
             Params = new List<KeyValuePairRequest>(),
-            Variables = new List<RequestVariableRequest>
-            {
-                new() { Key = "access_token", Value = "", Enabled = true }
-            },
+            Variables = new List<RequestVariableRequest>(),
             Auth = new AuthRequest
             {
                 AuthType = "bearer",
@@ -711,7 +711,7 @@ test('Returns the current user', () => {
 });"
         });
 
-        await EnsureSandboxOAuthRequestsAsync(service);
+        await EnsureSandboxOAuthRequestsAsync(service, baseUrl);
 
         return service;
     }
@@ -798,7 +798,7 @@ test('Returns the current user', () => {
                     await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_scope", "openid profile email", false, true, environmentId);
                     await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_redirect_uri", "http://localhost:5173/oauth/callback", false, true, environmentId);
                     await _svcVarRepo.UpsertAsync(service.Id, null, "oauth_code_verifier", "requestloom-sandbox-pkce", false, true, environmentId);
-                    await EnsureSandboxOAuthRequestsAsync(service);
+                    await EnsureSandboxOAuthRequestsAsync(service, authBaseUrl);
                 }
             }
         }
@@ -807,6 +807,20 @@ test('Returns the current user', () => {
     private async Task EnsureSandboxOAuthEndpointsAsync(MockServer mockServer)
     {
         var endpoints = (await _mockRepo.GetEndpointsAsync(mockServer.Id)).ToList();
+        var profileEndpoint = endpoints.FirstOrDefault(endpoint =>
+            endpoint.Method.Equals("GET", StringComparison.OrdinalIgnoreCase) &&
+            endpoint.Path.Equals("/api/auth/me", StringComparison.OrdinalIgnoreCase));
+        if (profileEndpoint != null)
+        {
+            var hardenedScript = HardenSandboxProfileScript(profileEndpoint.Script);
+            if (!string.Equals(hardenedScript, profileEndpoint.Script, StringComparison.Ordinal))
+            {
+                await _mockRepo.UpdateEndpointAsync(
+                    profileEndpoint.Id,
+                    CopyMockEndpointWithScript(profileEndpoint, hardenedScript));
+            }
+        }
+
         var config = JsonSerializer.Serialize(new
         {
             issuer = GetMockBaseUrl(mockServer.Slug),
@@ -847,14 +861,25 @@ test('Returns the current user', () => {
         }
     }
 
-    private async Task EnsureSandboxOAuthRequestsAsync(Service service)
+    private async Task EnsureSandboxOAuthRequestsAsync(Service service, string oauthBaseUrl)
     {
         var requests = await _requestRepo.GetByServiceIdAsync(service.Id);
+        await MigrateSandboxOAuthPersistenceScriptsAsync(requests);
 
         var profile = requests.FirstOrDefault(request =>
             request.Name.Equals("Get My Profile", StringComparison.OrdinalIgnoreCase));
-        if (profile != null && profile.Auth == null &&
-            !profile.Variables.Any(variable => variable.Key.Equals("access_token", StringComparison.OrdinalIgnoreCase)))
+        var profileVariables = profile?.Variables
+            .Where(variable => !variable.Key.Equals("access_token", StringComparison.OrdinalIgnoreCase))
+            .Select(variable => new RequestVariableRequest
+            {
+                Key = variable.Key,
+                Value = variable.Value,
+                Enabled = variable.Enabled
+            })
+            .ToList() ?? [];
+        var profileHasAccessTokenVariable = profile?.Variables.Any(variable =>
+            variable.Key.Equals("access_token", StringComparison.OrdinalIgnoreCase)) == true;
+        if (profile != null && (profile.Auth == null || profileHasAccessTokenVariable))
         {
             await _requestRepo.UpdateAsync(profile.Id, new UpdateApiRequestRequest
             {
@@ -879,13 +904,7 @@ test('Returns the current user', () => {
                 {
                     Key = param.Key, Value = param.Value, Enabled = param.Enabled
                 }).ToList(),
-                Variables = profile.Variables.Select(variable => new RequestVariableRequest
-                {
-                    Key = variable.Key, Value = variable.Value, Enabled = variable.Enabled
-                }).Append(new RequestVariableRequest
-                {
-                    Key = "access_token", Value = "", Enabled = true
-                }).ToList(),
+                Variables = profileVariables,
                 Auth = new AuthRequest
                 {
                     AuthType = "bearer",
@@ -960,7 +979,7 @@ test('Publishes OAuth2 endpoints', () => {
                 PostRequestScript = @"const location = getResponseHeader('Location') || '';
 const match = /[?&]code=([^&]+)/.exec(location);
 if (match) {
-    setVar('oauth_code', decodeURIComponent(match[1]));
+    setServiceVar('oauth_code', decodeURIComponent(match[1]), false);
     log('Authorization code stored for token exchange');
 } else {
     log('Authorization response did not contain a code');
@@ -1009,9 +1028,9 @@ test('Authorization response contains a code', () => {
                 Auth = new AuthRequest { AuthType = "none", ConfigJson = "{}" },
                 PostRequestScript = @"const json = JSON.parse(response.body);
 if (json.access_token) {
-    setVar('access_token', String(json.access_token));
-    setVar('id_token', String(json.id_token || ''));
-    setVar('refresh_token', String(json.refresh_token || ''));
+    setServiceVar('access_token', String(json.access_token), true);
+    setServiceVar('id_token', String(json.id_token || ''), true);
+    setServiceVar('refresh_token', String(json.refresh_token || ''), true);
     log('OAuth2 access token and OIDC ID token stored');
 }",
                 TestScript = @"test('Token exchange succeeded', () => {
@@ -1043,14 +1062,11 @@ test('Returns OAuth2 and OIDC tokens', () => {
                 BodyType = "none",
                 Headers = new List<KeyValuePairRequest>(),
                 Params = new List<KeyValuePairRequest>(),
-                Variables = new List<RequestVariableRequest>
-                {
-                    new() { Key = "access_token", Value = "", Enabled = true }
-                },
+                Variables = new List<RequestVariableRequest>(),
                 Auth = new AuthRequest
                 {
-                    AuthType = "bearer",
-                    ConfigJson = JsonSerializer.Serialize(new { token = "{{access_token}}" })
+                    AuthType = "oauth2",
+                    ConfigJson = CreateSandboxOAuthRequestConfig(oauthBaseUrl)
                 },
                 TestScript = @"test('UserInfo accepts the OAuth2 access token', () => {
     expect(response.status).toBe(200);
@@ -1062,6 +1078,177 @@ test('Returns OIDC claims', () => {
 });"
             });
         }
+
+        var existingUserInfo = requests.FirstOrDefault(request =>
+            request.Name.Equals("OIDC UserInfo", StringComparison.OrdinalIgnoreCase));
+        var existingUserInfoHasAccessTokenVariable = existingUserInfo?.Variables.Any(variable =>
+            variable.Key.Equals("access_token", StringComparison.OrdinalIgnoreCase)) == true;
+        if (existingUserInfo != null &&
+            (!string.Equals(existingUserInfo.Auth?.AuthType, "oauth2", StringComparison.OrdinalIgnoreCase) ||
+             existingUserInfoHasAccessTokenVariable))
+        {
+            var variables = existingUserInfo.Variables
+                .Where(variable => !variable.Key.Equals("access_token", StringComparison.OrdinalIgnoreCase))
+                .Select(variable => new RequestVariableRequest
+            {
+                Key = variable.Key,
+                Value = variable.Value,
+                Enabled = variable.Enabled
+            }).ToList();
+
+            await _requestRepo.UpdateAsync(existingUserInfo.Id, new UpdateApiRequestRequest
+            {
+                Name = existingUserInfo.Name,
+                Method = existingUserInfo.Method,
+                Url = existingUserInfo.Url,
+                Body = existingUserInfo.Body,
+                BodyType = existingUserInfo.BodyType,
+                PreRequestScript = existingUserInfo.PreRequestScript,
+                PostRequestScript = existingUserInfo.PostRequestScript,
+                TestScript = existingUserInfo.TestScript,
+                Notes = existingUserInfo.Notes,
+                Headers = existingUserInfo.Headers.Select(header => new KeyValuePairRequest
+                {
+                    Key = header.Key, Value = header.Value, Enabled = header.Enabled
+                }).ToList(),
+                Params = existingUserInfo.Params.Select(param => new KeyValuePairRequest
+                {
+                    Key = param.Key, Value = param.Value, Enabled = param.Enabled
+                }).ToList(),
+                Variables = variables,
+                Auth = new AuthRequest
+                {
+                    AuthType = "oauth2",
+                    ConfigJson = CreateSandboxOAuthRequestConfig(oauthBaseUrl)
+                }
+            });
+        }
+    }
+
+    private async Task MigrateSandboxOAuthPersistenceScriptsAsync(IEnumerable<ApiRequest> requests)
+    {
+        foreach (var request in requests)
+        {
+            var updatedScript = request.Name.ToLowerInvariant() switch
+            {
+                "login" => request.PostRequestScript
+                    .Replace("setVar('access_token', json.access_token);", "setServiceVar('access_token', String(json.access_token), true);")
+                    .Replace("setVar('refresh_token', json.refresh_token);", "setServiceVar('refresh_token', String(json.refresh_token || ''), true);")
+                    .Replace("setServiceVar('access_token', String(json.access_token));", "setServiceVar('access_token', String(json.access_token), true);")
+                    .Replace("setServiceVar('refresh_token', String(json.refresh_token || ''));", "setServiceVar('refresh_token', String(json.refresh_token || ''), true);"),
+                "oauth2 authorize (pkce)" => request.PostRequestScript
+                    .Replace("setVar('oauth_code', decodeURIComponent(match[1]));", "setServiceVar('oauth_code', decodeURIComponent(match[1]), false);")
+                    .Replace("setServiceVar('oauth_code', decodeURIComponent(match[1]));", "setServiceVar('oauth_code', decodeURIComponent(match[1]), false);"),
+                "oauth2 token exchange" => request.PostRequestScript
+                    .Replace("setVar('access_token', String(json.access_token));", "setServiceVar('access_token', String(json.access_token), true);")
+                    .Replace("setVar('id_token', String(json.id_token || ''));", "setServiceVar('id_token', String(json.id_token || ''), true);")
+                    .Replace("setVar('refresh_token', String(json.refresh_token || ''));", "setServiceVar('refresh_token', String(json.refresh_token || ''), true);")
+                    .Replace("setServiceVar('access_token', String(json.access_token));", "setServiceVar('access_token', String(json.access_token), true);")
+                    .Replace("setServiceVar('id_token', String(json.id_token || ''));", "setServiceVar('id_token', String(json.id_token || ''), true);")
+                    .Replace("setServiceVar('refresh_token', String(json.refresh_token || ''));", "setServiceVar('refresh_token', String(json.refresh_token || ''), true);"),
+                _ => request.PostRequestScript,
+            };
+
+            if (!string.Equals(updatedScript, request.PostRequestScript, StringComparison.Ordinal))
+                await _requestRepo.UpdateAsync(request.Id, CopyRequestWithPostScript(request, updatedScript));
+        }
+    }
+
+    private static string HardenSandboxProfileScript(string script)
+    {
+        const string oldCondition = "if (!auth || !auth.startsWith('Bearer ')) {";
+        if (string.IsNullOrWhiteSpace(script) ||
+            !script.Contains(oldCondition, StringComparison.Ordinal) ||
+            script.Contains("token.includes('{{')", StringComparison.Ordinal))
+        {
+            return script;
+        }
+
+        const string replacement = "const token = typeof auth === 'string' && auth.startsWith('Bearer ')\n    ? auth.slice(7).trim()\n    : '';\nif (!token || token.includes('{{') || token.includes('}}')) {";
+        return script.Replace(oldCondition, replacement, StringComparison.Ordinal);
+    }
+
+    private static UpdateMockEndpointRequest CopyMockEndpointWithScript(
+        MockServerEndpoint endpoint,
+        string script)
+    {
+        List<KeyValuePairRequest> responseHeaders;
+        try
+        {
+            responseHeaders = JsonSerializer.Deserialize<List<KeyValuePairRequest>>(endpoint.ResponseHeadersJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            responseHeaders = [];
+        }
+
+        return new UpdateMockEndpointRequest
+        {
+            Method = endpoint.Method,
+            Path = endpoint.Path,
+            StatusCode = endpoint.StatusCode,
+            ContentType = endpoint.ContentType,
+            ResponseBody = endpoint.ResponseBody,
+            ResponseHeaders = responseHeaders,
+            ScriptEnabled = endpoint.ScriptEnabled,
+            Script = script,
+            Behavior = endpoint.Behavior,
+            BehaviorConfigJson = endpoint.BehaviorConfigJson,
+            DelayMs = endpoint.DelayMs,
+        };
+    }
+
+    private static UpdateApiRequestRequest CopyRequestWithPostScript(ApiRequest request, string postRequestScript)
+    {
+        return new UpdateApiRequestRequest
+        {
+            Name = request.Name,
+            Method = request.Method,
+            Url = request.Url,
+            Body = request.Body,
+            BodyType = request.BodyType,
+            PreRequestScript = request.PreRequestScript,
+            PostRequestScript = postRequestScript,
+            TestScript = request.TestScript,
+            Notes = request.Notes,
+            Headers = request.Headers.Select(header => new KeyValuePairRequest
+            {
+                Key = header.Key, Value = header.Value, Enabled = header.Enabled
+            }).ToList(),
+            Params = request.Params.Select(param => new KeyValuePairRequest
+            {
+                Key = param.Key, Value = param.Value, Enabled = param.Enabled
+            }).ToList(),
+            Variables = request.Variables.Select(variable => new RequestVariableRequest
+            {
+                Key = variable.Key, Value = variable.Value, Enabled = variable.Enabled
+            }).ToList(),
+            Auth = request.Auth == null
+                ? null
+                : new AuthRequest
+                {
+                    AuthType = request.Auth.AuthType,
+                    ConfigJson = request.Auth.ConfigJson
+                }
+        };
+    }
+
+    private static string CreateSandboxOAuthRequestConfig(string oauthBaseUrl)
+    {
+        var normalizedBaseUrl = oauthBaseUrl.TrimEnd('/');
+        return JsonSerializer.Serialize(new
+        {
+            authorizationUrl = $"{normalizedBaseUrl}/oauth/authorize",
+            tokenUrl = $"{normalizedBaseUrl}/oauth/token",
+            issuer = normalizedBaseUrl,
+            clientId = "requestloom-sandbox-client",
+            clientSecret = "requestloom-sandbox-secret",
+            scope = "openid profile email",
+            redirectUri = "http://localhost:5173/oauth/callback",
+            audience = "",
+            clientAuthenticationMethod = "client_secret_post",
+            accessTokenVariable = "access_token",
+        });
     }
 
     private static string? NormalizePublicUrl(string? value)

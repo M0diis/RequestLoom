@@ -65,7 +65,8 @@ export interface ServiceVariable {
 
 export interface ApiRequest {
   id: string;
-  serviceId: string;
+  workspaceId: string;
+  serviceId: string | null;
   folderId: string | null;
   name: string;
   method: HttpMethod;
@@ -131,7 +132,7 @@ export interface ExecuteRequestPayload {
   variables: RequestVariableRequest[];
   auth?: AuthRequest | null;
   workspaceId?: string;
-  serviceId?: string;
+  serviceId?: string | null;
   requestId?: string;
   ignoreSslErrors?: boolean;
   mtls?: MtlsConfig | null;
@@ -175,6 +176,7 @@ export interface OAuth2Configuration {
   redirectUri: string;
   audience: string;
   clientAuthenticationMethod: 'client_secret_post' | 'client_secret_basic';
+  accessTokenVariable?: string;
 }
 
 export interface OAuthTokenExchangeResponse {
@@ -225,6 +227,7 @@ export interface ImportSpecificationRequest {
   source: string;
   serviceId?: string | null;
   serviceName?: string | null;
+  topLevel?: boolean;
 }
 
 export interface ImportSpecificationResult {
@@ -252,6 +255,7 @@ export interface ExecuteResponse {
   isSoapFault: boolean;
   soapFault?: SoapFaultInfo;
   scriptVariables: Record<string, RuntimeScriptVariable>;
+  serviceScriptVariables?: Record<string, RuntimeScriptVariable>;
   scriptLogs: string[];
   testResults: TestResult[];
 }
@@ -259,6 +263,7 @@ export interface ExecuteResponse {
 export interface RuntimeScriptVariable {
   value: string;
   source: string;
+  scope?: 'request' | 'service';
 }
 
 export interface SoapFaultInfo {
@@ -276,10 +281,20 @@ export interface HistoryEntry {
   requestHeadersJson?: string;
   requestBody?: string;
   responseStatus: number;
+  statusText?: string;
   responseHeadersJson?: string;
   responseBody?: string;
+  contentType?: string;
   responseTimeMs: number;
   responseSizeBytes: number;
+  isTruncated?: boolean;
+  error?: string;
+  isSoapFault?: boolean;
+  soapFault?: SoapFaultInfo;
+  scriptVariables?: Record<string, RuntimeScriptVariable>;
+  serviceScriptVariables?: Record<string, RuntimeScriptVariable>;
+  scriptLogs?: string[];
+  testResults?: TestResult[];
   executedAt: string;
 }
 
@@ -385,6 +400,7 @@ export interface WorkspaceExport {
   environments: EnvironmentExport[];
   workspaceVariables: WorkspaceVariable[];
   services: ServiceExport[];
+  topLevelRequests: RequestExport[];
   history: HistoryEntry[];
 }
 
@@ -511,6 +527,7 @@ export interface AppSettings {
   jsonStorageStrategy: JsonStorageStrategy;
   restartRequired: boolean;
   requestTimeoutMs: number;
+  autoSave: boolean;
   followRedirects: boolean;
   maxRedirects: number;
   ignoreSslErrors: boolean;
@@ -532,6 +549,7 @@ export type SettingsUpdate = Partial<
     | 'storageMode'
     | 'jsonStorageStrategy'
     | 'requestTimeoutMs'
+    | 'autoSave'
     | 'followRedirects'
     | 'maxRedirects'
     | 'ignoreSslErrors'

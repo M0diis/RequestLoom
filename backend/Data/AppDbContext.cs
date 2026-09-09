@@ -54,6 +54,12 @@ public class AppDbContext : DbContext
             .HasForeignKey(r => r.ServiceId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        modelBuilder.Entity<ApiRequestRow>()
+            .HasOne<WorkspaceRow>()
+            .WithMany()
+            .HasForeignKey(r => r.WorkspaceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         modelBuilder.Entity<RequestFolderRow>()
             .HasOne<ServiceRow>()
             .WithMany()
@@ -175,6 +181,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<EnvironmentRow>().HasIndex(e => e.WorkspaceId);
         modelBuilder.Entity<ServiceRow>().HasIndex(s => s.WorkspaceId);
         modelBuilder.Entity<ApiRequestRow>().HasIndex(r => r.ServiceId);
+        modelBuilder.Entity<ApiRequestRow>().HasIndex(r => r.WorkspaceId);
         modelBuilder.Entity<ApiRequestRow>().HasIndex(r => r.FolderId);
         modelBuilder.Entity<RequestFolderRow>().HasIndex(f => f.ServiceId);
         modelBuilder.Entity<RequestHeaderRow>().HasIndex(h => h.RequestId);

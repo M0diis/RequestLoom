@@ -19,6 +19,9 @@ import { RequestNotesEditor } from './RequestNotesEditor';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import { DynamicValueReferenceModal } from '../common/DynamicValueReferenceModal';
 import { AlertModal } from '../common/AlertModal';
+import {
+  type ResolvedVariableInfo,
+} from '../common/variablePreviewUtils';
 import { getDynamicValueSuggestions } from '../../lib/dynamicValues';
 import type {
   HttpMethod,
@@ -78,11 +81,6 @@ type PathVariableIndicator = {
   pending?: boolean;
 };
 
-type ResolvedVariable = {
-  value: string;
-  source: string;
-};
-
 const URL_VARIABLE_PATTERN_SOURCE = '\\{\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}\\}|\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}';
 
 function createUrlVariablePattern(): RegExp {
@@ -98,8 +96,10 @@ function extractPathVariables(url: string): string[] {
 
 function resolveVariablesInText(
   input: string,
-  resolvedLookup: Map<string, ResolvedVariable>,
-  missingVariables: Set<string>
+  resolvedLookup: Map<string, ResolvedVariableInfo>,
+  missingVariables: Set<string>,
+  secretVariables?: Set<string>,
+  maskSecrets = false,
 ): string {
   if (!input) return input;
 
@@ -115,6 +115,11 @@ function resolveVariablesInText(
         return fullMatch;
       }
 
+      if (resolved.isSecret) {
+        secretVariables?.add(variableName);
+        if (maskSecrets) return '••••••••';
+      }
+
       return resolved.value;
     }
   );
@@ -124,8 +129,8 @@ function buildScopedServiceLookup(
   variables: ServiceVariable[],
   activeEnvironmentId?: string,
   activeEnvironmentName?: string
-): Map<string, { value: string; source: string }> {
-  const map = new Map<string, { value: string; source: string }>();
+): Map<string, ResolvedVariableInfo> {
+  const map = new Map<string, ResolvedVariableInfo>();
 
   for (const variable of variables) {
     if (!variable.key.trim()) continue;
@@ -135,6 +140,7 @@ function buildScopedServiceLookup(
     map.set(variable.key.trim().toLowerCase(), {
       value: variable.value ?? '',
       source: 'service (ALL)',
+      isSecret: variable.isSecret,
     });
   }
 
@@ -147,6 +153,7 @@ function buildScopedServiceLookup(
       map.set(variable.key.trim().toLowerCase(), {
         value: variable.value ?? '',
         source: activeEnvironmentName ? `service (${activeEnvironmentName})` : 'service (env)',
+        isSecret: variable.isSecret,
       });
     }
   }
@@ -158,8 +165,8 @@ function buildScopedWorkspaceLookup(
   variables: WorkspaceVariable[],
   activeEnvironmentId?: string,
   activeEnvironmentName?: string
-): Map<string, { value: string; source: string }> {
-  const map = new Map<string, { value: string; source: string }>();
+): Map<string, ResolvedVariableInfo> {
+  const map = new Map<string, ResolvedVariableInfo>();
 
   for (const variable of variables) {
     if (!variable.key.trim()) continue;
@@ -169,6 +176,7 @@ function buildScopedWorkspaceLookup(
     map.set(variable.key.trim().toLowerCase(), {
       value: variable.value ?? '',
       source: 'global (ALL)',
+      isSecret: variable.isSecret,
     });
   }
 
@@ -181,6 +189,7 @@ function buildScopedWorkspaceLookup(
       map.set(variable.key.trim().toLowerCase(), {
         value: variable.value ?? '',
         source: activeEnvironmentName ? `global (${activeEnvironmentName})` : 'global (env)',
+        isSecret: variable.isSecret,
       });
     }
   }
@@ -195,10 +204,13 @@ export function RequestBuilder() {
     updateRequest,
     selectRequest,
     duplicateRequest,
+    saveRequest,
+    isRequestDirty,
     sendRequest,
     cancelRequest,
     sending,
     runtimeScriptVariablesByRequest,
+    clearServiceRuntimeVariables,
   } = useRequestStore();
   const { activeWorkspaceId } = useWorkspaceStore();
   const { environments } = useEnvironmentStore();
@@ -210,6 +222,7 @@ export function RequestBuilder() {
   const [cloneBusy, setCloneBusy] = useState(false);
   const [dynamicValues, setDynamicValues] = useState<DynamicValueDefinition[]>([]);
   const [curlCopied, setCurlCopied] = useState(false);
+  const [showResolvedUrlSecrets, setShowResolvedUrlSecrets] = useState(false);
   const [historyCount, setHistoryCount] = useState(0);
 
   const [workspaceVariables, setWorkspaceVariables] = useState<WorkspaceVariable[]>([]);
@@ -217,6 +230,8 @@ export function RequestBuilder() {
   const [workspaceVariablesLoading, setWorkspaceVariablesLoading] = useState(true);
   const [serviceVariablesLoading, setServiceVariablesLoading] = useState(true);
   const [serviceVariablesServiceId, setServiceVariablesServiceId] = useState<string | null>(null);
+  const activeServiceId = activeRequest?.serviceId;
+  const activeRequestId = activeRequest?.id;
 
   useEffect(() => {
     let canceled = false;
@@ -263,18 +278,18 @@ export function RequestBuilder() {
     let canceled = false;
 
     const loadServiceVariables = async () => {
-      if (!activeRequest?.serviceId) {
+      if (!activeServiceId) {
         setServiceVariablesServiceId(null);
         setServiceVariablesLoading(false);
         setServiceVariables([]);
         return;
       }
 
-      setServiceVariablesServiceId(activeRequest.serviceId);
+      setServiceVariablesServiceId(activeServiceId);
       setServiceVariablesLoading(true);
 
       try {
-        const rows = await serviceVariablesApi.getAll(activeRequest.serviceId);
+        const rows = await serviceVariablesApi.getAll(activeServiceId);
         if (!canceled) {
           setServiceVariables(rows);
           setServiceVariablesLoading(false);
@@ -289,18 +304,31 @@ export function RequestBuilder() {
 
     void loadServiceVariables();
 
+    const handleServiceVariablesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ serviceId?: string; invalidateRuntime?: boolean }>).detail;
+      const serviceId = detail?.serviceId;
+      if (serviceId === activeServiceId) {
+        if (detail?.invalidateRuntime && serviceId) {
+          clearServiceRuntimeVariables(serviceId);
+        }
+        void loadServiceVariables();
+      }
+    };
+    window.addEventListener('service-variables:updated', handleServiceVariablesUpdated);
+
     return () => {
       canceled = true;
+      window.removeEventListener('service-variables:updated', handleServiceVariablesUpdated);
     };
-  }, [activeRequest?.serviceId]);
+  }, [activeServiceId, clearServiceRuntimeVariables]);
 
   useEffect(() => {
     let canceled = false;
 
     const loadHistoryCount = async () => {
-      if (!activeRequest) return;
+      if (!activeRequestId) return;
       try {
-        const { count } = await historyApi.count(activeWorkspaceId, activeRequest.id);
+        const { count } = await historyApi.count(activeWorkspaceId, activeRequestId);
         if (!canceled) setHistoryCount(count);
       } catch {
         if (!canceled) setHistoryCount(0);
@@ -318,7 +346,7 @@ export function RequestBuilder() {
       canceled = true;
       window.removeEventListener('history:updated', handleHistoryUpdate);
     };
-  }, [activeWorkspaceId, activeRequest?.id]);
+  }, [activeWorkspaceId, activeRequestId]);
 
   const variableResolutionReady = useMemo(() => {
     if (workspaceVariablesLoading) return false;
@@ -327,8 +355,8 @@ export function RequestBuilder() {
     return !serviceVariablesLoading;
   }, [activeRequest?.serviceId, serviceVariablesLoading, serviceVariablesServiceId, workspaceVariablesLoading]);
 
-  const resolvedVariableLookup = useMemo<Map<string, ResolvedVariable>>(() => {
-    const map = new Map<string, ResolvedVariable>();
+  const resolvedVariableLookup = useMemo<Map<string, ResolvedVariableInfo>>(() => {
+    const map = new Map<string, ResolvedVariableInfo>();
 
     const scopedWorkspaceLookup = buildScopedWorkspaceLookup(
       workspaceVariables,
@@ -363,6 +391,7 @@ export function RequestBuilder() {
         map.set(key.trim().toLowerCase(), {
           value: variable.value,
           source: variable.source ? `runtime (${variable.source})` : 'runtime',
+          isSecret: map.get(key.trim().toLowerCase())?.isSecret,
         });
       }
     }
@@ -410,31 +439,66 @@ export function RequestBuilder() {
     if (!activeRequest) {
       return {
         value: '',
+        maskedValue: '',
         missingVariables: [] as string[],
+        hasSecrets: false,
       };
     }
 
     const missingVariables = new Set<string>();
+    const maskedMissingVariables = new Set<string>();
+    const secretVariables = new Set<string>();
+    const maskedSecretVariables = new Set<string>();
     let resolvedUrl = resolveVariablesInText(activeRequest.url, resolvedVariableLookup, missingVariables);
+    let maskedUrl = resolveVariablesInText(
+      activeRequest.url,
+      resolvedVariableLookup,
+      maskedMissingVariables,
+      maskedSecretVariables,
+      true,
+    );
 
     const queryParts: string[] = [];
+    const maskedQueryParts: string[] = [];
     for (const param of activeRequest.params) {
       if (!param.enabled) continue;
 
       const key = resolveVariablesInText(param.key, resolvedVariableLookup, missingVariables);
       const value = resolveVariablesInText(param.value, resolvedVariableLookup, missingVariables);
+      const maskedKey = resolveVariablesInText(
+        param.key,
+        resolvedVariableLookup,
+        maskedMissingVariables,
+        maskedSecretVariables,
+        true,
+      );
+      const maskedValue = resolveVariablesInText(
+        param.value,
+        resolvedVariableLookup,
+        maskedMissingVariables,
+        maskedSecretVariables,
+        true,
+      );
       queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+      maskedQueryParts.push(`${encodeURIComponent(maskedKey)}=${encodeURIComponent(maskedValue)}`);
     }
 
     if (queryParts.length > 0) {
       resolvedUrl += (resolvedUrl.includes('?') ? '&' : '?') + queryParts.join('&');
+      maskedUrl += (maskedUrl.includes('?') ? '&' : '?') + maskedQueryParts.join('&');
     }
 
     return {
       value: resolvedUrl,
+      maskedValue: maskedUrl,
       missingVariables: variableResolutionReady ? [...missingVariables] : [],
+      hasSecrets: secretVariables.size > 0 || maskedSecretVariables.size > 0,
     };
   }, [activeRequest, resolvedVariableLookup, variableResolutionReady]);
+
+  useEffect(() => {
+    setShowResolvedUrlSecrets(false);
+  }, [activeRequest?.id, resolvedUrlPreview.value]);
 
   const urlVariableStates = useMemo<Record<string, UrlVariableState>>(
     () => Object.fromEntries(
@@ -461,6 +525,7 @@ export function RequestBuilder() {
   }
 
   const serviceAuth = services.find((service) => service.id === activeRequest.serviceId)?.auth ?? null;
+  const requestIsDirty = isRequestDirty(activeRequest.id);
 
   const handleSend = () => sendRequest(activeWorkspaceId);
 
@@ -577,6 +642,15 @@ export function RequestBuilder() {
             </button>
           ) : (
             <div className="flex items-center gap-1">
+              {requestIsDirty && (
+                <button
+                  onClick={() => { void saveRequest(activeRequest.id); }}
+                  className="border border-amber-700 bg-amber-950/30 px-2.5 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-950/50 whitespace-nowrap"
+                  title="Save request (Ctrl/Cmd+S)"
+                >
+                  Save
+                </button>
+              )}
               <button
                 onClick={handleSend}
                 className="border border-[#ff6c37] bg-[#ff6c37] px-3 py-1 text-sm font-semibold text-white hover:bg-[#f95e26] whitespace-nowrap"
@@ -624,8 +698,19 @@ export function RequestBuilder() {
               resolvedUrlPreview.missingVariables.length > 0 ? 'text-amber-300' : 'text-gray-400'
             }`}
           >
-            {resolvedUrlPreview.value || activeRequest.url || 'Enter URL to preview resolution'}
+            {showResolvedUrlSecrets || !resolvedUrlPreview.hasSecrets
+              ? resolvedUrlPreview.value || activeRequest.url || 'Enter URL to preview resolution'
+              : resolvedUrlPreview.maskedValue || activeRequest.url || 'Enter URL to preview resolution'}
           </span>
+          {resolvedUrlPreview.hasSecrets && (
+            <button
+              type="button"
+              onClick={() => setShowResolvedUrlSecrets((current) => !current)}
+              className="flex-shrink-0 text-[10px] text-amber-300 hover:text-amber-200"
+            >
+              {showResolvedUrlSecrets ? 'Hide secrets' : 'Reveal secrets'}
+            </button>
+          )}
         </div>
         <div className="mt-1 text-[10px] text-amber-300/80">
           cURL and code snapshots resolve variables and may contain secrets.
@@ -670,6 +755,8 @@ export function RequestBuilder() {
             dynamicSuggestions={dynamicSuggestions}
             helpSection="http"
             helpTitle="Open query parameter documentation"
+            resolvedVariables={resolvedVariableLookup}
+            variableResolutionReady={variableResolutionReady}
           />
         )}
         {activeRequestTab === 'headers' && (
@@ -683,6 +770,8 @@ export function RequestBuilder() {
             dynamicSuggestions={dynamicSuggestions}
             helpSection="http"
             helpTitle="Open header documentation"
+            resolvedVariables={resolvedVariableLookup}
+            variableResolutionReady={variableResolutionReady}
           />
         )}
         {activeRequestTab === 'variables' && (
@@ -690,6 +779,8 @@ export function RequestBuilder() {
             entries={activeRequest.variables}
             onChange={handleVariablesChange}
             dynamicSuggestions={dynamicSuggestions}
+            resolvedVariables={resolvedVariableLookup}
+            variableResolutionReady={variableResolutionReady}
           />
         )}
         {activeRequestTab === 'body' && (
@@ -699,6 +790,8 @@ export function RequestBuilder() {
             requestId={activeRequest.id}
             onChange={handleBodyChange}
             dynamicSuggestions={dynamicSuggestions}
+            resolvedVariables={resolvedVariableLookup}
+            variableResolutionReady={variableResolutionReady}
           />
         )}
         {activeRequestTab === 'auth' && (
@@ -707,6 +800,8 @@ export function RequestBuilder() {
             serviceAuth={serviceAuth}
             onUpdate={updateRequest}
             dynamicSuggestions={dynamicSuggestions}
+            resolvedVariables={resolvedVariableLookup}
+            variableResolutionReady={variableResolutionReady}
           />
         )}
         {activeRequestTab === 'pre-script' && (
@@ -750,7 +845,7 @@ export function RequestBuilder() {
           variables={activeRequest.variables.map(v => ({ key: v.key, value: v.value, enabled: v.enabled }))}
           auth={activeRequest.auth ? { authType: activeRequest.auth.authType, configJson: activeRequest.auth.configJson } : null}
           workspaceId={activeWorkspaceId}
-          serviceId={activeRequest.serviceId}
+          serviceId={activeRequest.serviceId ?? undefined}
           requestId={activeRequest.id}
         />
       )}

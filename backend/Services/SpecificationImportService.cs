@@ -44,7 +44,9 @@ public class SpecificationImportService
                 : detectedTitle;
         }
 
-        var serviceId = await ResolveTargetServiceIdAsync(workspaceId, request.ServiceId, serviceName!);
+        var serviceId = request.TopLevel
+            ? null
+            : await ResolveTargetServiceIdAsync(workspaceId, request.ServiceId, serviceName!);
         var createdRequests = 0;
 
         foreach (var operation in operations)
@@ -59,7 +61,16 @@ public class SpecificationImportService
                 _ => null,
             };
 
-            var created = await _requestRepository.CreateAsync(serviceId, new CreateApiRequestRequest
+            var created = serviceId == null
+                ? await _requestRepository.CreateTopLevelAsync(workspaceId, new CreateApiRequestRequest
+                {
+                    Name = operation.Name,
+                    Method = operation.Method,
+                    Url = BuildImportedUrl(serverUrl, operation.Path),
+                    Body = bodyTemplate,
+                    BodyType = operation.BodyType,
+                })
+                : await _requestRepository.CreateAsync(serviceId, new CreateApiRequestRequest
             {
                 Name = operation.Name,
                 Method = operation.Method,
@@ -107,7 +118,7 @@ public class SpecificationImportService
 
         return new ImportSpecificationResult
         {
-            ServiceId = serviceId,
+            ServiceId = serviceId ?? "",
             CreatedRequests = createdRequests,
             Warnings = warnings,
         };
@@ -131,7 +142,9 @@ public class SpecificationImportService
         }
         if (string.IsNullOrWhiteSpace(serviceName)) serviceName = "WSDL Import";
 
-        var serviceId = await ResolveTargetServiceIdAsync(workspaceId, request.ServiceId, serviceName!);
+        var serviceId = request.TopLevel
+            ? null
+            : await ResolveTargetServiceIdAsync(workspaceId, request.ServiceId, serviceName!);
 
         var endpoint = doc.Descendants(soap + "address").Attributes("location").Select(a => a.Value).FirstOrDefault();
         if (string.IsNullOrWhiteSpace(endpoint))
@@ -160,7 +173,16 @@ public class SpecificationImportService
         {
             var body = BuildSoapEnvelope(targetNamespace, operation);
 
-            var created = await _requestRepository.CreateAsync(serviceId, new CreateApiRequestRequest
+            var created = serviceId == null
+                ? await _requestRepository.CreateTopLevelAsync(workspaceId, new CreateApiRequestRequest
+                {
+                    Name = operation,
+                    Method = "POST",
+                    Url = endpoint,
+                    Body = body,
+                    BodyType = "xml",
+                })
+                : await _requestRepository.CreateAsync(serviceId, new CreateApiRequestRequest
             {
                 Name = operation,
                 Method = "POST",
@@ -191,7 +213,7 @@ public class SpecificationImportService
 
         return new ImportSpecificationResult
         {
-            ServiceId = serviceId,
+            ServiceId = serviceId ?? "",
             CreatedRequests = createdRequests,
             Warnings = warnings,
         };

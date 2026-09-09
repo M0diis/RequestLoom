@@ -60,7 +60,7 @@ public class ImportsController : ControllerBase
     }
 
     [HttpPost("bruno")]
-    public async Task<IActionResult> ImportBruno(string workspaceId, [FromForm] IFormFileCollection files, [FromForm] string? serviceId, [FromForm] string? serviceName)
+    public async Task<IActionResult> ImportBruno(string workspaceId, [FromForm] IFormFileCollection files, [FromForm] string? serviceId, [FromForm] string? serviceName, [FromForm] bool topLevel = false)
     {
         try
         {
@@ -76,7 +76,7 @@ public class ImportsController : ControllerBase
                 });
             }
 
-            var result = await _collectionImportService.ImportBrunoAsync(workspaceId, importedFiles, serviceId, serviceName);
+            var result = await _collectionImportService.ImportBrunoAsync(workspaceId, importedFiles, serviceId, serviceName, topLevel);
             return Ok(result);
         }
         catch (Exception ex)

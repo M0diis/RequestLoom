@@ -64,6 +64,11 @@ public class MockServerService
             return ErrorResponse(404, "Mock server not found");
         }
 
+        if (!server.IsRunning)
+        {
+            return ErrorResponse(503, "Mock server is stopped");
+        }
+
         var endpoint = MatchEndpoint(server.Endpoints, method, path);
         if (endpoint == null)
         {

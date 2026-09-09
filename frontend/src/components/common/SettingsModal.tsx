@@ -58,6 +58,8 @@ const TABS: { id: TabId; label: string }[] = [
 
 const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: 'Ctrl / Cmd + Enter', action: 'Send the current request' },
+  { keys: 'Ctrl / Cmd + S', action: 'Save the current request' },
+  { keys: 'Ctrl / Cmd + N', action: 'Create a new top-level request' },
   { keys: 'Ctrl / Cmd + Alt + 1', action: 'Switch to Services panel' },
   { keys: 'Ctrl / Cmd + Alt + 2', action: 'Switch to Variables panel' },
   { keys: 'Ctrl / Cmd + Alt + 3', action: 'Switch to Mock Servers panel' },
@@ -71,6 +73,7 @@ export function SettingsModal({ onClose }: Props) {
   const [selectedMode, setSelectedMode] = useState<StorageMode>('sqlite');
   const [selectedJsonStrategy, setSelectedJsonStrategy] = useState<JsonStorageStrategy>('single');
   const [timeoutSec, setTimeoutSec] = useState('120');
+  const [autoSave, setAutoSave] = useState(true);
   const [followRedirects, setFollowRedirects] = useState(true);
   const [maxRedirects, setMaxRedirects] = useState('10');
   const [maxSizeMb, setMaxSizeMb] = useState('0');
@@ -99,6 +102,7 @@ export function SettingsModal({ onClose }: Props) {
     setSelectedMode(settings.storageMode);
     setSelectedJsonStrategy(settings.jsonStorageStrategy);
     setTimeoutSec(String(Math.round(settings.requestTimeoutMs / 1000)));
+    setAutoSave(settings.autoSave);
     setFollowRedirects(settings.followRedirects);
     setMaxRedirects(String(settings.maxRedirects));
     setMaxSizeMb(String(settings.maxResponseBodySizeMb));
@@ -142,6 +146,7 @@ export function SettingsModal({ onClose }: Props) {
       storageMode: selectedMode,
       jsonStorageStrategy: selectedJsonStrategy,
       requestTimeoutMs: Math.round(timeout * 1000),
+      autoSave,
       followRedirects,
       maxRedirects: redirectLimit,
       ignoreSslErrors: ignoreSsl,
@@ -323,6 +328,24 @@ export function SettingsModal({ onClose }: Props) {
                 <>
                   <section>
                     <label className={SECTION_LABEL}>Requests</label>
+                    <label className="flex cursor-pointer items-start gap-2 text-xs text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={autoSave}
+                        onChange={(e) => {
+                          setAutoSave(e.target.checked);
+                          setSaved(null);
+                        }}
+                        disabled={busy}
+                        className={`${UNCHECKED_CHECKBOX} mt-0.5 shrink-0`}
+                      />
+                      <span>
+                        <span className="block">Auto-save request changes</span>
+                        <span className="mt-0.5 block text-[11px] text-gray-500">
+                          When disabled, use Save in the request toolbar or Ctrl / Cmd + S.
+                        </span>
+                      </span>
+                    </label>
                     <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-300">
                       <input
                         type="checkbox"

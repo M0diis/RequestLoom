@@ -73,6 +73,17 @@ public class JsonDataStore
                 }
             }
 
+            // Older single-file JSON data did not persist request workspace IDs.
+            // Fill them from the owning collection before SQLite migration or export.
+            foreach (var request in _doc.Requests.Where(row => row.ServiceId != null && string.IsNullOrWhiteSpace(row.WorkspaceId)))
+            {
+                var service = _doc.Services.FirstOrDefault(row => row.Id == request.ServiceId);
+                if (service != null)
+                {
+                    request.WorkspaceId = service.WorkspaceId;
+                }
+            }
+
             SaveLocked();
             _logger.LogInformation("JSON store ready at {Path} ({Strategy})", _filePath, IsPerCollection ? "per collection" : "single file");
         }
@@ -395,9 +406,11 @@ public class JsonDataStore
         var legacyFolders = _doc.RequestFolders.ToList();
         var legacySettings = _doc.RequestSettings.ToList();
         var legacyVariables = _doc.ServiceVariables.ToList();
-        _doc.Requests = [];
+        _doc.Requests = legacyRequests.Where(row => row.ServiceId == null).ToList();
         _doc.RequestFolders = [];
-        _doc.RequestSettings = [];
+        _doc.RequestSettings = legacySettings
+            .Where(row => legacyRequests.Any(request => request.Id == row.RequestId && request.ServiceId == null))
+            .ToList();
         _doc.ServiceVariables = [];
 
         foreach (var service in _doc.Services)
@@ -413,7 +426,12 @@ public class JsonDataStore
                         File.ReadAllText(service.StoragePath), JsonOptions);
                     if (collection != null)
                     {
-                        _doc.Requests.AddRange(collection.Requests.Where(row => row.ServiceId == service.Id));
+                        var serviceRequests = collection.Requests.Where(row => row.ServiceId == service.Id).ToList();
+                        foreach (var request in serviceRequests)
+                        {
+                            if (string.IsNullOrWhiteSpace(request.WorkspaceId)) request.WorkspaceId = service.WorkspaceId;
+                        }
+                        _doc.Requests.AddRange(serviceRequests);
                         _doc.RequestFolders.AddRange(collection.RequestFolders.Where(row => row.ServiceId == service.Id));
                         _doc.RequestSettings.AddRange(collection.RequestSettings.Where(row => row.RequestId != ""));
                         _doc.ServiceVariables.AddRange(collection.ServiceVariables.Where(row => row.ServiceId == service.Id));
@@ -426,7 +444,12 @@ public class JsonDataStore
                 }
             }
 
-            _doc.Requests.AddRange(legacyRequests.Where(row => row.ServiceId == service.Id));
+            var legacyServiceRequests = legacyRequests.Where(row => row.ServiceId == service.Id).ToList();
+            foreach (var request in legacyServiceRequests)
+            {
+                if (string.IsNullOrWhiteSpace(request.WorkspaceId)) request.WorkspaceId = service.WorkspaceId;
+            }
+            _doc.Requests.AddRange(legacyServiceRequests);
             _doc.RequestFolders.AddRange(legacyFolders.Where(row => row.ServiceId == service.Id));
             _doc.RequestSettings.AddRange(legacySettings.Where(row => legacyRequests.Any(request => request.Id == row.RequestId && request.ServiceId == service.Id)));
             _doc.ServiceVariables.AddRange(legacyVariables.Where(row => row.ServiceId == service.Id));
@@ -470,6 +493,10 @@ public class JsonDataStore
             EnvironmentVariables = document.EnvironmentVariables,
             Services = document.Services,
             WorkspaceVariables = document.WorkspaceVariables,
+            Requests = document.Requests.Where(row => row.ServiceId == null).ToList(),
+            RequestSettings = document.RequestSettings
+                .Where(row => document.Requests.Any(request => request.Id == row.RequestId && request.ServiceId == null))
+                .ToList(),
             History = document.History,
             MockServers = document.MockServers,
         };

@@ -293,7 +293,10 @@ public partial class ToolsService
         var workspaceId = input.WorkspaceId ?? service?.WorkspaceId ?? "default";
 
         var requestVariables = MergeRequestVariables(persistedRequest?.Variables, input.Variables);
-        var runtimeVariables = _runtimeVariableStore.Get(workspaceId, input.RequestId);
+        var runtimeVariables = _runtimeVariableStore.Get(
+            workspaceId,
+            serviceId,
+            input.RequestId);
         var session = await _variableService.CreateSessionAsync(
             workspaceId,
             serviceId,

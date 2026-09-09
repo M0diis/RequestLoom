@@ -3,6 +3,8 @@ import { CodeEditor } from '../common/CodeEditor';
 import { MultipartFormEditor } from './MultipartFormEditor';
 import { createEmptyMultipartBody } from './multipartUtils';
 import { DocHelpButton } from '../documentation/DocumentationLink';
+import { VariablePreview } from '../common/VariablePreview';
+import type { ResolvedVariableLookup } from '../common/variablePreviewUtils';
 
 interface Props {
   body: string | null;
@@ -10,6 +12,8 @@ interface Props {
   requestId: string;
   onChange: (body: string | null, bodyType: BodyType) => void;
   dynamicSuggestions?: string[];
+  resolvedVariables?: ResolvedVariableLookup;
+  variableResolutionReady?: boolean;
 }
 
 const BODY_TYPES: { value: BodyType; label: string }[] = [
@@ -28,7 +32,7 @@ const LANGUAGE_MAP: Record<string, string> = {
   form: 'plaintext',
 };
 
-export function BodyEditor({ body, bodyType, requestId, onChange, dynamicSuggestions = [] }: Props) {
+export function BodyEditor({ body, bodyType, requestId, onChange, dynamicSuggestions = [], resolvedVariables, variableResolutionReady = true }: Props) {
   const changeBodyType = (nextType: BodyType) => {
     if (nextType === 'none') {
       onChange(null, nextType);
@@ -97,12 +101,19 @@ export function BodyEditor({ body, bodyType, requestId, onChange, dynamicSuggest
           onChange={(value) => onChange(value, bodyType)}
         />
       ) : (
-        <div className="flex-1 min-h-[200px] overflow-hidden border border-gray-700 bg-gray-900">
-          <CodeEditor
-            language={LANGUAGE_MAP[bodyType] || 'plaintext'}
+        <div className="flex min-h-[200px] flex-1 flex-col gap-1">
+          <div className="min-h-0 flex-1 overflow-hidden border border-gray-700 bg-gray-900">
+            <CodeEditor
+              language={LANGUAGE_MAP[bodyType] || 'plaintext'}
+              value={body ?? ''}
+              onChange={(value) => onChange(value, bodyType)}
+              dynamicSuggestions={dynamicSuggestions}
+            />
+          </div>
+          <VariablePreview
             value={body ?? ''}
-            onChange={(value) => onChange(value, bodyType)}
-            dynamicSuggestions={dynamicSuggestions}
+            variables={resolvedVariables}
+            ready={variableResolutionReady}
           />
         </div>
       )}

@@ -217,14 +217,16 @@ const FEATURE_CARDS = [
 const AUTOMATION_CARDS = [
   { title: 'Variables', text: 'Use {{variable}} in URLs, query parameters, headers, bodies, and scripts. Keep secrets scoped and reusable.', code: '{{base_url}}/users/{{user_id}}' },
   { title: 'Pre-request scripts', text: 'Run before the request to set variables, change the URL or method, and update headers, params, or body.', code: 'setHeader("Authorization", "Bearer " + getVar("token"));' },
-  { title: 'Post-request scripts', text: 'Run after a response to extract values and prepare the next request in a chain.', code: 'setVar("user_id", JSON.parse(getResponseBody()).id);' },
+  { title: 'Post-request scripts', text: 'Run after a response to extract values and prepare the next request in a chain.', code: 'setServiceVar("user_id", JSON.parse(getResponseBody()).id);' },
   { title: 'Tests', text: 'Add named assertions that run after the response and appear beside the response details.', code: 'test("Created", () => expect(response.status).toBe(201));' },
 ] as const;
 
 const SCRIPT_API = [
-  { fn: 'setVar(key, value)', stage: 'pre · post', desc: 'Create or update a runtime variable for this request session.' },
+  { fn: 'setVar(key, value)', stage: 'pre · post', desc: 'Create or update a request-scoped runtime variable.' },
+  { fn: 'setServiceVar(key, value, persist?)', stage: 'pre · post', desc: 'Create or update a shared runtime variable; persist it as a service variable when true.' },
   { fn: 'getVar(key)', stage: 'pre · post', desc: 'Read a resolved variable value.' },
-  { fn: 'unsetVar(key)', stage: 'pre · post', desc: 'Remove a runtime variable.' },
+  { fn: 'unsetVar(key)', stage: 'pre · post', desc: 'Remove a request-scoped runtime variable.' },
+  { fn: 'unsetServiceVar(key)', stage: 'pre · post', desc: 'Remove a service-scoped runtime variable.' },
   { fn: 'setHeader(key, value)', stage: 'pre', desc: 'Add or replace an outgoing request header.' },
   { fn: 'removeHeader(key)', stage: 'pre', desc: 'Remove an outgoing request header.' },
   { fn: 'setParam(key, value)', stage: 'pre', desc: 'Add or replace a query parameter.' },
@@ -823,7 +825,7 @@ function AutomationContent() {
               ['02', 'Environment', 'Active-environment workspace values override workspace-wide values.'],
               ['03', 'Service', 'Service values override workspace values; active-environment service values override service-wide values.'],
               ['04', 'Request', 'Request variables override service and workspace values.'],
-              ['05', 'Runtime', 'Values created by scripts with setVar() have the highest precedence for the request session.'],
+              ['05', 'Runtime', 'setVar() creates request-scoped values; setServiceVar() creates shared values and can persist them as service variables with true.'],
             ].map(([number, title, text]) => <div key={number} className="flex gap-3 border-b border-gray-800/80 py-2.5 last:border-0"><span className="font-mono text-[10px] text-[#ffbca3]">{number}</span><div><div className="text-xs font-semibold text-gray-200">{title}</div><div className="mt-1 text-[11px] leading-5 text-gray-500">{text}</div></div></div>)}
           </div>
           <div className="mt-4 border border-gray-800 bg-gray-950/50 p-3 font-mono text-[11px] leading-5 text-gray-400"><span className="text-gray-600">URL</span>  <span className="text-[#ffbca3]">{'{{base_url}}'}</span>/users/<span className="text-[#ffbca3]">{'{{user_id}}'}</span><br /><span className="text-gray-600">JSON</span> <span className="text-gray-500">{'{ "email": "{{email}}" }'}</span></div>

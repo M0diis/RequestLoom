@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RequestLoom.Api.Data;
 using RequestLoom.Api.Data.Entities;
@@ -76,6 +77,7 @@ public class ExportImportService
         var workspaceVars = (await _workspaceVariables.GetByWorkspaceAsync(workspaceId)).ToList();
 
         var services = (await _services.GetByWorkspaceAsync(workspaceId)).ToList();
+        var topLevelRequests = await _requests.GetByWorkspaceIdAsync(workspaceId);
 
         var serviceExports = new List<ServiceExport>();
         foreach (var svc in services)
@@ -118,6 +120,7 @@ public class ExportImportService
         }
 
         var history = (await _history.GetByWorkspaceAsync(workspaceId, limit: 500)).ToList();
+        var topLevelExports = await BuildRequestExportsAsync(topLevelRequests);
 
         return new WorkspaceExport
         {
@@ -125,6 +128,7 @@ public class ExportImportService
             Environments = envExports,
             WorkspaceVariables = workspaceVars,
             Services = serviceExports,
+            TopLevelRequests = topLevelExports,
             History = history,
         };
     }
@@ -256,7 +260,7 @@ public class ExportImportService
         var req = await _requests.GetByIdAsync(requestId)
             ?? throw new InvalidOperationException("Request not found");
 
-        var service = await _services.GetByIdAsync(req.ServiceId);
+        var service = req.ServiceId == null ? null : await _services.GetByIdAsync(req.ServiceId);
         var folderNames = service?.Folders.ToDictionary(folder => folder.Id, folder => folder.Name)
             ?? new Dictionary<string, string>();
         return await BuildRequestExportAsync(req, folderNames);
@@ -301,6 +305,17 @@ public class ExportImportService
             Auth = BuildRequestAuth(req.Auth),
             Settings = settings,
         };
+    }
+
+    private async Task<List<RequestExport>> BuildRequestExportsAsync(IEnumerable<ApiRequest> requests)
+    {
+        var exports = new List<RequestExport>();
+        foreach (var request in requests)
+        {
+            exports.Add(await BuildRequestExportAsync(request));
+        }
+
+        return exports;
     }
 
     private static AuthRequest? BuildRequestAuth(RequestAuth? auth)
@@ -410,7 +425,33 @@ public class ExportImportService
                 CreatedAt = DateTime.UtcNow.ToString("o"),
             });
 
-            await ImportServiceDetailsAsync(serviceId, svc, envNameToId);
+            await ImportServiceDetailsAsync(workspaceId, serviceId, svc, envNameToId);
+        }
+
+        foreach (var req in data.TopLevelRequests)
+        {
+            var requestId = Guid.NewGuid().ToString("N");
+            _db.Requests.Add(new ApiRequestRow
+            {
+                Id = requestId,
+                WorkspaceId = workspaceId,
+                ServiceId = null,
+                FolderId = null,
+                Name = req.Name,
+                Method = req.Method,
+                Url = req.Url,
+                Body = req.Body,
+                BodyType = req.BodyType,
+                PreRequestScript = req.PreRequestScript,
+                PostRequestScript = req.PostRequestScript,
+                Notes = req.Notes,
+                TestScript = "",
+                SortOrder = req.SortOrder,
+                IsFavorite = req.IsFavorite,
+                CreatedAt = DateTime.UtcNow.ToString("o"),
+                UpdatedAt = DateTime.UtcNow.ToString("o"),
+            });
+            ImportRequestDetailsAsync(requestId, req);
         }
 
         // History
@@ -426,10 +467,20 @@ public class ExportImportService
                 RequestHeadersJson = h.RequestHeadersJson,
                 RequestBody = h.RequestBody,
                 ResponseStatus = h.ResponseStatus,
+                StatusText = h.StatusText,
                 ResponseHeadersJson = h.ResponseHeadersJson,
                 ResponseBody = h.ResponseBody,
+                ContentType = h.ContentType,
                 ResponseTimeMs = h.ResponseTimeMs,
                 ResponseSizeBytes = h.ResponseSizeBytes,
+                IsTruncated = h.IsTruncated,
+                Error = h.Error,
+                IsSoapFault = h.IsSoapFault,
+                SoapFaultJson = JsonSerializer.Serialize(h.SoapFault),
+                ScriptVariablesJson = JsonSerializer.Serialize(h.ScriptVariables),
+                ServiceScriptVariablesJson = JsonSerializer.Serialize(h.ServiceScriptVariables),
+                ScriptLogsJson = JsonSerializer.Serialize(h.ScriptLogs),
+                TestResultsJson = JsonSerializer.Serialize(h.TestResults),
                 ExecutedAt = string.IsNullOrEmpty(h.ExecutedAt) ? DateTime.UtcNow.ToString("o") : h.ExecutedAt,
             });
         }
@@ -437,7 +488,7 @@ public class ExportImportService
         await _db.SaveChangesAsync();
     }
 
-    private async Task ImportServiceDetailsAsync(string serviceId, ServiceExport svc, Dictionary<string, string> envNameToId)
+    private async Task ImportServiceDetailsAsync(string workspaceId, string serviceId, ServiceExport svc, Dictionary<string, string> envNameToId)
     {
         foreach (var h in svc.Headers.Where(h => !string.IsNullOrWhiteSpace(h.Key)))
         {
@@ -509,6 +560,7 @@ public class ExportImportService
             _db.Requests.Add(new ApiRequestRow
             {
                 Id = requestId,
+                WorkspaceId = workspaceId,
                 ServiceId = serviceId,
                 FolderId = folderId,
                 Name = req.Name,
@@ -868,6 +920,82 @@ public class ExportImportService
             }
         }
 
+        foreach (var req in data.TopLevelRequests)
+        {
+            var requestId = Guid.NewGuid().ToString("N");
+            var request = new ApiRequest
+            {
+                Id = requestId,
+                WorkspaceId = workspaceId,
+                ServiceId = null,
+                FolderId = null,
+                Name = req.Name,
+                Method = req.Method,
+                Url = req.Url,
+                Body = req.Body,
+                BodyType = req.BodyType,
+                PreRequestScript = req.PreRequestScript,
+                PostRequestScript = req.PostRequestScript,
+                Notes = req.Notes,
+                TestScript = "",
+                SortOrder = req.SortOrder,
+                IsFavorite = req.IsFavorite,
+                CreatedAt = JsonDataStore.Now(),
+                UpdatedAt = JsonDataStore.Now(),
+                Headers = req.Headers
+                    .Where(h => !string.IsNullOrWhiteSpace(h.Key))
+                    .Select(h => new KeyValuePair
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Key = h.Key.Trim(),
+                        Value = h.Value ?? "",
+                        Enabled = h.Enabled,
+                    }).ToList(),
+                Params = req.Params
+                    .Where(p => !string.IsNullOrWhiteSpace(p.Key))
+                    .Select(p => new KeyValuePair
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Key = p.Key.Trim(),
+                        Value = p.Value ?? "",
+                        Enabled = p.Enabled,
+                    }).ToList(),
+                Variables = req.Variables.Select(v => new RequestVariable
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    RequestId = requestId,
+                    Key = v.Key,
+                    Value = v.Value,
+                    Enabled = v.Enabled,
+                }).ToList(),
+            };
+
+            if (req.Auth != null && !string.IsNullOrWhiteSpace(req.Auth.AuthType)
+                && !string.Equals(req.Auth.AuthType, "none", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(req.Auth.AuthType, "inherit", StringComparison.OrdinalIgnoreCase))
+            {
+                request.Auth = new RequestAuth
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    RequestId = requestId,
+                    AuthType = req.Auth.AuthType,
+                    ConfigJson = req.Auth.ConfigJson ?? "{}",
+                };
+            }
+
+            doc.Requests.Add(request);
+            if (req.Settings != null)
+            {
+                doc.RequestSettings.Add(new ApiRequestSettings
+                {
+                    RequestId = requestId,
+                    FollowRedirects = req.Settings.FollowRedirects,
+                    IgnoreSslErrors = req.Settings.IgnoreSslErrors,
+                    TimeoutSeconds = req.Settings.TimeoutSeconds,
+                });
+            }
+        }
+
         // History
         foreach (var h in data.History.Take(200))
         {
@@ -881,10 +1009,20 @@ public class ExportImportService
                 RequestHeadersJson = h.RequestHeadersJson,
                 RequestBody = h.RequestBody,
                 ResponseStatus = h.ResponseStatus,
+                StatusText = h.StatusText,
                 ResponseHeadersJson = h.ResponseHeadersJson,
                 ResponseBody = h.ResponseBody,
+                ContentType = h.ContentType,
                 ResponseTimeMs = h.ResponseTimeMs,
                 ResponseSizeBytes = h.ResponseSizeBytes,
+                IsTruncated = h.IsTruncated,
+                Error = h.Error,
+                IsSoapFault = h.IsSoapFault,
+                SoapFault = h.SoapFault,
+                ScriptVariables = h.ScriptVariables,
+                ServiceScriptVariables = h.ServiceScriptVariables,
+                ScriptLogs = h.ScriptLogs,
+                TestResults = h.TestResults,
                 ExecutedAt = h.ExecutedAt,
             });
         }

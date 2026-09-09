@@ -17,6 +17,13 @@ const api = axios.create({
   baseURL: '/api',
 });
 
+function notifyServiceVariablesUpdated(serviceId: string, invalidateRuntime = false) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('service-variables:updated', {
+    detail: { serviceId, invalidateRuntime },
+  }));
+}
+
 // Workspaces
 export const workspacesApi = {
   getAll: () => api.get<Workspace[]>('/workspaces').then(r => r.data),
@@ -90,12 +97,18 @@ export const requestsApi = {
   getById: (id: string) => api.get<ApiRequest>(`/requests/${id}`).then(r => r.data),
   create: (serviceId: string, data: { name: string; method: string; url: string; folderId?: string | null }) =>
     api.post<ApiRequest>(`/requests/service/${serviceId}`, data).then(r => r.data),
+  getTopLevel: (workspaceId: string) =>
+    api.get<ApiRequest[]>(`/requests/workspace/${workspaceId}/top-level`).then(r => r.data),
+  createTopLevel: (workspaceId: string, data: { name: string; method: string; url: string }) =>
+    api.post<ApiRequest>(`/requests/workspace/${workspaceId}`, data).then(r => r.data),
   update: (id: string, data: UpdateApiRequestPayload) =>
     api.put<ApiRequest>(`/requests/${id}`, data).then(r => r.data),
   duplicate: (id: string) => api.post<ApiRequest>(`/requests/${id}/duplicate`).then(r => r.data),
   toggleFavorite: (id: string) => api.post(`/requests/${id}/favorite`),
   moveToService: (id: string, newServiceId: string) =>
     api.post(`/requests/${id}/move/${newServiceId}`),
+  moveToTopLevel: (id: string) =>
+    api.post(`/requests/${id}/move/top-level`),
   moveToFolder: (id: string, folderId: string | null) =>
     api.put(`/requests/${id}/folder`, { folderId }),
   reorder: (id: string, folderId: string | null, beforeRequestId?: string | null) =>
@@ -172,9 +185,15 @@ export const serviceVariablesApi = {
       enabled: boolean;
     }
   ) =>
-    api.put<ServiceVariable>(`/services/${serviceId}/variables`, data).then(r => r.data),
+    api.put<ServiceVariable>(`/services/${serviceId}/variables`, data).then(r => {
+      notifyServiceVariablesUpdated(serviceId, true);
+      return r.data;
+    }),
   delete: (serviceId: string, id: string) =>
-    api.delete(`/services/${serviceId}/variables/${id}`),
+    api.delete(`/services/${serviceId}/variables/${id}`).then(r => {
+      notifyServiceVariablesUpdated(serviceId, true);
+      return r;
+    }),
 };
 
 // History
@@ -223,11 +242,12 @@ export const importsApi = {
     api.post<ImportSpecificationResult>(`/workspaces/${workspaceId}/imports/wsdl`, data).then(r => r.data),
   postman: (workspaceId: string, data: ImportSpecificationRequest) =>
     api.post<ImportSpecificationResult>(`/workspaces/${workspaceId}/imports/postman`, data).then(r => r.data),
-  bruno: (workspaceId: string, files: File[], serviceId?: string, serviceName?: string) => {
+  bruno: (workspaceId: string, files: File[], serviceId?: string, serviceName?: string, topLevel?: boolean) => {
     const form = new FormData();
     files.forEach(f => form.append('files', f));
     if (serviceId) form.append('serviceId', serviceId);
     if (serviceName) form.append('serviceName', serviceName);
+    if (topLevel) form.append('topLevel', 'true');
     return api.post<ImportSpecificationResult>(`/workspaces/${workspaceId}/imports/bruno`, form).then(r => r.data);
   },
 };

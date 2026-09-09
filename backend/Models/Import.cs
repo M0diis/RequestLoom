@@ -7,6 +7,7 @@ public class ImportSpecificationRequest
     public string Source { get; set; } = "";
     public string? ServiceId { get; set; }
     public string? ServiceName { get; set; }
+    public bool TopLevel { get; set; }
 }
 
 public class ImportSpecificationResult

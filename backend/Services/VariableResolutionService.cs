@@ -37,8 +37,8 @@ public class VariableResolutionService
     {
         var variables = await BuildVariableMapAsync(workspaceId, serviceId, requestVariables);
 
-        // Runtime variables are request-scoped and have the highest precedence,
-        // matching the existing execution behavior.
+        // Runtime variables have the highest precedence. Request-scoped
+        // runtime values override service-scoped runtime values.
         if (runtimeVariables != null)
         {
             foreach (var (key, value) in runtimeVariables)

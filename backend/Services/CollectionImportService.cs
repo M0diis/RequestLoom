@@ -38,7 +38,9 @@ public class CollectionImportService
             serviceName = string.IsNullOrWhiteSpace(detectedTitle) ? "Postman Import" : detectedTitle;
         }
 
-        var serviceId = await ResolveTargetServiceIdAsync(workspaceId, request.ServiceId, serviceName!);
+        var serviceId = request.TopLevel
+            ? null
+            : await ResolveTargetServiceIdAsync(workspaceId, request.ServiceId, serviceName!);
 
         if (root["variable"] is JsonArray variables && variables.Count > 0)
         {
@@ -58,11 +60,14 @@ public class CollectionImportService
         }
 
         var folderIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var targetService = await _serviceRepository.GetByIdAsync(serviceId)
-            ?? throw new InvalidOperationException("Service not found");
-        foreach (var folder in targetService.Folders)
+        if (serviceId != null)
         {
-            folderIds[folder.Name] = folder.Id;
+            var targetService = await _serviceRepository.GetByIdAsync(serviceId)
+                ?? throw new InvalidOperationException("Service not found");
+            foreach (var folder in targetService.Folders)
+            {
+                folderIds[folder.Name] = folder.Id;
+            }
         }
 
         foreach (var folderName in requests
@@ -71,6 +76,11 @@ public class CollectionImportService
             .Select(name => name!.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase))
         {
+            if (serviceId == null)
+            {
+                warnings.Add($"Folder '{folderName}' was flattened because top-level requests cannot use request folders.");
+                continue;
+            }
             if (folderIds.ContainsKey(folderName)) continue;
 
             var folder = await _serviceRepository.CreateFolderAsync(workspaceId, serviceId, folderName)
@@ -84,7 +94,7 @@ public class CollectionImportService
             var folderId = !string.IsNullOrWhiteSpace(folderName) && folderIds.TryGetValue(folderName.Trim(), out var resolvedFolderId)
                 ? resolvedFolderId
                 : null;
-            var created = await ImportPostmanRequestAsync(serviceId, name, requestObj, warnings, folderId);
+            var created = await ImportPostmanRequestAsync(workspaceId, serviceId, name, requestObj, warnings, folderId);
             if (created != null)
             {
                 createdRequests++;
@@ -93,13 +103,13 @@ public class CollectionImportService
 
         return new ImportSpecificationResult
         {
-            ServiceId = serviceId,
+            ServiceId = serviceId ?? "",
             CreatedRequests = createdRequests,
             Warnings = warnings,
         };
     }
 
-    public async Task<ImportSpecificationResult> ImportBrunoAsync(string workspaceId, IReadOnlyList<ImportedFile> files, string? serviceId, string? serviceName)
+    public async Task<ImportSpecificationResult> ImportBrunoAsync(string workspaceId, IReadOnlyList<ImportedFile> files, string? serviceId, string? serviceName, bool topLevel = false)
     {
         if (files.Count == 0)
         {
@@ -109,7 +119,9 @@ public class CollectionImportService
         var warnings = new List<string>();
 
         var effectiveName = string.IsNullOrWhiteSpace(serviceName) ? "Bruno Import" : serviceName!;
-        var targetServiceId = await ResolveTargetServiceIdAsync(workspaceId, serviceId, effectiveName);
+        var targetServiceId = topLevel
+            ? null
+            : await ResolveTargetServiceIdAsync(workspaceId, serviceId, effectiveName);
 
         var createdRequests = 0;
         foreach (var file in files)
@@ -121,7 +133,7 @@ public class CollectionImportService
                 continue;
             }
 
-            var created = await ImportBrunoRequestAsync(targetServiceId, file.FileName, content, warnings);
+            var created = await ImportBrunoRequestAsync(workspaceId, targetServiceId, file.FileName, content, warnings);
             if (created != null)
             {
                 createdRequests++;
@@ -135,7 +147,7 @@ public class CollectionImportService
 
         return new ImportSpecificationResult
         {
-            ServiceId = targetServiceId,
+            ServiceId = targetServiceId ?? "",
             CreatedRequests = createdRequests,
             Warnings = warnings,
         };
@@ -175,7 +187,7 @@ public class CollectionImportService
         }
     }
 
-    private async Task<ApiRequest?> ImportPostmanRequestAsync(string serviceId, string name, JsonObject requestObj, List<string> warnings, string? folderId = null)
+    private async Task<ApiRequest?> ImportPostmanRequestAsync(string workspaceId, string? serviceId, string name, JsonObject requestObj, List<string> warnings, string? folderId = null)
     {
         var method = NormalizeHttpMethod(requestObj["method"]?.GetValue<string>());
         if (method == null)
@@ -261,7 +273,7 @@ public class CollectionImportService
         var auth = requestObj["auth"];
         var authRequest = MapPostmanAuth(auth, warnings, name);
 
-        var created = await _requestRepository.CreateAsync(serviceId, new CreateApiRequestRequest
+        var createRequest = new CreateApiRequestRequest
         {
             Name = name,
             Method = method,
@@ -269,7 +281,10 @@ public class CollectionImportService
             Body = bodyText,
             BodyType = bodyType,
             FolderId = folderId,
-        });
+        };
+        var created = serviceId == null
+            ? await _requestRepository.CreateTopLevelAsync(workspaceId, createRequest)
+            : await _requestRepository.CreateAsync(serviceId, createRequest);
 
         if (headers.Count > 0 || paramsList.Count > 0 || authRequest != null)
         {
@@ -609,7 +624,7 @@ public class CollectionImportService
         }
     }
 
-    private async Task<ApiRequest?> ImportBrunoRequestAsync(string serviceId, string fileName, BrunoRequest request, List<string> warnings)
+    private async Task<ApiRequest?> ImportBrunoRequestAsync(string workspaceId, string? serviceId, string fileName, BrunoRequest request, List<string> warnings)
     {
         var name = string.IsNullOrWhiteSpace(request.Name) ? fileName.Replace(".bru", "", StringComparison.OrdinalIgnoreCase) : request.Name;
 
@@ -623,14 +638,17 @@ public class CollectionImportService
             .Select(p => new KeyValuePairRequest { Key = p.Key.Trim(), Value = p.Value, Enabled = true })
             .ToList();
 
-        var created = await _requestRepository.CreateAsync(serviceId, new CreateApiRequestRequest
+        var createRequest = new CreateApiRequestRequest
         {
             Name = name,
             Method = request.Method,
             Url = request.Url,
             Body = request.Body,
             BodyType = request.BodyType,
-        });
+        };
+        var created = serviceId == null
+            ? await _requestRepository.CreateTopLevelAsync(workspaceId, createRequest)
+            : await _requestRepository.CreateAsync(serviceId, createRequest);
 
         if (headers.Count > 0 || paramsList.Count > 0 || request.Auth != null)
         {

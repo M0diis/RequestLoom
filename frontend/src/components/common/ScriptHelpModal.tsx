@@ -11,9 +11,11 @@ const HELP_CONTENT = {
     title: 'Pre-request Script',
     description: 'Runs before the HTTP request is sent. Use it to set up variables, modify headers, or change the request dynamically.',
     api: [
-      { fn: 'setVar(key, value)', desc: 'Create/modify a runtime variable. Survives between requests in the same session.' },
+      { fn: 'setVar(key, value)', desc: 'Create/modify a request-scoped runtime variable.' },
+      { fn: 'setServiceVar(key, value, persist?)', desc: 'Create/modify a shared runtime variable; persist it as a service variable when true.' },
       { fn: 'getVar(key)', desc: 'Get a variable value. Returns null if not defined.' },
       { fn: 'unsetVar(key)', desc: 'Remove a runtime variable.' },
+      { fn: 'unsetServiceVar(key)', desc: 'Remove a service-scoped runtime variable.' },
       { fn: 'setUrl(url)', desc: 'Change the request URL.' },
       { fn: 'getUrl()', desc: 'Get the current request URL.' },
       { fn: 'setMethod(method)', desc: 'Change the HTTP method (GET, POST, etc).' },
@@ -49,7 +51,9 @@ log("Request ready: " + getMethod() + " " + getUrl());`,
     title: 'Post-request Script',
     description: 'Runs after a response is received. Use it to extract data, set variables for chaining, or process the response.',
     api: [
-      { fn: 'setVar(key, value)', desc: 'Store a value for use in subsequent requests.' },
+      { fn: 'setVar(key, value)', desc: 'Store a request-scoped value.' },
+      { fn: 'setServiceVar(key, value, persist?)', desc: 'Store a shared value; persist it as a service variable when true.' },
+      { fn: 'unsetServiceVar(key)', desc: 'Remove a service-scoped runtime variable.' },
       { fn: 'getVar(key)', desc: 'Get a variable value.' },
       { fn: 'getResponseStatus()', desc: 'Get the HTTP status code as a number.' },
       { fn: 'getResponseBody()', desc: 'Get the response body as a string.' },
@@ -77,10 +81,10 @@ if (status >= 400) {
     log("Request failed with status " + status);
 }
 
-// Store auth token for next request
+// Store auth token for the next request in this service
 var authHeader = getResponseHeader("Authorization");
 if (authHeader) {
-    setVar("auth_token", authHeader.replace("Bearer ", ""));
+    setServiceVar("auth_token", authHeader.replace("Bearer ", ""));
 }`,
     ],
   },

@@ -13,6 +13,7 @@ interface Props {
 const PRE_REQUEST_HELP = [
   'Pre-request script runs before variable resolution and sending.',
   'Use setVar("key", "value") to create request-scoped runtime variables.',
+  'Use setServiceVar("key", "value", true) to share a runtime variable and persist it as a service variable; omit true for runtime-only sharing.',
   'Resolved variables are available through vars; setBody(object) serializes JSON and changes the body type to JSON.',
   'Use setHeader / removeHeader / setParam / removeParam to shape the outgoing call.',
   'You can also use setUrl, setMethod, setBody, getVar and log.',
@@ -21,7 +22,8 @@ const PRE_REQUEST_HELP = [
 const POST_REQUEST_HELP = [
   'Post-request script runs after response is received.',
   'Use getResponseStatus(), getResponseBody(), getResponseHeader(name).',
-  'Use setVar("key", "value") to store runtime variables for the next execution of this request.',
+  'Use setVar("key", "value") to store request-scoped runtime variables.',
+  'Use setServiceVar("key", "value", true) to store a service variable; pass false or omit it for runtime-only sharing.',
 ].join(' ');
 
 const TEST_HELP = [

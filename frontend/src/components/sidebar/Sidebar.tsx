@@ -5,13 +5,13 @@ import { useUiStore } from '../../stores/uiStore';
 import { VariablesSidebarPanel } from '../variables/VariablesSidebarPanel';
 import { MockServersSidebarPanel } from '../mockserver/MockServersSidebarPanel';
 import { DocumentationSidebar } from '../documentation/DocumentationSidebar';
-import { ImportModal } from '../common/ImportModal';
 import { CollectionRunnerModal } from '../common/CollectionRunnerModal';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import { AlertModal } from '../common/AlertModal';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { TextInputModal } from '../common/TextInputModal';
 import { MoveRequestFolderModal } from '../common/MoveRequestFolderModal';
+import { MoveRequestCollectionModal } from '../common/MoveRequestCollectionModal';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useScriptFileStore, type ScriptFileEntry } from '../../stores/scriptFileStore';
 import { exportImportApi, requestsApi, serviceFilesApi } from '../../services/api';
@@ -30,6 +30,10 @@ const METHOD_COLORS: Record<string, string> = {
 const MENU_ITEM = 'group flex min-h-8 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] leading-4 text-gray-300 transition-colors hover:bg-gray-800/80 hover:text-gray-100 focus-visible:bg-gray-800/80 focus-visible:outline-none whitespace-nowrap';
 const MENU_DANGER = 'group flex min-h-8 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] leading-4 text-rose-300 transition-colors hover:bg-rose-950/40 hover:text-rose-200 focus-visible:bg-rose-950/40 focus-visible:outline-none whitespace-nowrap';
 const MENU_ICON = 'h-3.5 w-3.5 flex-shrink-0 text-gray-500 transition-colors group-hover:text-gray-300';
+const QUICK_FORM_ROW = 'grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5';
+const QUICK_FORM_INPUT = 'h-8 min-w-0 w-full border border-gray-600 bg-gray-900 px-2 text-xs text-gray-100 outline-none focus:border-[#ff6c37]';
+const QUICK_FORM_PRIMARY = 'h-8 border border-[#ff6c37] bg-[#ff6c37] px-2.5 text-[10px] font-semibold text-white transition-colors hover:bg-[#f95e26]';
+const QUICK_FORM_CANCEL = 'h-8 border border-gray-700 bg-gray-900 px-2 text-[10px] text-gray-400 transition-colors hover:border-gray-600 hover:bg-gray-800 hover:text-gray-200';
 
 type MenuIconName =
   | 'play'
@@ -125,11 +129,13 @@ function ContextMenuItem({ icon, children, onClick, danger = false }: ContextMen
 export function Sidebar() {
   const {
     services,
+    topLevelRequests,
     activeRequestId,
     selectRequest,
     createService,
     duplicateService,
     createRequest,
+    createTopLevelRequest,
     updateRequest,
     deleteService,
     deleteRequest,
@@ -144,6 +150,8 @@ export function Sidebar() {
     reorderFolders,
     moveRequestToFolder,
     reorderRequest,
+    moveRequestToService,
+    moveRequestToTopLevel,
   } = useRequestStore();
   const { activeWorkspaceId } = useWorkspaceStore();
   const {
@@ -165,13 +173,14 @@ export function Sidebar() {
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePath, setNewServicePath] = useState('');
   const [addingService, setAddingService] = useState(false);
+  const [addingTopLevelRequest, setAddingTopLevelRequest] = useState(false);
   const [addingRequestToService, setAddingRequestToService] = useState<string | null>(null);
   const [addingRequestToFolder, setAddingRequestToFolder] = useState<{ serviceId: string; folderId: string } | null>(null);
   const [newRequestName, setNewRequestName] = useState('');
   const [contextMenu, setContextMenu] = useState<{ type: 'service' | 'request' | 'folder' | 'script'; id: string; x: number; y: number } | null>(null);
   const [collapsedServices, setCollapsedServices] = useState<Set<string>>(new Set());
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
-  const [showImport, setShowImport] = useState(false);
+  const [topLevelCollapsed, setTopLevelCollapsed] = useState(false);
   const [showCollectionRunner, setShowCollectionRunner] = useState<{ serviceId: string; folderId?: string } | null>(null);
   const [renamingRequestId, setRenamingRequestId] = useState<string | null>(null);
   const [renamingRequestName, setRenamingRequestName] = useState('');
@@ -185,6 +194,7 @@ export function Sidebar() {
   } | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<{ serviceId: string; id: string; name: string } | null>(null);
   const [moveRequestId, setMoveRequestId] = useState<string | null>(null);
+  const [moveRequestToCollectionId, setMoveRequestToCollectionId] = useState<string | null>(null);
   const [showCodeForRequest, setShowCodeForRequest] = useState<ApiRequest | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [collectionAssetDialog, setCollectionAssetDialog] = useState<{
@@ -216,7 +226,8 @@ export function Sidebar() {
     return () => observer.disconnect();
   }, []);
 
-  const favorites = services.flatMap((s) => s.requests.filter((r) => r.isFavorite));
+  const favorites = [...topLevelRequests, ...services.flatMap((s) => s.requests)].filter((r) => r.isFavorite);
+  const allRequests = [...topLevelRequests, ...services.flatMap((service) => service.requests)];
 
   const toggleCollapse = (serviceId: string) => {
     setCollapsedServices((prev) => {
@@ -267,10 +278,58 @@ export function Sidebar() {
     }
   };
 
+  const handleAddTopLevelRequest = async () => {
+    if (!newRequestName.trim() || addRequestSubmitting.current) return;
+    addRequestSubmitting.current = true;
+    try {
+      const req = await createTopLevelRequest(activeWorkspaceId, newRequestName.trim(), 'GET');
+      setNewRequestName('');
+      setAddingTopLevelRequest(false);
+      setActiveScriptFile(null);
+      await selectRequest(req.id);
+    } finally {
+      addRequestSubmitting.current = false;
+    }
+  };
+
+  const closeTopLevelRequestComposer = () => {
+    setAddingTopLevelRequest(false);
+    setNewRequestName('');
+  };
+
+  const closeCollectionComposer = () => {
+    setAddingService(false);
+    setNewServiceName('');
+    setNewServicePath('');
+  };
+
+  const toggleTopLevelRequestComposer = () => {
+    if (addingTopLevelRequest) {
+      closeTopLevelRequestComposer();
+      return;
+    }
+
+    closeCollectionComposer();
+    setAddingTopLevelRequest(true);
+    setAddingRequestToService(null);
+    setAddingRequestToFolder(null);
+    setNewRequestName('');
+  };
+
+  const toggleCollectionComposer = () => {
+    if (addingService) {
+      closeCollectionComposer();
+      return;
+    }
+
+    closeTopLevelRequestComposer();
+    setAddingService(true);
+    setAddingRequestToService(null);
+    setAddingRequestToFolder(null);
+  };
+
   const startRenameRequest = (requestId: string) => {
-    const request = services
-      .flatMap((service) => service.requests)
-      .find((row) => row.id === requestId);
+    const request = allRequests.find((row) => row.id === requestId);
 
     if (!request) return;
 
@@ -285,9 +344,7 @@ export function Sidebar() {
 
   const commitRenameRequest = async (requestId: string, candidateName: string) => {
     const nextName = candidateName.trim();
-    const request = services
-      .flatMap((service) => service.requests)
-      .find((row) => row.id === requestId);
+    const request = allRequests.find((row) => row.id === requestId);
 
     if (!request) {
       cancelRenameRequest();
@@ -414,13 +471,41 @@ export function Sidebar() {
 
   const handleDropOnRequest = (event: React.DragEvent, target: ApiRequest) => {
     event.preventDefault();
+    event.stopPropagation();
     const requestId = getDraggedRequestId(event);
     if (!requestId || requestId === target.id) {
       clearDragState();
       return;
     }
 
-    void reorderRequest(requestId, target.folderId ?? null, target.id)
+    const source = allRequests.find((request) => request.id === requestId);
+    if (!source) {
+      clearDragState();
+      return;
+    }
+
+    const move = source.serviceId !== target.serviceId
+      ? target.serviceId
+        ? moveRequestToService(requestId, target.serviceId)
+        : moveRequestToTopLevel(requestId)
+      : reorderRequest(requestId, target.folderId ?? null, target.id);
+
+    void move
+      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
+      .finally(clearDragState);
+  };
+
+  const handleDropOnTopLevel = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const requestId = getDraggedRequestId(event);
+    const source = requestId ? allRequests.find((request) => request.id === requestId) : null;
+    if (!requestId || !source || source.serviceId === null) {
+      clearDragState();
+      return;
+    }
+
+    void moveRequestToTopLevel(requestId)
       .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
       .finally(clearDragState);
   };
@@ -495,10 +580,8 @@ export function Sidebar() {
   const handleDropOnService = (event: React.DragEvent, serviceId: string) => {
     event.preventDefault();
     const requestId = getDraggedRequestId(event);
-    const source = requestId
-      ? services.flatMap((service) => service.requests).find((request) => request.id === requestId)
-      : null;
-    if (source && source.serviceId !== serviceId) {
+    const source = requestId ? allRequests.find((request) => request.id === requestId) : null;
+    if (source?.serviceId === serviceId) {
       clearDragState();
       return;
     }
@@ -507,7 +590,10 @@ export function Sidebar() {
       return;
     }
 
-    void reorderRequest(requestId, null, null)
+    const move = source?.serviceId !== serviceId
+      ? moveRequestToService(requestId, serviceId)
+      : Promise.resolve();
+    void move
       .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
       .finally(clearDragState);
   };
@@ -540,6 +626,15 @@ export function Sidebar() {
       await selectRequest(clonedRequest.id);
     } catch (error) {
       setAlertMessage(error instanceof Error ? error.message : 'Failed to clone request');
+    }
+  };
+
+  const handleMoveRequestToTopLevel = async (requestId: string) => {
+    setContextMenu(null);
+    try {
+      await moveRequestToTopLevel(requestId);
+    } catch (error) {
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to move request to top level');
     }
   };
 
@@ -691,7 +786,8 @@ export function Sidebar() {
         }}
         onDragEnd={clearDragState}
         onDragOver={(event) => {
-          if (!draggingRequestId) return;
+          event.stopPropagation();
+          if (!getDraggedRequestId(event)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = 'move';
           setDragOverRequestId(request.id);
@@ -699,6 +795,7 @@ export function Sidebar() {
           setDragOverServiceId(null);
         }}
         onDragLeave={(event) => {
+          event.stopPropagation();
           if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
             setDragOverRequestId((current) => current === request.id ? null : current);
           }
@@ -786,38 +883,103 @@ export function Sidebar() {
       {sidebarTab === 'services' && (
         <div className="flex-1 overflow-y-auto">
 
-          <div className="border-b border-gray-800/80 px-3 py-2">
-            <button
-              onClick={() => setShowImport(true)}
-              title="Import OpenAPI / WSDL / cURL"
-              className="flex w-full items-center gap-1.5 border border-gray-700 bg-gray-900 px-2 py-1.5 text-left text-xs text-gray-200 hover:bg-gray-800"
-            >
-              <svg className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 4v12m0 0l-4-4m4 4l4-4" />
-              </svg>
-              {compact ? <span>Import OpenAPI ...</span> : <span>Import OpenAPI / WSDL / cURL</span>}
-            </button>
-          </div>
-
-          {/* Add service */}
-          <div className="border-b border-gray-800/80 px-3 py-2">
-            {addingService ? (
-              <div className="space-y-1.5">
+          <div className="border-b border-gray-800/80 px-3 py-2.5">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Workspace</span>
+              <span className="text-[10px] text-gray-600">Quick start</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={toggleTopLevelRequestComposer}
+                title="Create a top-level request"
+                aria-pressed={addingTopLevelRequest}
+                className={`flex h-9 items-center justify-center gap-2 border text-[11px] font-semibold transition-colors ${compact ? 'px-0' : 'px-2'} ${
+                  addingTopLevelRequest
+                    ? 'border-[#ff6c37] bg-[#ff6c37]/20 text-[#ffd2c2] ring-1 ring-inset ring-[#ff6c37]/70'
+                    : 'border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600 hover:bg-gray-800'
+                }`}
+              >
+                <MenuIcon name="plus" />
+                <span className={compact ? 'sr-only' : undefined}>New request</span>
+              </button>
+              <button
+                type="button"
+                onClick={toggleCollectionComposer}
+                title="Create a collection"
+                aria-pressed={addingService}
+                className={`flex h-9 items-center justify-center gap-2 border text-[11px] font-medium transition-colors ${compact ? 'px-0' : 'px-2'} ${
+                  addingService
+                    ? 'border-[#ff6c37] bg-[#ff6c37]/20 text-[#ffd2c2] ring-1 ring-inset ring-[#ff6c37]/70'
+                    : 'border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600 hover:bg-gray-800'
+                }`}
+              >
+                <MenuIcon name="folder-plus" />
+                <span className={compact ? 'sr-only' : undefined}>New collection</span>
+              </button>
+            </div>
+            {addingTopLevelRequest && (
+              <div className={`mt-2 ${QUICK_FORM_ROW}`}>
                 <input
                   autoFocus
-                  className="w-full border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
-                  placeholder="Collection name"
-                  value={newServiceName}
-                  onChange={(e) => setNewServiceName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleAddService();
-                    if (e.key === 'Escape') setAddingService(false);
+                  className={QUICK_FORM_INPUT}
+                  placeholder="Request name"
+                  value={newRequestName}
+                  onChange={(event) => setNewRequestName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void handleAddTopLevelRequest();
+                    if (event.key === 'Escape') closeTopLevelRequestComposer();
                   }}
                 />
+                <button
+                  type="button"
+                  onClick={() => { void handleAddTopLevelRequest(); }}
+                  className={QUICK_FORM_PRIMARY}
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={closeTopLevelRequestComposer}
+                  className={QUICK_FORM_CANCEL}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {addingService && (
+              <div className="mt-2 space-y-1.5">
+                <div className={QUICK_FORM_ROW}>
+                  <input
+                    autoFocus
+                    className={QUICK_FORM_INPUT}
+                    placeholder="Collection name"
+                    value={newServiceName}
+                    onChange={(e) => setNewServiceName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleAddService();
+                      if (e.key === 'Escape') closeCollectionComposer();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { void handleAddService(); }}
+                    className={QUICK_FORM_PRIMARY}
+                  >
+                    Create
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeCollectionComposer}
+                    className={QUICK_FORM_CANCEL}
+                  >
+                    Cancel
+                  </button>
+                </div>
                 {settings?.storageMode === 'json' && settings.jsonStorageStrategy === 'perCollection' && (
                   <div className="flex gap-1">
                     <input
-                      className="min-w-0 flex-1 border border-gray-700 bg-gray-900 px-2 py-1 text-[10px] text-gray-300 outline-none focus:border-gray-400"
+                      className="h-7 min-w-0 flex-1 border border-gray-700 bg-gray-900 px-2 text-[10px] text-gray-300 outline-none focus:border-gray-400"
                       placeholder="Collection folder (optional)"
                       value={newServicePath}
                       onChange={(e) => setNewServicePath(e.target.value)}
@@ -825,32 +987,57 @@ export function Sidebar() {
                     <button
                       type="button"
                       onClick={() => { void chooseCollectionFolder(); }}
-                      className="border border-gray-700 px-1.5 text-[10px] text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+                      className="h-7 border border-gray-700 px-1.5 text-[10px] text-gray-400 hover:bg-gray-800 hover:text-gray-200"
                       title="Choose collection folder"
                     >
                       …
                     </button>
                   </div>
                 )}
-                <div className="flex justify-end gap-1">
-                  <button type="button" onClick={() => setAddingService(false)} className="px-1.5 py-0.5 text-[10px] text-gray-500 hover:text-gray-200">Cancel</button>
-                  <button type="button" onClick={() => { void handleAddService(); }} className="border border-gray-700 px-1.5 py-0.5 text-[10px] text-gray-300 hover:bg-gray-800">Create</button>
-                </div>
               </div>
-            ) : (
-              <button
-                onClick={() => { setAddingService(true); setNewServicePath(''); }}
-                title="Add service"
-                className="flex w-full items-center gap-1.5 py-1 text-xs font-semibold text-gray-400 hover:text-gray-200"
-              >
-                <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-                <span>Add Service</span>
-              </button>
             )}
           </div>
 
+
+          {/* Top-level requests */}
+          <div
+            className={`border-b border-gray-800/80 px-3 py-2 ${dragOverServiceId === '__top_level__' ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70' : ''}`}
+            onDragOver={(event) => {
+              if (!getDraggedRequestId(event)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              setDragOverServiceId('__top_level__');
+              setDragOverServiceOrderId(null);
+              setDragOverFolderId(null);
+              setDragOverFolderOrderId(null);
+              setDragOverRequestId(null);
+            }}
+            onDragLeave={(event) => {
+              if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
+                setDragOverServiceId((current) => current === '__top_level__' ? null : current);
+              }
+            }}
+            onDrop={handleDropOnTopLevel}
+          >
+            <button
+              type="button"
+              className="flex w-full items-center justify-between pb-1.5 text-left"
+              onClick={() => setTopLevelCollapsed((collapsed) => !collapsed)}
+              aria-expanded={!topLevelCollapsed}
+              title={topLevelCollapsed ? 'Expand no collection' : 'Collapse no collection'}
+            >
+              <span className="flex min-w-0 items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                <svg className={`h-3 w-3 flex-shrink-0 transition-transform ${topLevelCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                <span>No collection</span>
+              </span>
+            </button>
+            {!topLevelCollapsed && topLevelRequests.map((request) => renderRequest(request, '-mx-3 pl-3'))}
+            {!topLevelCollapsed && topLevelRequests.length === 0 && draggingRequestId !== null && (
+              <div className="py-1 text-[10px] text-cyan-300/80">Drop here for top level</div>
+            )}
+          </div>
 
           {/* Favorites */}
           {favorites.length > 0 && (
@@ -911,7 +1098,7 @@ export function Sidebar() {
                     setDragOverRequestId(null);
                     return;
                   }
-                  if (!draggingRequestId) return;
+                  if (!getDraggedRequestId(event)) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = 'move';
                   setDragOverServiceId(service.id);
@@ -956,7 +1143,7 @@ export function Sidebar() {
                   <span className="truncate flex-1">{service.name}</span>
                 )}
                 {!compact && <span className="mr-1 text-[10px] text-gray-500">{service.requests.length}</span>}
-                {!compact && (
+                <div className="ml-1 flex items-center gap-0.5">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -970,7 +1157,6 @@ export function Sidebar() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </button>
-                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1011,6 +1197,7 @@ export function Sidebar() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                   </svg>
                 </button>
+                </div>
               </div>
 
               {/* Request folders and direct service requests */}
@@ -1057,7 +1244,7 @@ export function Sidebar() {
                           setDragOverRequestId(null);
                           return;
                         }
-                        if (!draggingRequestId) return;
+                        if (!getDraggedRequestId(event)) return;
                         event.preventDefault();
                         event.dataTransfer.dropEffect = 'move';
                         setDragOverFolderId(folder.id);
@@ -1129,10 +1316,10 @@ export function Sidebar() {
                     </div>
                     {!folderCollapsed && folderRequests.map((request) => renderRequest(request, 'pl-8'))}
                     {!folderCollapsed && addingRequestToFolder?.serviceId === service.id && addingRequestToFolder.folderId === folder.id && (
-                      <div className="pl-18 pr-3 py-1">
+                      <div className={`pl-18 pr-3 py-1 ${QUICK_FORM_ROW}`}>
                         <input
                           autoFocus
-                          className="w-full border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
+                          className={QUICK_FORM_INPUT}
                           placeholder="Request name (Enter to add)"
                           value={newRequestName}
                           onChange={(event) => setNewRequestName(event.target.value)}
@@ -1144,9 +1331,17 @@ export function Sidebar() {
                             setTimeout(() => {
                               if (!addRequestSubmitting.current) setAddingRequestToFolder(null);
                             }, 150);
-                          }}
-                        />
-                      </div>
+                           }}
+                         />
+                        <button
+                          type="button"
+                          className={QUICK_FORM_CANCEL}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => setAddingRequestToFolder(null)}
+                        >
+                          Cancel
+                        </button>
+                       </div>
                     )}
                   </div>
                 );
@@ -1177,10 +1372,10 @@ export function Sidebar() {
 
               {/* Add request inline */}
               {!collapsedServices.has(service.id) && addingRequestToService === service.id && (
-                <div className="pl-8 pr-3 py-1">
+                <div className={`pl-8 pr-3 py-1 ${QUICK_FORM_ROW}`}>
                   <input
                     autoFocus
-                    className="w-full border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-100 outline-none focus:border-gray-400"
+                    className={QUICK_FORM_INPUT}
                     placeholder="Request name (Enter to add)"
                     value={newRequestName}
                     onChange={(e) => setNewRequestName(e.target.value)}
@@ -1195,6 +1390,14 @@ export function Sidebar() {
                       }, 150);
                     }}
                   />
+                  <button
+                    type="button"
+                    className={QUICK_FORM_CANCEL}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => setAddingRequestToService(null)}
+                  >
+                    Cancel
+                  </button>
                 </div>
               )}
             </div>
@@ -1237,13 +1440,41 @@ export function Sidebar() {
               <ContextMenuItem icon="rename" onClick={() => { startRenameRequest(contextMenu.id); setContextMenu(null); }}>
                 Rename
               </ContextMenuItem>
-              <ContextMenuItem icon="folder" onClick={() => { setMoveRequestId(contextMenu.id); setContextMenu(null); }}>
-                Move to Folder…
-              </ContextMenuItem>
+              {allRequests.find((request) => request.id === contextMenu.id)?.serviceId ? (
+                <>
+                  <ContextMenuItem icon="folder" onClick={() => { void handleMoveRequestToTopLevel(contextMenu.id); }}>
+                    Move to top level
+                  </ContextMenuItem>
+                  {services.length > 1 && (
+                    <ContextMenuItem
+                      icon="folder"
+                      onClick={() => {
+                        setMoveRequestToCollectionId(contextMenu.id);
+                        setContextMenu(null);
+                      }}
+                    >
+                      Move to collection…
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuItem icon="folder" onClick={() => { setMoveRequestId(contextMenu.id); setContextMenu(null); }}>
+                    Move to Folder…
+                  </ContextMenuItem>
+                </>
+              ) : services.length > 0 ? (
+                <ContextMenuItem
+                  icon="folder"
+                  onClick={() => {
+                    setMoveRequestToCollectionId(contextMenu.id);
+                    setContextMenu(null);
+                  }}
+                >
+                  Move to collection…
+                </ContextMenuItem>
+              ) : null}
               <ContextMenuItem
                 icon="code"
                 onClick={() => {
-                  const request = services.flatMap((service) => service.requests).find((row) => row.id === contextMenu.id);
+                  const request = allRequests.find((row) => row.id === contextMenu.id);
                   setShowCodeForRequest(request ?? null);
                   setContextMenu(null);
                 }}
@@ -1265,7 +1496,7 @@ export function Sidebar() {
                 icon="info"
                 onClick={() => {
                   setContextMenu(null);
-                  const request = services.flatMap((service) => service.requests).find((row) => row.id === contextMenu.id);
+                  const request = allRequests.find((row) => row.id === contextMenu.id);
                   if (request) {
                     setAlertMessage(`${request.method} ${request.url || '(no URL)'}\n\nCreated: ${request.createdAt}\nUpdated: ${request.updatedAt}`);
                   }
@@ -1437,14 +1668,6 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Import Modal */}
-      {showImport && (
-        <ImportModal
-          onClose={() => setShowImport(false)}
-          workspaceId={activeWorkspaceId}
-        />
-      )}
-
       {collectionAssetDialog && (
         <TextInputModal
           title={collectionAssetDialog.kind === 'folder' ? 'Create folder' : 'Create JavaScript file'}
@@ -1480,7 +1703,7 @@ export function Sidebar() {
       )}
 
       {moveRequestId && (() => {
-        const request = services.flatMap((service) => service.requests).find((item) => item.id === moveRequestId);
+        const request = allRequests.find((item) => item.id === moveRequestId);
         const service = services.find((item) => item.requests.some((itemRequest) => itemRequest.id === moveRequestId));
         if (!request || !service) return null;
 
@@ -1498,6 +1721,28 @@ export function Sidebar() {
               }
             }}
             onClose={() => setMoveRequestId(null)}
+          />
+        );
+      })()}
+
+      {moveRequestToCollectionId && (() => {
+        const request = allRequests.find((item) => item.id === moveRequestToCollectionId);
+        if (!request || request.serviceId !== null || services.length === 0) return null;
+
+        return (
+          <MoveRequestCollectionModal
+            requestName={request.name}
+            collections={services.map((service) => ({ id: service.id, name: service.name }))}
+            currentCollectionId={request.serviceId}
+            onConfirm={async (serviceId) => {
+              try {
+                await moveRequestToService(request.id, serviceId);
+                setMoveRequestToCollectionId(null);
+              } catch (error) {
+                setAlertMessage(error instanceof Error ? error.message : 'Failed to move request to collection');
+              }
+            }}
+            onClose={() => setMoveRequestToCollectionId(null)}
           />
         );
       })()}

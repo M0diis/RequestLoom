@@ -123,9 +123,11 @@ function registerScriptCompletionsInternal(monaco: any): void {
         sni('.toBeLessThan', K.Method, '.toBeLessThan(${1:n})', 'Assert value is less than n.'),
         val('.not', K.Property, '.not', 'Negate the next assertion.'),
         // Variables
-        sni('setVar', K.Function, 'setVar("${1:key}", ${2:value});', 'Create/update a runtime variable.'),
+        sni('setVar', K.Function, 'setVar("${1:key}", ${2:value});', 'Create/update a request-scoped runtime variable.'),
+        sni('setServiceVar', K.Function, 'setServiceVar("${1:key}", ${2:value}, ${3:persist});', 'Create/update a service-scoped runtime variable; pass true to persist it.'),
         sni('getVar', K.Function, 'getVar("${1:key}")', 'Get a runtime variable value.'),
         sni('unsetVar', K.Function, 'unsetVar("${1:key}");', 'Remove a runtime variable.'),
+        sni('unsetServiceVar', K.Function, 'unsetServiceVar("${1:key}");', 'Remove a service-scoped runtime variable.'),
         // Request
         sni('setUrl', K.Function, 'setUrl("${1:url}");', 'Change the request URL.'),
         val('getUrl', K.Function, 'getUrl()', 'Get the current request URL.'),

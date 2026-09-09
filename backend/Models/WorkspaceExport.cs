@@ -11,6 +11,7 @@ public class WorkspaceExport
     public List<EnvironmentExport> Environments { get; set; } = [];
     public List<WorkspaceVariable> WorkspaceVariables { get; set; } = [];
     public List<ServiceExport> Services { get; set; } = [];
+    public List<RequestExport> TopLevelRequests { get; set; } = [];
     public List<HistoryEntry> History { get; set; } = [];
 }
 

@@ -49,7 +49,8 @@ public class ServiceRow
 public class ApiRequestRow
 {
     [Key, Column("id")] public string Id { get; set; } = "";
-    [Column("service_id")] public string ServiceId { get; set; } = "";
+    [Column("workspace_id")] public string WorkspaceId { get; set; } = "";
+    [Column("service_id")] public string? ServiceId { get; set; }
     [Column("folder_id")] public string? FolderId { get; set; }
     [Column("name")] public string Name { get; set; } = "";
     [Column("method")] public string Method { get; set; } = "GET";
@@ -184,10 +185,20 @@ public class HistoryRow
     [Column("request_headers_json")] public string? RequestHeadersJson { get; set; }
     [Column("request_body")] public string? RequestBody { get; set; }
     [Column("response_status")] public int ResponseStatus { get; set; }
+    [Column("response_status_text")] public string? StatusText { get; set; }
     [Column("response_headers_json")] public string? ResponseHeadersJson { get; set; }
     [Column("response_body")] public string? ResponseBody { get; set; }
+    [Column("response_content_type")] public string? ContentType { get; set; }
     [Column("response_time_ms")] public long ResponseTimeMs { get; set; }
     [Column("response_size_bytes")] public long ResponseSizeBytes { get; set; }
+    [Column("response_is_truncated")] public bool IsTruncated { get; set; }
+    [Column("response_error")] public string? Error { get; set; }
+    [Column("is_soap_fault")] public bool IsSoapFault { get; set; }
+    [Column("soap_fault_json")] public string? SoapFaultJson { get; set; }
+    [Column("script_variables_json")] public string? ScriptVariablesJson { get; set; }
+    [Column("service_script_variables_json")] public string? ServiceScriptVariablesJson { get; set; }
+    [Column("script_logs_json")] public string? ScriptLogsJson { get; set; }
+    [Column("test_results_json")] public string? TestResultsJson { get; set; }
     [Column("executed_at")] public string ExecutedAt { get; set; } = "";
 }
 

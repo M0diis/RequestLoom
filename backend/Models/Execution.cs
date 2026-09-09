@@ -41,6 +41,7 @@ public class ExecuteResponse
     public bool IsSoapFault { get; set; }
     public SoapFaultInfo? SoapFault { get; set; }
     public Dictionary<string, RuntimeScriptVariable> ScriptVariables { get; set; } = [];
+    public Dictionary<string, RuntimeScriptVariable> ServiceScriptVariables { get; set; } = [];
     public List<string> ScriptLogs { get; set; } = [];
     public List<TestResult> TestResults { get; set; } = [];
 }
@@ -49,6 +50,7 @@ public class RuntimeScriptVariable
 {
     public string Value { get; set; } = "";
     public string Source { get; set; } = "";
+    public string Scope { get; set; } = "request";
 }
 
 public class SoapFaultInfo
@@ -68,9 +70,19 @@ public class HistoryEntry
     public string? RequestHeadersJson { get; set; }
     public string? RequestBody { get; set; }
     public int ResponseStatus { get; set; }
+    public string StatusText { get; set; } = "";
     public string? ResponseHeadersJson { get; set; }
     public string? ResponseBody { get; set; }
+    public string ContentType { get; set; } = "";
     public long ResponseTimeMs { get; set; }
     public long ResponseSizeBytes { get; set; }
+    public bool IsTruncated { get; set; }
+    public string? Error { get; set; }
+    public bool IsSoapFault { get; set; }
+    public SoapFaultInfo? SoapFault { get; set; }
+    public Dictionary<string, RuntimeScriptVariable> ScriptVariables { get; set; } = [];
+    public Dictionary<string, RuntimeScriptVariable> ServiceScriptVariables { get; set; } = [];
+    public List<string> ScriptLogs { get; set; } = [];
+    public List<TestResult> TestResults { get; set; } = [];
     public string ExecutedAt { get; set; } = "";
 }

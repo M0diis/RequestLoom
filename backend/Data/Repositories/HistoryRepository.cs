@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RequestLoom.Api.Data.Entities;
 using RequestLoom.Api.Models;
@@ -6,6 +7,11 @@ namespace RequestLoom.Api.Data.Repositories;
 
 public class HistoryRepository : IHistoryRepository
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private readonly AppDbContext _db;
 
     public HistoryRepository(AppDbContext db)
@@ -66,10 +72,20 @@ public class HistoryRepository : IHistoryRepository
             RequestHeadersJson = entry.RequestHeadersJson,
             RequestBody = entry.RequestBody,
             ResponseStatus = entry.ResponseStatus,
+            StatusText = entry.StatusText,
             ResponseHeadersJson = entry.ResponseHeadersJson,
             ResponseBody = entry.ResponseBody,
+            ContentType = entry.ContentType,
             ResponseTimeMs = entry.ResponseTimeMs,
             ResponseSizeBytes = entry.ResponseSizeBytes,
+            IsTruncated = entry.IsTruncated,
+            Error = entry.Error,
+            IsSoapFault = entry.IsSoapFault,
+            SoapFaultJson = Serialize(entry.SoapFault),
+            ScriptVariablesJson = Serialize(entry.ScriptVariables),
+            ServiceScriptVariablesJson = Serialize(entry.ServiceScriptVariables),
+            ScriptLogsJson = Serialize(entry.ScriptLogs),
+            TestResultsJson = Serialize(entry.TestResults),
             ExecutedAt = string.IsNullOrEmpty(entry.ExecutedAt) ? DateTime.UtcNow.ToString("o") : entry.ExecutedAt,
         };
         _db.History.Add(row);
@@ -138,11 +154,40 @@ public class HistoryRepository : IHistoryRepository
             RequestHeadersJson = row.RequestHeadersJson,
             RequestBody = row.RequestBody,
             ResponseStatus = row.ResponseStatus,
+            StatusText = row.StatusText ?? "",
             ResponseHeadersJson = row.ResponseHeadersJson,
             ResponseBody = row.ResponseBody,
+            ContentType = row.ContentType ?? "",
             ResponseTimeMs = row.ResponseTimeMs,
             ResponseSizeBytes = row.ResponseSizeBytes,
+            IsTruncated = row.IsTruncated,
+            Error = row.Error,
+            IsSoapFault = row.IsSoapFault,
+            SoapFault = Deserialize<SoapFaultInfo>(row.SoapFaultJson),
+            ScriptVariables = Deserialize<Dictionary<string, RuntimeScriptVariable>>(row.ScriptVariablesJson) ?? [],
+            ServiceScriptVariables = Deserialize<Dictionary<string, RuntimeScriptVariable>>(row.ServiceScriptVariablesJson) ?? [],
+            ScriptLogs = Deserialize<List<string>>(row.ScriptLogsJson) ?? [],
+            TestResults = Deserialize<List<TestResult>>(row.TestResultsJson) ?? [],
             ExecutedAt = row.ExecutedAt,
         };
+    }
+
+    private static string? Serialize<T>(T? value)
+    {
+        return value == null ? null : JsonSerializer.Serialize(value, JsonOptions);
+    }
+
+    private static T? Deserialize<T>(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return default;
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(value, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyValueEditor } from '../common/KeyValueEditor';
 import { serviceVariablesApi } from '../../services/api';
 import { useRequestStore } from '../../stores/requestStore';
@@ -9,6 +9,8 @@ import { CustomDropdown, type DropdownOption } from '../common/CustomDropdown';
 import { AutocompleteInput } from '../common/AutocompleteInput';
 import { DEFAULT_DYNAMIC_VALUE_SUGGESTIONS } from '../../lib/dynamicValues';
 import { OAuth2AuthFields } from '../common/OAuth2AuthFields';
+import { VariablePreview } from '../common/VariablePreview';
+import type { ResolvedVariableLookup } from '../common/variablePreviewUtils';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 import type {
   ServiceVariable,
@@ -167,6 +169,8 @@ export function ServiceSettingsPage({ serviceId }: Props) {
   const [defaultHeaders, setDefaultHeaders] = useState<KeyValueEntry[]>([]);
   const [defaultAuthType, setDefaultAuthType] = useState<AuthType>('none');
   const [defaultAuthConfig, setDefaultAuthConfig] = useState<Record<string, string>>({});
+  const authConfigCache = useRef<Partial<Record<AuthType, Record<string, string>>>>({});
+  const cacheServiceId = useRef(serviceId);
   const [savingMeta, setSavingMeta] = useState(false);
 
   const [variables, setVariables] = useState<ServiceVariable[]>([]);
@@ -181,6 +185,33 @@ export function ServiceSettingsPage({ serviceId }: Props) {
   const [newEnvironmentId, setNewEnvironmentId] = useState('');
 
   const [error, setError] = useState<string | null>(null);
+
+  const resolvedServiceVariables = useMemo<ResolvedVariableLookup>(() => {
+    const map = new Map<string, { value: string; source: string; isSecret: boolean }>();
+    const activeEnvironment = environments.find((environment) => environment.isActive);
+
+    for (const variable of variables) {
+      if (!variable.enabled || !variable.key.trim() || variable.environmentId) continue;
+      map.set(variable.key.trim().toLowerCase(), {
+        value: variable.value ?? '',
+        source: 'service (ALL)',
+        isSecret: variable.isSecret,
+      });
+    }
+
+    if (activeEnvironment) {
+      for (const variable of variables) {
+        if (!variable.enabled || !variable.key.trim() || variable.environmentId !== activeEnvironment.id) continue;
+        map.set(variable.key.trim().toLowerCase(), {
+          value: variable.value ?? '',
+          source: `service (${activeEnvironment.name})`,
+          isSecret: variable.isSecret,
+        });
+      }
+    }
+
+    return map;
+  }, [environments, variables]);
 
   // Dirty tracking
   const metaDirty = useMemo(() => {
@@ -210,6 +241,11 @@ export function ServiceSettingsPage({ serviceId }: Props) {
     }
     return false;
   }, [variables, drafts]);
+  const varsDirtyRef = useRef(false);
+
+  useEffect(() => {
+    varsDirtyRef.current = varsDirty;
+  }, [varsDirty]);
 
   const environmentScopeOptions = useMemo(
     () => [
@@ -220,6 +256,11 @@ export function ServiceSettingsPage({ serviceId }: Props) {
   );
 
   useEffect(() => {
+    if (cacheServiceId.current !== serviceId) {
+      authConfigCache.current = {};
+      cacheServiceId.current = serviceId;
+    }
+
     if (!service) {
       return;
     }
@@ -234,9 +275,11 @@ export function ServiceSettingsPage({ serviceId }: Props) {
     })));
 
     const initialAuthType = (service.auth?.authType ?? 'none') as AuthType;
+    const initialAuthConfig = tryParseAuthConfig(service.auth?.configJson, initialAuthType);
+    authConfigCache.current = { [initialAuthType]: initialAuthConfig };
     setDefaultAuthType(initialAuthType);
-    setDefaultAuthConfig(tryParseAuthConfig(service.auth?.configJson, initialAuthType));
-  }, [service]);
+    setDefaultAuthConfig(initialAuthConfig);
+  }, [service, serviceId]);
 
   useEffect(() => {
     const loadVariables = async () => {
@@ -263,7 +306,7 @@ export function ServiceSettingsPage({ serviceId }: Props) {
     loadVariables();
   }, [serviceId]);
 
-  const refreshVariables = async () => {
+  const refreshVariables = useCallback(async () => {
     const list = await serviceVariablesApi.getAll(serviceId);
     setVariables(list);
     setDrafts(Object.fromEntries(list.map((v) => [v.id, {
@@ -274,7 +317,18 @@ export function ServiceSettingsPage({ serviceId }: Props) {
       reveal: false,
       environmentId: v.environmentId ?? null,
     }])));
-  };
+  }, [serviceId]);
+
+  useEffect(() => {
+    const handleServiceVariablesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ serviceId?: string; invalidateRuntime?: boolean }>).detail;
+      if (detail?.serviceId === serviceId && !varsDirtyRef.current) {
+        void refreshVariables();
+      }
+    };
+    window.addEventListener('service-variables:updated', handleServiceVariablesUpdated);
+    return () => window.removeEventListener('service-variables:updated', handleServiceVariablesUpdated);
+  }, [serviceId, refreshVariables]);
 
   const buildServiceAuth = (): AuthRequest | null => {
     if (defaultAuthType === 'none') {
@@ -382,25 +436,50 @@ export function ServiceSettingsPage({ serviceId }: Props) {
   };
 
   const handleAuthTypeChange = (type: AuthType) => {
+    authConfigCache.current[defaultAuthType] = defaultAuthConfig;
+    const nextConfig = authConfigCache.current[type] ?? getDefaultAuthConfig(type);
+    authConfigCache.current[type] = nextConfig;
     setDefaultAuthType(type);
-    setDefaultAuthConfig(getDefaultAuthConfig(type));
+    setDefaultAuthConfig(nextConfig);
   };
 
   const updateAuthField = (field: string, value: string) => {
-    setDefaultAuthConfig((prev) => ({ ...prev, [field]: value }));
+    setDefaultAuthConfig((prev) => {
+      const nextConfig = { ...prev, [field]: value };
+      authConfigCache.current[defaultAuthType] = nextConfig;
+      return nextConfig;
+    });
   };
 
-  const renderDynamicInput = (field: string, placeholder: string, type = 'text') => (
-    <AutocompleteInput
-      value={defaultAuthConfig[field] ?? ''}
-      onChange={(value) => updateAuthField(field, value)}
-      suggestions={[]}
-      dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
-      type={type}
-      placeholder={placeholder}
-      className={`${MONO_INPUT_CLASS} w-full`}
-    />
-  );
+  const handleAuthConfigChange = (nextConfig: Record<string, string>) => {
+    authConfigCache.current[defaultAuthType] = nextConfig;
+    setDefaultAuthConfig(nextConfig);
+  };
+
+  const renderDynamicInput = (field: string, placeholder: string, type = 'text') => {
+    const value = defaultAuthConfig[field] ?? '';
+    const sensitive = field === 'password' || field === 'token' || field === 'value' || field === 'clientSecret';
+
+    return (
+      <div>
+        <AutocompleteInput
+          value={value}
+          onChange={(nextValue) => updateAuthField(field, nextValue)}
+          suggestions={[]}
+          dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
+          type={type}
+          placeholder={placeholder}
+          className={`${MONO_INPUT_CLASS} w-full`}
+        />
+        <VariablePreview
+          value={value}
+          variables={resolvedServiceVariables}
+          ready={!loadingVars}
+          sensitive={sensitive}
+        />
+      </div>
+    );
+  };
 
   if (!service) {
     return (
@@ -481,6 +560,8 @@ export function ServiceSettingsPage({ serviceId }: Props) {
             dynamicSuggestions={DEFAULT_DYNAMIC_VALUE_SUGGESTIONS}
             helpSection="http"
             helpTitle="Open HTTP header documentation"
+            resolvedVariables={resolvedServiceVariables}
+            variableResolutionReady={!loadingVars}
           />
         </div>
 
@@ -551,8 +632,10 @@ export function ServiceSettingsPage({ serviceId }: Props) {
           {defaultAuthType === 'oauth2' && (
             <OAuth2AuthFields
               config={defaultAuthConfig}
-              onChange={setDefaultAuthConfig}
+              onChange={handleAuthConfigChange}
               ownerKey={'service:' + service.id}
+              resolvedVariables={resolvedServiceVariables}
+              variableResolutionReady={!loadingVars}
             />
           )}
 

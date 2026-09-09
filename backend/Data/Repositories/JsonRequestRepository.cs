@@ -28,6 +28,10 @@ public class JsonRequestRepository : IRequestRepository
         ApiRequest? created = null;
         _store.Mutate(doc =>
         {
+            var service = doc.Services.FirstOrDefault(row => row.Id == serviceId);
+            if (service == null)
+                throw new InvalidOperationException("Service was not found.");
+
             if (!string.IsNullOrWhiteSpace(req.FolderId) && !doc.RequestFolders.Any(folder => folder.Id == req.FolderId && folder.ServiceId == serviceId))
                 throw new InvalidOperationException("Folder does not belong to the request service.");
 
@@ -39,8 +43,44 @@ public class JsonRequestRepository : IRequestRepository
             var request = new ApiRequest
             {
                 Id = Guid.NewGuid().ToString("N"),
+                WorkspaceId = service.WorkspaceId,
                 ServiceId = serviceId,
                 FolderId = string.IsNullOrWhiteSpace(req.FolderId) ? null : req.FolderId,
+                Name = req.Name,
+                Method = req.Method,
+                Url = req.Url,
+                Body = req.Body,
+                BodyType = req.BodyType,
+                SortOrder = maxOrder + 1,
+                CreatedAt = JsonDataStore.Now(),
+                UpdatedAt = JsonDataStore.Now()
+            };
+            doc.Requests.Add(request);
+            created = request;
+        });
+
+        return Task.FromResult(Clone(created!, _store));
+    }
+
+    public Task<ApiRequest> CreateTopLevelAsync(string workspaceId, CreateApiRequestRequest req)
+    {
+        ApiRequest? created = null;
+        _store.Mutate(doc =>
+        {
+            if (!doc.Workspaces.Any(workspace => workspace.Id == workspaceId))
+                throw new InvalidOperationException("Workspace was not found.");
+
+            var maxOrder = doc.Requests
+                .Where(r => r.WorkspaceId == workspaceId && r.ServiceId == null)
+                .Select(r => (int?)r.SortOrder)
+                .Max() ?? -1;
+
+            var request = new ApiRequest
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                WorkspaceId = workspaceId,
+                ServiceId = null,
+                FolderId = null,
                 Name = req.Name,
                 Method = req.Method,
                 Url = req.Url,
@@ -138,15 +178,16 @@ public class JsonRequestRepository : IRequestRepository
             if (original == null) return;
 
             var maxOrder = doc.Requests
-                .Where(r => r.ServiceId == original.ServiceId)
+                .Where(r => r.WorkspaceId == original.WorkspaceId && r.ServiceId == original.ServiceId)
                 .Select(r => (int?)r.SortOrder)
                 .Max() ?? -1;
 
             var copy = new ApiRequest
             {
                 Id = Guid.NewGuid().ToString("N"),
+                WorkspaceId = original.WorkspaceId,
                 ServiceId = original.ServiceId,
-                FolderId = original.FolderId,
+                FolderId = original.ServiceId == null ? null : original.FolderId,
                 Name = original.Name + " (copy)",
                 Method = original.Method,
                 Url = original.Url,
@@ -245,6 +286,17 @@ public class JsonRequestRepository : IRequestRepository
         return Task.FromResult(result);
     }
 
+    public Task<List<ApiRequest>> GetByWorkspaceIdAsync(string workspaceId)
+    {
+        var result = _store.Read(doc =>
+            doc.Requests
+                .Where(r => r.WorkspaceId == workspaceId && r.ServiceId == null)
+                .OrderBy(r => r.SortOrder)
+                .Select(r => Clone(r, doc))
+                .ToList());
+        return Task.FromResult(result);
+    }
+
     public Task<bool> MoveToServiceAsync(string id, string newServiceId)
     {
         var moved = false;
@@ -252,6 +304,9 @@ public class JsonRequestRepository : IRequestRepository
         {
             var request = doc.Requests.FirstOrDefault(r => r.Id == id);
             if (request == null) return;
+
+            var service = doc.Services.FirstOrDefault(row => row.Id == newServiceId && row.WorkspaceId == request.WorkspaceId);
+            if (service == null) return;
 
             var maxOrder = doc.Requests
                 .Where(r => r.ServiceId == newServiceId)
@@ -267,6 +322,29 @@ public class JsonRequestRepository : IRequestRepository
         return Task.FromResult(moved);
     }
 
+    public Task<bool> MoveToTopLevelAsync(string id)
+    {
+        var moved = false;
+        _store.Mutate(doc =>
+        {
+            var request = doc.Requests.FirstOrDefault(row => row.Id == id);
+            if (request == null) return;
+
+            var maxOrder = doc.Requests
+                .Where(row => row.WorkspaceId == request.WorkspaceId && row.ServiceId == null)
+                .Select(row => (int?)row.SortOrder)
+                .Max() ?? -1;
+
+            request.ServiceId = null;
+            request.FolderId = null;
+            request.SortOrder = maxOrder + 1;
+            request.UpdatedAt = JsonDataStore.Now();
+            moved = true;
+        });
+
+        return Task.FromResult(moved);
+    }
+
     public Task<bool> MoveToFolderAsync(string id, string? folderId)
     {
         var moved = false;
@@ -274,11 +352,12 @@ public class JsonRequestRepository : IRequestRepository
         {
             var request = doc.Requests.FirstOrDefault(row => row.Id == id);
             if (request == null) return;
+            if (request.ServiceId == null && !string.IsNullOrWhiteSpace(folderId)) return;
             if (!string.IsNullOrWhiteSpace(folderId) && !doc.RequestFolders.Any(folder => folder.Id == folderId && folder.ServiceId == request.ServiceId)) return;
 
             var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
             var maxSort = doc.Requests
-                .Where(row => row.ServiceId == request.ServiceId && row.FolderId == targetFolderId && row.Id != id)
+                .Where(row => row.WorkspaceId == request.WorkspaceId && row.ServiceId == request.ServiceId && row.FolderId == targetFolderId && row.Id != id)
                 .Select(row => (int?)row.SortOrder)
                 .Max() ?? -1;
             request.FolderId = targetFolderId;
@@ -297,13 +376,14 @@ public class JsonRequestRepository : IRequestRepository
         {
             var request = doc.Requests.FirstOrDefault(row => row.Id == id);
             if (request == null) return;
+            if (request.ServiceId == null && !string.IsNullOrWhiteSpace(folderId)) return;
 
             var targetFolderId = string.IsNullOrWhiteSpace(folderId) ? null : folderId;
             if (targetFolderId != null && !doc.RequestFolders.Any(folder => folder.Id == targetFolderId && folder.ServiceId == request.ServiceId))
                 return;
 
             var rows = doc.Requests
-                .Where(row => row.ServiceId == request.ServiceId)
+                .Where(row => row.WorkspaceId == request.WorkspaceId && row.ServiceId == request.ServiceId)
                 .OrderBy(row => row.SortOrder)
                 .ThenBy(row => row.Id)
                 .ToList();
@@ -406,6 +486,7 @@ public class JsonRequestRepository : IRequestRepository
         return new ApiRequest
         {
             Id = request.Id,
+            WorkspaceId = request.WorkspaceId,
             ServiceId = request.ServiceId,
             FolderId = request.FolderId,
             Name = request.Name,

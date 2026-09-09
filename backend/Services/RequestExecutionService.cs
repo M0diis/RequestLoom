@@ -17,7 +17,9 @@ public class RequestExecutionService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly VariableResolutionService _variableService;
+    private readonly IEnvironmentRepository _environmentRepo;
     private readonly IServiceRepository _serviceRepo;
+    private readonly IServiceVariableRepository _serviceVariableRepo;
     private readonly IRequestRepository _requestRepo;
     private readonly IHistoryRepository _historyRepo;
     private readonly SettingsService _settings;
@@ -30,7 +32,9 @@ public class RequestExecutionService
     public RequestExecutionService(
         IHttpClientFactory httpClientFactory,
         VariableResolutionService variableService,
+        IEnvironmentRepository environmentRepo,
         IServiceRepository serviceRepo,
+        IServiceVariableRepository serviceVariableRepo,
         IRequestRepository requestRepo,
         IHistoryRepository historyRepo,
         SettingsService settings,
@@ -42,7 +46,9 @@ public class RequestExecutionService
     {
         _httpClientFactory = httpClientFactory;
         _variableService = variableService;
+        _environmentRepo = environmentRepo;
         _serviceRepo = serviceRepo;
+        _serviceVariableRepo = serviceVariableRepo;
         _requestRepo = requestRepo;
         _historyRepo = historyRepo;
         _settings = settings;
@@ -56,7 +62,17 @@ public class RequestExecutionService
     public async Task<ExecuteResponse> ExecuteAsync(ExecuteRequestPayload payload, CancellationToken cancellationToken)
     {
         var workspaceId = payload.WorkspaceId ?? "default";
-        var runtimeVariables = _runtimeVariableStore.Get(workspaceId, payload.RequestId);
+        var requestRuntimeVariables = _runtimeVariableStore.GetRequest(
+            workspaceId,
+            payload.RequestId);
+        var serviceRuntimeVariables = _runtimeVariableStore.GetService(
+            workspaceId,
+            payload.ServiceId);
+        var runtimeVariables = MergeRuntimeVariables(
+            serviceRuntimeVariables,
+            requestRuntimeVariables);
+        var serviceVariablesToPersist = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var serviceVariablesToDelete = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var scriptLogs = new List<string>();
         var stopwatch = Stopwatch.StartNew();
         var urlForDiagnostics = payload.Url ?? "";
@@ -86,6 +102,10 @@ public class RequestExecutionService
                 requestState: requestState,
                 responseState: null,
                 runtimeVariables: runtimeVariables,
+                requestRuntimeVariables: requestRuntimeVariables,
+                serviceRuntimeVariables: serviceRuntimeVariables,
+                serviceVariablesToPersist: serviceVariablesToPersist,
+                serviceVariablesToDelete: serviceVariablesToDelete,
                 resolutionSession: resolutionSession,
                 sourceLabel: "Pre-request script");
 
@@ -101,6 +121,7 @@ public class RequestExecutionService
                     Error = $"Pre-request script failed: {preScriptResult.ErrorMessage}",
                     ResponseTimeMs = stopwatch.ElapsedMilliseconds,
                     ScriptVariables = CloneRuntimeVariables(runtimeVariables),
+                    ServiceScriptVariables = CloneRuntimeVariables(serviceRuntimeVariables),
                     ScriptLogs = scriptLogs
                 };
             }
@@ -231,14 +252,25 @@ public class RequestExecutionService
                         resolutionSession.Resolve(effectiveAuth.ConfigJson),
                         new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                         ?? throw new InvalidOperationException("OAuth configuration is invalid.");
-                    var oauthOwnerKey = ResolveOAuthOwnerKey(payload);
-                    var oauthToken = await _oauthTokenService.GetAccessTokenAsync(
-                        oauthOwnerKey,
-                        oauthConfig,
-                        cancellationToken);
-                    request.Headers.TryAddWithoutValidation(
-                        "Authorization",
-                        $"{oauthToken.TokenType} {oauthToken.Value}");
+                    var runtimeToken = !string.IsNullOrWhiteSpace(oauthConfig.AccessTokenVariable)
+                        ? resolutionSession.GetVariable(oauthConfig.AccessTokenVariable)
+                        : null;
+
+                    if (!string.IsNullOrWhiteSpace(runtimeToken) && !ContainsUnresolvedVariable(runtimeToken))
+                    {
+                        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {runtimeToken}");
+                    }
+                    else
+                    {
+                        var oauthOwnerKey = ResolveOAuthOwnerKey(payload);
+                        var oauthToken = await _oauthTokenService.GetAccessTokenAsync(
+                            oauthOwnerKey,
+                            oauthConfig,
+                            cancellationToken);
+                        request.Headers.TryAddWithoutValidation(
+                            "Authorization",
+                            $"{oauthToken.TokenType} {oauthToken.Value}");
+                    }
                 }
                 else
                 {
@@ -366,6 +398,10 @@ public class RequestExecutionService
                     Headers = responseHeaders
                 },
                 runtimeVariables: runtimeVariables,
+                requestRuntimeVariables: requestRuntimeVariables,
+                serviceRuntimeVariables: serviceRuntimeVariables,
+                serviceVariablesToPersist: serviceVariablesToPersist,
+                serviceVariablesToDelete: serviceVariablesToDelete,
                 resolutionSession: resolutionSession,
                 sourceLabel: "Post-request script");
 
@@ -375,8 +411,23 @@ public class RequestExecutionService
                 scriptLogs.Add($"Post-request script failed: {postScriptResult.ErrorMessage}");
             }
 
-            _runtimeVariableStore.Set(workspaceId, payload.RequestId, runtimeVariables);
+            await PersistServiceRuntimeVariablesAsync(
+                workspaceId,
+                payload.ServiceId,
+                serviceRuntimeVariables,
+                serviceVariablesToPersist,
+                serviceVariablesToDelete);
+
+            _runtimeVariableStore.SetRequest(
+                workspaceId,
+                payload.RequestId,
+                requestRuntimeVariables);
+            _runtimeVariableStore.SetService(
+                workspaceId,
+                payload.ServiceId,
+                serviceRuntimeVariables);
             result.ScriptVariables = CloneRuntimeVariables(runtimeVariables);
+            result.ServiceScriptVariables = CloneRuntimeVariables(serviceRuntimeVariables);
             result.ScriptLogs = scriptLogs;
 
             var testScript = await ResolveTestScriptAsync(payload);
@@ -400,10 +451,20 @@ public class RequestExecutionService
                     RequestHeadersJson = JsonSerializer.Serialize(resolvedHeaders),
                     RequestBody = resolvedBody,
                     ResponseStatus = result.StatusCode,
+                    StatusText = result.StatusText,
                     ResponseHeadersJson = JsonSerializer.Serialize(responseHeaders),
                     ResponseBody = responseBody,
+                    ContentType = result.ContentType,
                     ResponseTimeMs = result.ResponseTimeMs,
-                    ResponseSizeBytes = result.ResponseSizeBytes
+                    ResponseSizeBytes = result.ResponseSizeBytes,
+                    IsTruncated = result.IsTruncated,
+                    Error = result.Error,
+                    IsSoapFault = result.IsSoapFault,
+                    SoapFault = result.SoapFault,
+                    ScriptVariables = result.ScriptVariables,
+                    ServiceScriptVariables = result.ServiceScriptVariables,
+                    ScriptLogs = result.ScriptLogs,
+                    TestResults = result.TestResults,
                 });
             }
 
@@ -419,6 +480,7 @@ public class RequestExecutionService
                 Error = "Request was cancelled",
                 ResponseTimeMs = stopwatch.ElapsedMilliseconds,
                 ScriptVariables = CloneRuntimeVariables(runtimeVariables),
+                ServiceScriptVariables = CloneRuntimeVariables(serviceRuntimeVariables),
                 ScriptLogs = scriptLogs
             };
         }
@@ -433,6 +495,7 @@ public class RequestExecutionService
                 Error = BuildErrorMessageWithUrl(ex.Message, urlForDiagnostics),
                 ResponseTimeMs = stopwatch.ElapsedMilliseconds,
                 ScriptVariables = CloneRuntimeVariables(runtimeVariables),
+                ServiceScriptVariables = CloneRuntimeVariables(serviceRuntimeVariables),
                 ScriptLogs = scriptLogs
             };
         }
@@ -530,6 +593,10 @@ public class RequestExecutionService
         ScriptRequestState requestState,
         ScriptResponseState? responseState,
         Dictionary<string, RuntimeScriptVariable> runtimeVariables,
+        Dictionary<string, RuntimeScriptVariable> requestRuntimeVariables,
+        Dictionary<string, RuntimeScriptVariable> serviceRuntimeVariables,
+        HashSet<string> serviceVariablesToPersist,
+        HashSet<string> serviceVariablesToDelete,
         TemplateResolutionSession resolutionSession,
         string sourceLabel)
     {
@@ -558,12 +625,42 @@ public class RequestExecutionService
                 if (string.IsNullOrWhiteSpace(normalizedKey)) return;
 
                 var normalizedValue = value?.ToString() ?? "";
-                runtimeVariables[normalizedKey] = new RuntimeScriptVariable
+                var runtimeVariable = new RuntimeScriptVariable
                 {
                     Value = normalizedValue,
-                    Source = sourceLabel
+                    Source = sourceLabel,
+                    Scope = "request"
                 };
+                requestRuntimeVariables[normalizedKey] = runtimeVariable;
+                runtimeVariables[normalizedKey] = runtimeVariable;
                 resolutionSession.SetVariable(normalizedKey, normalizedValue);
+                RefreshAvailableVariables(availableVariables, resolutionSession);
+            }));
+
+            engine.SetValue("setServiceVar", new Action<string, object?, object?>((key, value, persist) =>
+            {
+                var normalizedKey = key?.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedKey)) return;
+
+                var normalizedValue = value?.ToString() ?? "";
+                var shouldPersist = ReadScriptBoolean(persist);
+                var runtimeVariable = new RuntimeScriptVariable
+                {
+                    Value = normalizedValue,
+                    Source = sourceLabel,
+                    Scope = "service"
+                };
+                serviceRuntimeVariables[normalizedKey] = runtimeVariable;
+                if (shouldPersist)
+                    serviceVariablesToPersist.Add(normalizedKey);
+                else
+                    serviceVariablesToPersist.Remove(normalizedKey);
+                serviceVariablesToDelete.Remove(normalizedKey);
+                if (!requestRuntimeVariables.ContainsKey(normalizedKey))
+                {
+                    runtimeVariables[normalizedKey] = runtimeVariable;
+                    resolutionSession.SetVariable(normalizedKey, normalizedValue);
+                }
                 RefreshAvailableVariables(availableVariables, resolutionSession);
             }));
 
@@ -580,8 +677,38 @@ public class RequestExecutionService
                 var normalizedKey = key?.Trim();
                 if (string.IsNullOrWhiteSpace(normalizedKey)) return;
 
-                runtimeVariables.Remove(normalizedKey);
-                resolutionSession.UnsetVariable(normalizedKey);
+                requestRuntimeVariables.Remove(normalizedKey);
+                if (serviceRuntimeVariables.TryGetValue(normalizedKey, out var serviceVariable))
+                {
+                    runtimeVariables[normalizedKey] = serviceVariable;
+                    resolutionSession.SetVariable(normalizedKey, serviceVariable.Value);
+                }
+                else
+                {
+                    runtimeVariables.Remove(normalizedKey);
+                    resolutionSession.UnsetVariable(normalizedKey);
+                }
+                RefreshAvailableVariables(availableVariables, resolutionSession);
+            }));
+
+            engine.SetValue("unsetServiceVar", new Action<string>((key) =>
+            {
+                var normalizedKey = key?.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedKey)) return;
+
+                serviceRuntimeVariables.Remove(normalizedKey);
+                serviceVariablesToPersist.Remove(normalizedKey);
+                serviceVariablesToDelete.Add(normalizedKey);
+                if (requestRuntimeVariables.TryGetValue(normalizedKey, out var requestVariable))
+                {
+                    runtimeVariables[normalizedKey] = requestVariable;
+                    resolutionSession.SetVariable(normalizedKey, requestVariable.Value);
+                }
+                else
+                {
+                    runtimeVariables.Remove(normalizedKey);
+                    resolutionSession.UnsetVariable(normalizedKey);
+                }
                 RefreshAvailableVariables(availableVariables, resolutionSession);
             }));
 
@@ -838,9 +965,110 @@ public class RequestExecutionService
             pair => new RuntimeScriptVariable
             {
                 Value = pair.Value.Value,
-                Source = pair.Value.Source
+                Source = pair.Value.Source,
+                Scope = pair.Value.Scope
             },
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, RuntimeScriptVariable> MergeRuntimeVariables(
+        Dictionary<string, RuntimeScriptVariable> serviceRuntimeVariables,
+        Dictionary<string, RuntimeScriptVariable> requestRuntimeVariables)
+    {
+        var merged = CloneRuntimeVariables(serviceRuntimeVariables);
+        foreach (var (key, value) in requestRuntimeVariables)
+            merged[key] = value;
+
+        return merged;
+    }
+
+    private async Task PersistServiceRuntimeVariablesAsync(
+        string workspaceId,
+        string? serviceId,
+        Dictionary<string, RuntimeScriptVariable> serviceRuntimeVariables,
+        HashSet<string> serviceVariablesToPersist,
+        HashSet<string> serviceVariablesToDelete)
+    {
+        if (string.IsNullOrWhiteSpace(serviceId))
+            return;
+
+        try
+        {
+            var activeEnvironmentId = (await _environmentRepo.GetByWorkspaceAsync(workspaceId))
+                .FirstOrDefault(environment => environment.IsActive)?.Id;
+            var persistedVariables = (await _serviceVariableRepo.GetByServiceAsync(serviceId)).ToList();
+
+            foreach (var key in serviceVariablesToDelete)
+            {
+                var existing = FindServiceVariable(persistedVariables, key, activeEnvironmentId);
+                if (existing != null)
+                {
+                    await _serviceVariableRepo.DeleteAsync(existing.Id);
+                    persistedVariables.Remove(existing);
+                }
+            }
+
+            foreach (var key in serviceVariablesToPersist)
+            {
+                if (!serviceRuntimeVariables.TryGetValue(key, out var runtimeVariable))
+                    continue;
+
+                var existing = FindServiceVariable(persistedVariables, key, activeEnvironmentId);
+                var environmentId = existing?.EnvironmentId ?? activeEnvironmentId;
+                var saved = await _serviceVariableRepo.UpsertAsync(
+                    serviceId,
+                    existing?.Id,
+                    key,
+                    runtimeVariable.Value,
+                    existing?.IsSecret == true || IsSensitiveServiceVariable(key),
+                    true,
+                    environmentId);
+
+                if (existing == null)
+                    persistedVariables.Add(saved);
+                else
+                {
+                    var index = persistedVariables.IndexOf(existing);
+                    persistedVariables[index] = saved;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist service runtime variables for service {ServiceId}", serviceId);
+        }
+    }
+
+    private static ServiceVariable? FindServiceVariable(
+        IEnumerable<ServiceVariable> variables,
+        string key,
+        string? activeEnvironmentId)
+    {
+        return variables.FirstOrDefault(variable =>
+                   variable.Key.Equals(key, StringComparison.OrdinalIgnoreCase) &&
+                   variable.EnvironmentId == activeEnvironmentId)
+            ?? variables.FirstOrDefault(variable =>
+                variable.Key.Equals(key, StringComparison.OrdinalIgnoreCase) &&
+                variable.EnvironmentId == null);
+    }
+
+    private static bool IsSensitiveServiceVariable(string key)
+    {
+        return key.Contains("token", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("password", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("code", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ReadScriptBoolean(object? value)
+    {
+        return value switch
+        {
+            bool booleanValue => booleanValue,
+            JsValue jsValue when jsValue.Type == Types.Boolean => jsValue.AsBoolean(),
+            string stringValue when bool.TryParse(stringValue, out var booleanValue) => booleanValue,
+            _ => false,
+        };
     }
 
     private static List<KeyValuePairRequest> MergeHeaders(
@@ -910,6 +1138,12 @@ public class RequestExecutionService
         return string.Equals(authType?.Trim(), expected, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool ContainsUnresolvedVariable(string value)
+    {
+        return value.Contains("{{", StringComparison.Ordinal) &&
+            value.Contains("}}", StringComparison.Ordinal);
+    }
+
     private static string ResolveOAuthOwnerKey(ExecuteRequestPayload payload)
     {
         var requestAuthIsExplicit = payload.Auth != null &&
@@ -945,7 +1179,10 @@ public class RequestExecutionService
 
             case "bearer":
                 var token = resolutionSession.Resolve(config.GetProperty("token").GetString() ?? "");
-                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+                if (!string.IsNullOrWhiteSpace(token) && !ContainsUnresolvedVariable(token))
+                {
+                    request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+                }
                 break;
 
             case "apikey":

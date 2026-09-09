@@ -70,7 +70,6 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnName("pre_request_script");
 
                     b.Property<string>("ServiceId")
-                        .IsRequired()
                         .HasColumnType("TEXT")
                         .HasColumnName("service_id");
 
@@ -93,11 +92,18 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("url");
 
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("workspace_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("FolderId");
 
                     b.HasIndex("ServiceId");
+
+                    b.HasIndex("WorkspaceId");
 
                     b.ToTable("requests");
                 });
@@ -181,10 +187,26 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("id");
 
+                    b.Property<string>("ContentType")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("response_content_type");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("response_error");
+
                     b.Property<string>("ExecutedAt")
                         .IsRequired()
                         .HasColumnType("TEXT")
                         .HasColumnName("executed_at");
+
+                    b.Property<bool>("IsSoapFault")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("is_soap_fault");
+
+                    b.Property<bool>("IsTruncated")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("response_is_truncated");
 
                     b.Property<string>("Method")
                         .IsRequired()
@@ -223,6 +245,30 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("response_time_ms");
 
+                    b.Property<string>("ScriptLogsJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("script_logs_json");
+
+                    b.Property<string>("ScriptVariablesJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("script_variables_json");
+
+                    b.Property<string>("ServiceScriptVariablesJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("service_script_variables_json");
+
+                    b.Property<string>("SoapFaultJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("soap_fault_json");
+
+                    b.Property<string>("StatusText")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("response_status_text");
+
+                    b.Property<string>("TestResultsJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("test_results_json");
+
                     b.Property<string>("Url")
                         .IsRequired()
                         .HasColumnType("TEXT")
@@ -250,6 +296,16 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("id");
 
+                    b.Property<string>("Behavior")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("behavior");
+
+                    b.Property<string>("BehaviorConfigJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("behavior_config_json");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasColumnType("TEXT")
@@ -263,16 +319,6 @@ namespace RequestLoom.Api.Migrations
                     b.Property<int>("DelayMs")
                         .HasColumnType("INTEGER")
                         .HasColumnName("delay_ms");
-
-                    b.Property<string>("Behavior")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("behavior");
-
-                    b.Property<string>("BehaviorConfigJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("behavior_config_json");
 
                     b.Property<string>("Method")
                         .IsRequired()
@@ -805,6 +851,11 @@ namespace RequestLoom.Api.Migrations
                     b.HasOne("RequestLoom.Api.Data.Entities.ServiceRow", null)
                         .WithMany()
                         .HasForeignKey("ServiceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("RequestLoom.Api.Data.Entities.WorkspaceRow", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

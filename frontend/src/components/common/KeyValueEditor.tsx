@@ -3,6 +3,8 @@ import { AutocompleteInput } from './AutocompleteInput';
 import type { KeyValueEntry } from '../../types';
 import type { DocumentationSection } from '../../stores/uiStore';
 import { DocHelpButton } from '../documentation/DocumentationLink';
+import { VariablePreview } from './VariablePreview';
+import type { ResolvedVariableLookup } from './variablePreviewUtils';
 
 interface Props {
   entries: KeyValueEntry[];
@@ -14,6 +16,8 @@ interface Props {
   dynamicSuggestions?: string[];
   helpSection?: DocumentationSection;
   helpTitle?: string;
+  resolvedVariables?: ResolvedVariableLookup;
+  variableResolutionReady?: boolean;
 }
 
 const GRID_COLS = 'grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)] gap-2 items-center';
@@ -21,7 +25,7 @@ const GRID_COLS = 'grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)] gap-2 items
 const iconButtonClass = 'flex h-[26px] w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-700 hover:text-gray-200 disabled:cursor-default disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-gray-500';
 const deleteButtonClass = 'flex h-[26px] w-7 items-center justify-center rounded text-gray-500 hover:bg-rose-500/20 hover:text-rose-300';
 
-export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valuePlaceholder = 'Value', keySuggestions, valueSuggestionsMap, dynamicSuggestions = [], helpSection, helpTitle }: Props) {
+export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valuePlaceholder = 'Value', keySuggestions, valueSuggestionsMap, dynamicSuggestions = [], helpSection, helpTitle, resolvedVariables, variableResolutionReady = true }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const nextPlaceholderId = useRef(1);
   const lastFocus = useRef<{ id: string; field: string } | null>(null);
@@ -164,6 +168,12 @@ export function KeyValueEditor({ entries, onChange, keyPlaceholder = 'Key', valu
                   />
                 )}
                 <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 pr-1">
+                  <VariablePreview
+                    value={entry.value}
+                    variables={resolvedVariables}
+                    ready={variableResolutionReady}
+                    compact
+                  />
                   <button
                     onClick={() => handleMove(i, -1)}
                     disabled={i === 0}

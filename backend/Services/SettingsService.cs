@@ -26,6 +26,7 @@ public class SettingsService
     private const string KeyFollowRedirects = "followRedirects";
     private const string KeyMaxRedirects = "maxRedirects";
     private const string KeyRequestTimeoutMs = "requestTimeoutMs";
+    private const string KeyAutoSave = "autoSave";
     private const string KeyIgnoreSslErrors = "ignoreSslErrors";
     private const string KeyMaxResponseBodySizeMb = "maxResponseBodySizeMb";
     private const string KeySaveHistory = "saveHistory";
@@ -108,6 +109,9 @@ public class SettingsService
     /// <summary>Default request timeout in milliseconds. 0 = no timeout.</summary>
     public long RequestTimeoutMs => GetLong(KeyRequestTimeoutMs, 120_000);
 
+    /// <summary>Whether request edits are persisted automatically.</summary>
+    public bool AutoSave => GetBool(KeyAutoSave, true);
+
     /// <summary>Whether requests follow HTTP redirects by default.</summary>
     public bool FollowRedirects => GetBool(KeyFollowRedirects, true);
 
@@ -150,6 +154,7 @@ public class SettingsService
             JsonStorageStrategy = JsonStorageStrategy,
             RestartRequired = false,
             RequestTimeoutMs = RequestTimeoutMs,
+            AutoSave = AutoSave,
             FollowRedirects = FollowRedirects,
             MaxRedirects = MaxRedirects,
             IgnoreSslErrors = IgnoreSslErrors,
@@ -216,6 +221,7 @@ public class SettingsService
             if (newMode != null) _overrides[KeyStorageMode] = newMode;
             if (newJsonStorageStrategy != null) _overrides[KeyJsonStorageStrategy] = newJsonStorageStrategy;
             if (request.RequestTimeoutMs.HasValue) _overrides[KeyRequestTimeoutMs] = request.RequestTimeoutMs.Value.ToString(CultureInfo.InvariantCulture);
+            if (request.AutoSave.HasValue) _overrides[KeyAutoSave] = request.AutoSave.Value ? "true" : "false";
             if (request.FollowRedirects.HasValue) _overrides[KeyFollowRedirects] = request.FollowRedirects.Value ? "true" : "false";
             if (request.MaxRedirects.HasValue) _overrides[KeyMaxRedirects] = request.MaxRedirects.Value.ToString(CultureInfo.InvariantCulture);
             if (request.IgnoreSslErrors.HasValue) _overrides[KeyIgnoreSslErrors] = request.IgnoreSslErrors.Value ? "true" : "false";
@@ -238,6 +244,7 @@ public class SettingsService
             JsonStorageStrategy = JsonStorageStrategy,
             RestartRequired = restartRequired,
             RequestTimeoutMs = RequestTimeoutMs,
+            AutoSave = AutoSave,
             FollowRedirects = FollowRedirects,
             MaxRedirects = MaxRedirects,
             IgnoreSslErrors = IgnoreSslErrors,
@@ -317,6 +324,7 @@ public class AppSettingsDto
     public string JsonStorageStrategy { get; set; } = SettingsService.JsonSingleFile;
     public bool RestartRequired { get; set; }
     public long RequestTimeoutMs { get; set; } = 120_000;
+    public bool AutoSave { get; set; } = true;
     public bool FollowRedirects { get; set; } = true;
     public int MaxRedirects { get; set; } = SettingsService.DefaultMaxRedirects;
     public bool IgnoreSslErrors { get; set; }
@@ -335,6 +343,7 @@ public class UpdateSettingsRequest
     public string? StorageMode { get; set; }
     public string? JsonStorageStrategy { get; set; }
     public long? RequestTimeoutMs { get; set; }
+    public bool? AutoSave { get; set; }
     public bool? FollowRedirects { get; set; }
     public int? MaxRedirects { get; set; }
     public bool? IgnoreSslErrors { get; set; }

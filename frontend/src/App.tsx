@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { MainLayout } from './layouts/MainLayout';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { RequestBuilder } from './components/request-builder/RequestBuilder';
@@ -17,14 +17,27 @@ import { useScriptFileStore } from './stores/scriptFileStore';
 import { DevToolsPanel } from './components/common/DevToolsPanel';
 import { JavaScriptFileEditor } from './components/script-files/JavaScriptFileEditor';
 import { DocumentationPage } from './components/documentation/DocumentationPage';
+import { NewRequestModal } from './components/common/NewRequestModal';
+import type { ApiRequest, HttpMethod } from './types';
 
 function App() {
   const { activeWorkspaceId, load: loadWorkspaces } = useWorkspaceStore();
   const { load: loadEnvironments } = useEnvironmentStore();
-  const { loadServices, sendRequest, services } = useRequestStore();
+  const {
+    loadServices,
+    sendRequest,
+    services,
+    activeRequestId,
+    saveRequest,
+    createRequest,
+    createService,
+    createTopLevelRequest,
+    selectRequest,
+  } = useRequestStore();
   const { load: loadScriptFiles, activeFileKey } = useScriptFileStore();
   const { load: loadMockServers } = useMockServerStore();
   const { load: loadSettings } = useSettingsStore();
+  const [newRequestModalOpen, setNewRequestModalOpen] = useState(false);
   const {
     sidebarTab,
     docsSection,
@@ -97,6 +110,20 @@ function App() {
         }
       }
 
+      if (mod && !e.altKey && !e.shiftKey) {
+        const key = e.key.toLowerCase();
+        if (key === 's') {
+          if (activeRequestId) void saveRequest(activeRequestId);
+          e.preventDefault();
+          return;
+        }
+        if (key === 'n') {
+          setNewRequestModalOpen(true);
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (sidebarTab !== 'services' || serviceSettingsServiceId) return;
       if (mod && e.key === 'Enter') {
         e.preventDefault();
@@ -107,6 +134,9 @@ function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [
     activeWorkspaceId,
+    activeRequestId,
+    saveRequest,
+    setNewRequestModalOpen,
     sendRequest,
     serviceSettingsServiceId,
     sidebarTab,
@@ -157,10 +187,31 @@ function App() {
   // The request tab bar only belongs to the Services view.
   const showRequestTabs = !showServiceSettings && sidebarTab === 'services';
 
+  const handleNewRequestCreate = async (draft: {
+    name: string;
+    method: HttpMethod;
+    url: string;
+    collectionId: string | null;
+    newCollectionName: string;
+  }) => {
+    let created: ApiRequest;
+    if (draft.newCollectionName) {
+      const collection = await createService(activeWorkspaceId, draft.newCollectionName);
+      created = await createRequest(collection.id, draft.name, draft.method, null, draft.url);
+    } else if (draft.collectionId) {
+      created = await createRequest(draft.collectionId, draft.name, draft.method, null, draft.url);
+    } else {
+      created = await createTopLevelRequest(activeWorkspaceId, draft.name, draft.method, draft.url);
+    }
+    await selectRequest(created.id);
+    setNewRequestModalOpen(false);
+  };
+
   return (
-    <MainLayout
-      sidebar={<Sidebar />}
-      main={(
+    <>
+      <MainLayout
+        sidebar={<Sidebar />}
+        main={(
         <>
           {showRequestTabs ? <RequestTabBar /> : null}
           <div
@@ -202,8 +253,16 @@ function App() {
           </div>
           <DevToolsPanel />
         </>
+        )}
+      />
+      {newRequestModalOpen && (
+        <NewRequestModal
+          onClose={() => setNewRequestModalOpen(false)}
+          collections={services.map((service) => ({ id: service.id, name: service.name }))}
+          onCreate={handleNewRequestCreate}
+        />
       )}
-    />
+    </>
   );
 }
 

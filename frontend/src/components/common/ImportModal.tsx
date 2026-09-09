@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import axios from 'axios';
 import { toolsApi, importsApi } from '../../services/api';
 import { useRequestStore } from '../../stores/requestStore';
-import type { CurlParseResult } from '../../types';
+import type { ApiRequest, CurlParseResult } from '../../types';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
@@ -27,7 +27,7 @@ const SELECT_CLASS = 'border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs tex
 const INPUT_CLASS = 'w-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-100 outline-none focus:border-gray-500';
 
 export function ImportModal({ onClose, workspaceId }: Props) {
-  const { services, createService, createRequest, loadServices } = useRequestStore();
+  const { services, createService, createRequest, createTopLevelRequest, loadServices } = useRequestStore();
 
   const [kind, setKind] = useState<ImportKind>('openapi');
 
@@ -56,6 +56,7 @@ export function ImportModal({ onClose, workspaceId }: Props) {
   const isPostman = kind === 'postman';
   const isBruno = kind === 'bruno';
   const busy = specBusy || curlBusy || curlImporting || brunoBusy;
+  const isTopLevel = serviceId === '__top_level__';
 
   const handleSpecImport = async () => {
     if (!source.trim()) return;
@@ -66,8 +67,9 @@ export function ImportModal({ onClose, workspaceId }: Props) {
       const payload = {
         sourceType: isPostman ? 'raw' : sourceType,
         source: source.trim(),
-        serviceId: serviceId || null,
-        serviceName: serviceId ? null : (serviceName.trim() || null),
+        serviceId: isTopLevel ? null : (serviceId || null),
+        serviceName: isTopLevel || serviceId ? null : (serviceName.trim() || null),
+        topLevel: isTopLevel,
       };
 
       const result = kind === 'openapi'
@@ -114,8 +116,9 @@ export function ImportModal({ onClose, workspaceId }: Props) {
       const result = await importsApi.bruno(
         workspaceId,
         brunoFiles,
-        serviceId || undefined,
-        serviceId ? undefined : (serviceName.trim() || undefined),
+        isTopLevel ? undefined : (serviceId || undefined),
+        isTopLevel || serviceId ? undefined : (serviceName.trim() || undefined),
+        isTopLevel,
       );
 
       await loadServices(workspaceId);
@@ -156,17 +159,23 @@ export function ImportModal({ onClose, workspaceId }: Props) {
     setCurlImporting(true);
     setError(null);
     try {
-      let targetServiceId = '';
-      const SvcName = parsed.serviceName || 'Imported';
-      const existing = services.find(s => s.name === SvcName);
-      if (existing) {
-        targetServiceId = existing.id;
+      let req: ApiRequest;
+      if (isTopLevel) {
+        req = await createTopLevelRequest(workspaceId, parsed.url || 'Imported Request', parsed.method || 'GET');
       } else {
-        const svc = await createService(workspaceId, SvcName);
-        targetServiceId = svc.id;
+        let targetServiceId = serviceId;
+        const SvcName = parsed.serviceName || 'Imported';
+        if (!targetServiceId) {
+          const existing = services.find(s => s.name === SvcName);
+          if (existing) {
+            targetServiceId = existing.id;
+          } else {
+            const svc = await createService(workspaceId, SvcName);
+            targetServiceId = svc.id;
+          }
+        }
+        req = await createRequest(targetServiceId, parsed.url || 'Imported Request', parsed.method || 'GET');
       }
-
-      const req = await createRequest(targetServiceId, parsed.url || 'Imported Request', parsed.method || 'GET');
 
       const { updateRequest, selectRequest } = useRequestStore.getState();
       await updateRequest(req.id, {
@@ -201,7 +210,7 @@ export function ImportModal({ onClose, workspaceId }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[140] flex items-center justify-center bg-black/55 p-4"
+      className="titlebar-no-drag fixed inset-0 z-[140] flex items-center justify-center bg-black/55 p-4"
       onMouseDown={e => { if (e.currentTarget === e.target) close(); }}>
       <div className="flex h-[min(340px,65vh)] w-full max-w-xl flex-col border border-gray-700 bg-[#141414] shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
         {/* Header with kind tabs */}
@@ -258,7 +267,8 @@ export function ImportModal({ onClose, workspaceId }: Props) {
                   className={SELECT_CLASS}
                   disabled={busy}
                 >
-                  <option value="">Create new service</option>
+                  <option value="">Create new collection</option>
+                  <option value="__top_level__">Top-level request(s)</option>
                   {services.map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
@@ -270,7 +280,7 @@ export function ImportModal({ onClose, workspaceId }: Props) {
                   type="text"
                   value={serviceName}
                   onChange={e => setServiceName(e.target.value)}
-                  placeholder="New service name (optional)"
+                  placeholder="New collection name (optional)"
                   className={INPUT_CLASS}
                   disabled={busy}
                 />
@@ -336,7 +346,8 @@ export function ImportModal({ onClose, workspaceId }: Props) {
                   className={SELECT_CLASS}
                   disabled={busy}
                 >
-                  <option value="">Create new service</option>
+                  <option value="">Create new collection</option>
+                  <option value="__top_level__">Top-level request(s)</option>
                   {services.map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
@@ -346,7 +357,7 @@ export function ImportModal({ onClose, workspaceId }: Props) {
                     type="text"
                     value={serviceName}
                     onChange={e => setServiceName(e.target.value)}
-                    placeholder="New service name (optional)"
+                    placeholder="New collection name (optional)"
                     className={INPUT_CLASS}
                     disabled={busy}
                   />
@@ -371,6 +382,18 @@ export function ImportModal({ onClose, workspaceId }: Props) {
               <p className="text-xs text-gray-500">
                 Paste a cURL command to create a request. Headers, body, auth, and method are auto-detected.
               </p>
+              <select
+                value={serviceId}
+                onChange={e => setServiceId(e.target.value)}
+                className={`${SELECT_CLASS} w-full`}
+                disabled={busy}
+              >
+                <option value="">Create new collection from command</option>
+                <option value="__top_level__">Top-level request</option>
+                {services.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
               <textarea
                 value={curlText}
                 onChange={e => setCurlText(e.target.value)}

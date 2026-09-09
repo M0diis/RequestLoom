@@ -149,10 +149,20 @@ public class JsonHistoryRepository : IHistoryRepository
             RequestHeadersJson = entry.RequestHeadersJson,
             RequestBody = entry.RequestBody,
             ResponseStatus = entry.ResponseStatus,
+            StatusText = entry.StatusText,
             ResponseHeadersJson = entry.ResponseHeadersJson,
             ResponseBody = entry.ResponseBody,
+            ContentType = entry.ContentType,
             ResponseTimeMs = entry.ResponseTimeMs,
             ResponseSizeBytes = entry.ResponseSizeBytes,
+            IsTruncated = entry.IsTruncated,
+            Error = entry.Error,
+            IsSoapFault = entry.IsSoapFault,
+            SoapFault = entry.SoapFault,
+            ScriptVariables = entry.ScriptVariables,
+            ServiceScriptVariables = entry.ServiceScriptVariables,
+            ScriptLogs = entry.ScriptLogs,
+            TestResults = entry.TestResults,
             ExecutedAt = entry.ExecutedAt
         };
     }

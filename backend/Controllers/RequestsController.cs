@@ -79,6 +79,14 @@ public class RequestsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{id}/move/top-level")]
+    public async Task<IActionResult> MoveToTopLevel(string id)
+    {
+        var moved = await _repo.MoveToTopLevelAsync(id);
+        if (!moved) return NotFound();
+        return NoContent();
+    }
+
     [HttpPost("{id}/move/{newServiceId}")]
     public async Task<IActionResult> MoveToService(string id, string newServiceId)
     {
@@ -119,6 +127,29 @@ public class RequestsController : ControllerBase
         var deleted = await _repo.DeleteAsync(id);
         if (!deleted) return NotFound();
         return NoContent();
+    }
+
+    [HttpGet("workspace/{workspaceId}/top-level")]
+    public async Task<IActionResult> GetTopLevel(string workspaceId)
+    {
+        return Ok(await _repo.GetByWorkspaceIdAsync(workspaceId));
+    }
+
+    [HttpPost("workspace/{workspaceId}")]
+    public async Task<IActionResult> CreateTopLevel(string workspaceId, [FromBody] CreateApiRequestRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest("Name is required");
+
+        try
+        {
+            var created = await _repo.CreateTopLevelAsync(workspaceId, request);
+            return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpPut("{id}/folder")]

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { serviceVariablesApi, workspaceVariablesApi } from '../../services/api';
 import { useEnvironmentStore } from '../../stores/environmentStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
@@ -150,6 +150,11 @@ export function VariableManagerPage() {
     }
     return false;
   }, [serviceVariables, serviceDrafts]);
+  const serviceDirtyRef = useRef(false);
+
+  useEffect(() => {
+    serviceDirtyRef.current = serviceDirty;
+  }, [serviceDirty]);
 
   useEffect(() => {
     if (variableServiceFilterId && services.some((s) => s.id === variableServiceFilterId)) {
@@ -207,12 +212,23 @@ export function VariableManagerPage() {
     setGlobalDrafts(toDraftMap(vars));
   };
 
-  const refreshService = async () => {
+  const refreshService = useCallback(async () => {
     if (!selectedServiceId) return;
     const vars = await serviceVariablesApi.getAll(selectedServiceId);
     setServiceVariables(vars);
     setServiceDrafts(toDraftMap(vars));
-  };
+  }, [selectedServiceId]);
+
+  useEffect(() => {
+    const handleServiceVariablesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ serviceId?: string; invalidateRuntime?: boolean }>).detail;
+      if (detail?.serviceId === selectedServiceId && !serviceDirtyRef.current) {
+        void refreshService();
+      }
+    };
+    window.addEventListener('service-variables:updated', handleServiceVariablesUpdated);
+    return () => window.removeEventListener('service-variables:updated', handleServiceVariablesUpdated);
+  }, [selectedServiceId, refreshService]);
 
   const handleCreateEnv = async () => {
     const name = newEnvName.trim();

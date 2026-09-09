@@ -44,8 +44,8 @@ public class ExportImportController : ControllerBase
         if (data == null)
             return BadRequest(new { error = "No import data provided" });
 
-        if (data.Services.Count == 0 && data.Environments.Count == 0)
-            return BadRequest(new { error = "Import data is empty: no services or environments found" });
+        if (data.Services.Count == 0 && data.TopLevelRequests.Count == 0 && data.Environments.Count == 0)
+            return BadRequest(new { error = "Import data is empty: no collections, requests, or environments found" });
 
         try
         {

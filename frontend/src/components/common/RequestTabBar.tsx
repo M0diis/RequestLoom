@@ -13,11 +13,16 @@ const METHOD_COLORS: Record<string, string> = {
 };
 
 export function RequestTabBar() {
-  const { services, openRequestIds, activeRequestId, selectRequest, closeRequest } = useRequestStore();
+  const { services, topLevelRequests, openRequestIds, activeRequestId, selectRequest, closeRequest } = useRequestStore();
   const { tabs: scriptTabs, openFileKeys, activeFileKey, setActiveFile, closeFile } = useScriptFileStore();
 
   const openRequests = useMemo(() => {
     const result: { id: string; name: string; method: string }[] = [];
+    for (const req of topLevelRequests) {
+      if (openRequestIds.includes(req.id)) {
+        result.push({ id: req.id, name: req.name, method: req.method });
+      }
+    }
     for (const svc of services) {
       for (const req of svc.requests) {
         if (openRequestIds.includes(req.id)) {
@@ -28,7 +33,7 @@ export function RequestTabBar() {
     // Preserve tab order
     result.sort((a, b) => openRequestIds.indexOf(a.id) - openRequestIds.indexOf(b.id));
     return result;
-  }, [services, openRequestIds]);
+  }, [services, topLevelRequests, openRequestIds]);
 
   const openScripts = useMemo(
     () => openFileKeys

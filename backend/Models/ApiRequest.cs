@@ -3,7 +3,8 @@ namespace RequestLoom.Api.Models;
 public class ApiRequest
 {
     public string Id { get; set; } = "";
-    public string ServiceId { get; set; } = "";
+    public string WorkspaceId { get; set; } = "";
+    public string? ServiceId { get; set; }
     public string? FolderId { get; set; }
     public string Name { get; set; } = "";
     public string Method { get; set; } = "GET";

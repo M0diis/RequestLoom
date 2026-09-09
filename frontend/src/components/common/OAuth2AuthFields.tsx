@@ -2,11 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { oauthApi } from '../../services/api';
 import type { OAuth2Configuration, OAuthTokenStatus } from '../../types';
 import { DocHelpButton } from '../documentation/DocumentationLink';
+import { VariablePreview } from './VariablePreview';
+import type { ResolvedVariableLookup } from './variablePreviewUtils';
 
 interface Props {
   config: Record<string, string>;
   onChange: (config: Record<string, string>) => void;
   ownerKey: string;
+  resolvedVariables?: ResolvedVariableLookup;
+  variableResolutionReady?: boolean;
 }
 
 interface PendingAuthorization {
@@ -63,7 +67,7 @@ function formatExpiry(status: OAuthTokenStatus | null): string {
   return 'expires ' + date.toLocaleTimeString();
 }
 
-export function OAuth2AuthFields({ config, onChange, ownerKey }: Props) {
+export function OAuth2AuthFields({ config, onChange, ownerKey, resolvedVariables, variableResolutionReady = true }: Props) {
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [status, setStatus] = useState<OAuthTokenStatus | null>(null);
   const [message, setMessage] = useState('');
@@ -233,18 +237,32 @@ export function OAuth2AuthFields({ config, onChange, ownerKey }: Props) {
   const inputClass = 'w-full border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-gray-100 outline-none focus:border-gray-500';
   const labelClass = 'mb-1 block text-[11px] text-gray-500';
   const messageClass = connectionState === 'error' ? 'text-[11px] text-rose-400' : 'text-[11px] text-gray-500';
+  const renderInput = (field: string, placeholder: string, type = 'text', sensitive = false) => (
+    <>
+      <input
+        className={inputClass}
+        type={type}
+        autoComplete={sensitive ? 'new-password' : undefined}
+        value={config[field] ?? ''}
+        onChange={(event) => update(field, event.target.value)}
+        placeholder={placeholder}
+      />
+      <VariablePreview
+        value={config[field] ?? ''}
+        variables={resolvedVariables}
+        ready={variableResolutionReady}
+        sensitive={sensitive}
+      />
+    </>
+  );
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-1">
-          <input
-            className={inputClass}
-            placeholder="OIDC issuer (optional)"
-            value={config.issuer ?? ''}
-            onChange={(event) => update('issuer', event.target.value)}
-            aria-label="OIDC issuer"
-          />
+          <div className="min-w-0 flex-1">
+            {renderInput('issuer', 'OIDC issuer (optional)')}
+          </div>
           <DocHelpButton section="http" title="Open OAuth2 and authentication documentation" />
         </div>
         <button
@@ -259,34 +277,34 @@ export function OAuth2AuthFields({ config, onChange, ownerKey }: Props) {
 
       <div>
         <label className={labelClass}>Authorization URL</label>
-        <input className={inputClass} value={config.authorizationUrl ?? ''} onChange={(event) => update('authorizationUrl', event.target.value)} placeholder="https://idp.example.com/authorize" />
+        {renderInput('authorizationUrl', 'https://idp.example.com/authorize')}
       </div>
       <div>
         <label className={labelClass}>Token URL</label>
-        <input className={inputClass} value={config.tokenUrl ?? ''} onChange={(event) => update('tokenUrl', event.target.value)} placeholder="https://idp.example.com/oauth/token" />
+        {renderInput('tokenUrl', 'https://idp.example.com/oauth/token')}
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className={labelClass}>Client ID</label>
-          <input className={inputClass} value={config.clientId ?? ''} onChange={(event) => update('clientId', event.target.value)} placeholder="public-client-id" />
+          {renderInput('clientId', 'public-client-id')}
         </div>
         <div>
           <label className={labelClass}>Client secret (optional)</label>
-          <input className={inputClass} type="password" autoComplete="new-password" value={config.clientSecret ?? ''} onChange={(event) => update('clientSecret', event.target.value)} placeholder="Leave blank for public clients" />
+          {renderInput('clientSecret', 'Leave blank for public clients', 'password', true)}
         </div>
       </div>
       <div>
         <label className={labelClass}>Scopes</label>
-        <input className={inputClass} value={config.scope ?? DEFAULT_SCOPE} onChange={(event) => update('scope', event.target.value)} placeholder="openid profile email" />
+        {renderInput('scope', 'openid profile email')}
       </div>
       <div>
         <label className={labelClass}>Redirect URI</label>
-        <input className={inputClass} value={config.redirectUri ?? ''} onChange={(event) => update('redirectUri', event.target.value)} placeholder={window.location.origin + '/oauth/callback'} />
+        {renderInput('redirectUri', window.location.origin + '/oauth/callback')}
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className={labelClass}>Audience (optional)</label>
-          <input className={inputClass} value={config.audience ?? ''} onChange={(event) => update('audience', event.target.value)} placeholder="https://api.example.com" />
+          {renderInput('audience', 'https://api.example.com')}
         </div>
         <div>
           <label className={labelClass}>Token client authentication</label>
