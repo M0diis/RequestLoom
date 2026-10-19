@@ -72,6 +72,7 @@ public class RequestFolderRow
 {
     [Key, Column("id")] public string Id { get; set; } = "";
     [Column("service_id")] public string ServiceId { get; set; } = "";
+    [Column("parent_folder_id")] public string? ParentFolderId { get; set; }
     [Column("name")] public string Name { get; set; } = "";
     [Column("sort_order")] public int SortOrder { get; set; }
     [Column("created_at")] public string CreatedAt { get; set; } = "";

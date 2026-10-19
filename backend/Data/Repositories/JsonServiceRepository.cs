@@ -98,21 +98,25 @@ public class JsonServiceRepository : IServiceRepository
         return Task.FromResult(updated == null ? null : Clone(updated));
     }
 
-    public Task<RequestFolder?> CreateFolderAsync(string workspaceId, string serviceId, string name)
+    public Task<RequestFolder?> CreateFolderAsync(string workspaceId, string serviceId, string name, string? parentFolderId = null)
     {
         RequestFolder? created = null;
         string? serviceName = null;
         string? storagePath = null;
+        string? folderPath = null;
+        parentFolderId = string.IsNullOrWhiteSpace(parentFolderId) ? null : parentFolderId;
         _store.Mutate(doc =>
         {
             var service = doc.Services.FirstOrDefault(row => row.Id == serviceId && row.WorkspaceId == workspaceId);
             if (service == null) return;
+            if (parentFolderId != null &&
+                !doc.RequestFolders.Any(folder => folder.Id == parentFolderId && folder.ServiceId == serviceId)) return;
 
             serviceName = service.Name;
             storagePath = service.StoragePath;
 
             var maxOrder = doc.RequestFolders
-                .Where(folder => folder.ServiceId == serviceId)
+                .Where(folder => folder.ServiceId == serviceId && folder.ParentFolderId == parentFolderId)
                 .Select(folder => (int?)folder.SortOrder)
                 .Max() ?? -1;
 
@@ -120,16 +124,18 @@ public class JsonServiceRepository : IServiceRepository
             {
                 Id = Guid.NewGuid().ToString("N"),
                 ServiceId = serviceId,
+                ParentFolderId = parentFolderId,
                 Name = name,
                 SortOrder = maxOrder + 1,
                 CreatedAt = JsonDataStore.Now(),
             };
             doc.RequestFolders.Add(created);
+            folderPath = JsonDataStore.BuildFolderPath(doc.RequestFolders, created);
         });
 
         if (created != null)
         {
-            _store.EnsureRequestFolderDirectory(serviceId, serviceName ?? "collection", storagePath, created.Name);
+            _store.EnsureRequestFolderDirectory(serviceId, serviceName ?? "collection", storagePath, folderPath ?? created.Name);
         }
 
         return Task.FromResult(created == null ? null : CloneFolder(created));
@@ -140,7 +146,8 @@ public class JsonServiceRepository : IServiceRepository
         RequestFolder? updated = null;
         string? serviceName = null;
         string? storagePath = null;
-        string? oldName = null;
+        string? oldPath = null;
+        string? newPath = null;
         _store.Mutate(doc =>
         {
             var service = doc.Services.FirstOrDefault(row => row.Id == serviceId && row.WorkspaceId == workspaceId);
@@ -149,8 +156,9 @@ public class JsonServiceRepository : IServiceRepository
 
             serviceName = service.Name;
             storagePath = service.StoragePath;
-            oldName = folder.Name;
+            oldPath = JsonDataStore.BuildFolderPath(doc.RequestFolders, folder);
             folder.Name = name;
+            newPath = JsonDataStore.BuildFolderPath(doc.RequestFolders, folder);
             updated = folder;
         });
 
@@ -160,11 +168,62 @@ public class JsonServiceRepository : IServiceRepository
                 serviceId,
                 serviceName ?? "collection",
                 storagePath,
-                oldName ?? updated.Name,
-                updated.Name);
+                oldPath ?? updated.Name,
+                newPath ?? updated.Name);
         }
 
         return Task.FromResult(updated == null ? null : CloneFolder(updated));
+    }
+
+    public Task<RequestFolder?> MoveFolderAsync(string workspaceId, string serviceId, string folderId, string? parentFolderId)
+    {
+        parentFolderId = string.IsNullOrWhiteSpace(parentFolderId) ? null : parentFolderId;
+        RequestFolder? moved = null;
+        string? serviceName = null;
+        string? storagePath = null;
+        string? oldPath = null;
+        string? newPath = null;
+        _store.Mutate(doc =>
+        {
+            var service = doc.Services.FirstOrDefault(row => row.Id == serviceId && row.WorkspaceId == workspaceId);
+            var siblings = doc.RequestFolders.Where(row => row.ServiceId == serviceId).ToList();
+            var folder = siblings.FirstOrDefault(row => row.Id == folderId);
+            if (service == null || folder == null) return;
+            if (folder.ParentFolderId == parentFolderId)
+            {
+                moved = folder;
+                return;
+            }
+
+            if (parentFolderId != null)
+            {
+                // The target must exist and must not be the folder itself or one of its descendants.
+                var byId = siblings.ToDictionary(row => row.Id);
+                if (!byId.ContainsKey(parentFolderId)) return;
+                var seen = new HashSet<string>();
+                for (var current = parentFolderId; current != null && seen.Add(current);
+                     current = byId.TryGetValue(current, out var node) ? node.ParentFolderId : null)
+                {
+                    if (current == folderId) return;
+                }
+            }
+
+            serviceName = service.Name;
+            storagePath = service.StoragePath;
+            oldPath = JsonDataStore.BuildFolderPath(doc.RequestFolders, folder);
+            folder.ParentFolderId = parentFolderId;
+            folder.SortOrder = siblings.Where(row => row.ParentFolderId == parentFolderId && row.Id != folderId)
+                .Select(row => row.SortOrder).DefaultIfEmpty(-1).Max() + 1;
+            newPath = JsonDataStore.BuildFolderPath(doc.RequestFolders, folder);
+            moved = folder;
+        });
+
+        if (moved != null && oldPath != null && newPath != null)
+        {
+            _store.RenameRequestFolderDirectory(serviceId, serviceName ?? "collection", storagePath, oldPath, newPath);
+        }
+
+        return Task.FromResult(moved == null ? null : CloneFolder(moved));
     }
 
     public Task<bool> DeleteFolderAsync(string workspaceId, string serviceId, string folderId)
@@ -181,9 +240,12 @@ public class JsonServiceRepository : IServiceRepository
 
             serviceName = service.Name;
             storagePath = service.StoragePath;
-            folderName = folder.Name;
+            folderName = JsonDataStore.BuildFolderPath(doc.RequestFolders, folder);
+            // Children and requests move up to the deleted folder's parent.
             foreach (var request in doc.Requests.Where(request => request.FolderId == folderId))
-                request.FolderId = null;
+                request.FolderId = folder.ParentFolderId;
+            foreach (var child in doc.RequestFolders.Where(row => row.ParentFolderId == folderId))
+                child.ParentFolderId = folder.ParentFolderId;
             deleted = doc.RequestFolders.Remove(folder);
         });
 
@@ -330,6 +392,7 @@ public class JsonServiceRepository : IServiceRepository
         {
             Id = folder.Id,
             ServiceId = folder.ServiceId,
+            ParentFolderId = folder.ParentFolderId,
             Name = folder.Name,
             SortOrder = folder.SortOrder,
             CreatedAt = folder.CreatedAt,

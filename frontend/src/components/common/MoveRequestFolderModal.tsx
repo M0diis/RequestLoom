@@ -16,6 +16,16 @@ export function MoveRequestFolderModal({
   onConfirm,
   onClose,
 }: MoveRequestFolderModalProps) {
+  const folderPath = (folder: RequestFolder): string => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (let current: RequestFolder | undefined = folder; current && !seen.has(current.id);
+      current = folders.find((item) => item.id === current!.parentFolderId)) {
+      seen.add(current.id);
+      names.unshift(current.name);
+    }
+    return names.join(' / ');
+  };
   const [folderId, setFolderId] = useState(currentFolderId ?? '');
   const [busy, setBusy] = useState(false);
   const modalId = useId();
@@ -68,7 +78,7 @@ export function MoveRequestFolderModal({
           >
             <option value="">Service root (no folder)</option>
             {folders.map((folder) => (
-              <option key={folder.id} value={folder.id}>{folder.name}</option>
+              <option key={folder.id} value={folder.id}>{folderPath(folder)}</option>
             ))}
           </select>
         </div>

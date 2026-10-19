@@ -49,8 +49,19 @@ public class CollectionRunnerService
             ?? throw new InvalidOperationException("Service not found");
         var folder = service.Folders.FirstOrDefault(item => item.Id == folderId)
             ?? throw new InvalidOperationException("Folder not found");
+        // Include requests in nested subfolders.
+        var folderIds = new HashSet<string> { folderId };
+        for (var added = true; added;)
+        {
+            added = false;
+            foreach (var child in service.Folders)
+            {
+                if (child.ParentFolderId != null && folderIds.Contains(child.ParentFolderId) && folderIds.Add(child.Id))
+                    added = true;
+            }
+        }
         var requests = (await _requestRepo.GetByServiceIdAsync(serviceId))
-            .Where(request => string.Equals(request.FolderId, folderId, StringComparison.Ordinal))
+            .Where(request => request.FolderId != null && folderIds.Contains(request.FolderId))
             .ToList();
 
         return await RunRequestsAsync(service, requests, folder, environmentId, stopOnFailure, cancellationToken);

@@ -368,6 +368,19 @@ public class JsonDataStore
         return $"// Shared collection script: {fileName}\n// Use module.exports to expose reusable helpers to request scripts.\n\nmodule.exports = {{}};\n";
     }
 
+    public static string BuildFolderPath(IEnumerable<RequestFolder> folders, RequestFolder folder)
+    {
+        var byId = folders.ToDictionary(row => row.Id);
+        var names = new List<string>();
+        var seen = new HashSet<string>();
+        for (var current = folder; current != null && seen.Add(current.Id);
+             current = current.ParentFolderId != null && byId.TryGetValue(current.ParentFolderId, out var parent) ? parent : null)
+        {
+            names.Insert(0, current.Name);
+        }
+        return string.Join('/', names);
+    }
+
     private string ResolveRequestFolderPath(
         string serviceId,
         string serviceName,
@@ -552,7 +565,7 @@ public class JsonDataStore
                     service.StoragePath,
                     filePath,
                     strategy,
-                    folder.Name));
+                    BuildFolderPath(document.RequestFolders, folder)));
             }
         }
     }
@@ -619,7 +632,9 @@ public class JsonDataStore
                 : Path.Combine(collectionsDirectory, $"collection-{suffix}");
         }
 
-        return Path.Combine(serviceDirectory, SanitizeFileName(folderName));
+        // folderName may be a "/"-joined chain of ancestor names for nested folders.
+        var segments = folderName.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(SanitizeFileName);
+        return Path.Combine(segments.Prepend(serviceDirectory).ToArray());
     }
 
     private static JsonDataDocument CloneDocument(JsonDataDocument document)

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
+using RequestLoom.Api.Data;
 using RequestLoom.Api.Models;
 
 namespace RequestLoom.Api.Services;
@@ -43,7 +44,8 @@ public partial class CollectionImportService
             else CollectSoapUiSoap(iface, requests, warnings);
         }
 
-        if (Kids(root, "testSuite").Any()) warnings.Add("Test suites were not imported.");
+        CollectSoapUiTestSteps(root, requests, warnings);
+        if (Kids(root, "testSuite").Any()) warnings.Add("Test suite requests were imported under 'Test Suites'; assertions, scripts and other step types were not.");
         if (Kids(root, "mockService").Any()) warnings.Add("Mock services were not imported.");
         if (Kids(root, "properties").Any(p => Kids(p, "property").Any())) warnings.Add("Project properties were not imported.");
         if (requests.Any(r => r.Url.Contains("${") || (r.Body?.Contains("${") ?? false)))
@@ -63,15 +65,27 @@ public partial class CollectionImportService
         {
             var targetService = await _serviceRepository.GetByIdAsync(serviceId)
                 ?? throw new InvalidOperationException("Service not found");
-            foreach (var folder in targetService.Folders) folderIds[folder.Name] = folder.Id;
+            foreach (var folder in targetService.Folders)
+                folderIds[JsonDataStore.BuildFolderPath(targetService.Folders, folder)] = folder.Id;
 
-            foreach (var folderName in requests.Select(r => r.Folder).Where(n => !string.IsNullOrWhiteSpace(n))
+            // Folder paths are "/"-separated (e.g. "Test Suites/Suite/Case"); create each missing level.
+            foreach (var folderPath in requests.Select(r => r.Folder).Where(n => !string.IsNullOrWhiteSpace(n))
                 .Select(n => n!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                if (folderIds.ContainsKey(folderName)) continue;
-                var folder = await _serviceRepository.CreateFolderAsync(workspaceId, serviceId, folderName)
-                    ?? throw new InvalidOperationException($"Could not create SoapUI folder '{folderName}'.");
-                folderIds[folderName] = folder.Id;
+                string? parentId = null;
+                var prefix = "";
+                foreach (var segment in folderPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    prefix = prefix.Length == 0 ? segment : prefix + "/" + segment;
+                    if (!folderIds.TryGetValue(prefix, out var existingId))
+                    {
+                        var folder = await _serviceRepository.CreateFolderAsync(workspaceId, serviceId, segment, parentId)
+                            ?? throw new InvalidOperationException($"Could not create SoapUI folder '{prefix}'.");
+                        existingId = folder.Id;
+                        folderIds[prefix] = existingId;
+                    }
+                    parentId = existingId;
+                }
             }
         }
         else if (requests.Any(r => !string.IsNullOrWhiteSpace(r.Folder)))
@@ -85,7 +99,8 @@ public partial class CollectionImportService
             string? folderId = null;
             if (serviceId != null && !string.IsNullOrWhiteSpace(item.Folder))
             {
-                folderIds.TryGetValue(item.Folder.Trim(), out folderId);
+                var key = string.Join('/', item.Folder.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                folderIds.TryGetValue(key, out folderId);
             }
 
             var createRequest = new CreateApiRequestRequest
@@ -181,7 +196,7 @@ public partial class CollectionImportService
 
     private static void CollectSoapUiSoap(XElement iface, List<SoapUiRequest> output, List<string> warnings)
     {
-        var interfaceName = (string?)iface.Attribute("name") ?? "Interface";
+        var interfaceName = SafeFolderName((string?)iface.Attribute("name"), "Interface");
         var soapVersion = (string?)iface.Attribute("soapVersion") ?? "1.1";
         var isSoap12 = soapVersion.Contains("1.2");
         var interfaceEndpoint = FirstEndpoint(iface);
@@ -206,18 +221,7 @@ public partial class CollectionImportService
                     continue;
                 }
 
-                var headers = new List<KeyValuePairRequest>();
-                if (isSoap12)
-                {
-                    var contentType = "application/soap+xml; charset=utf-8";
-                    if (!string.IsNullOrWhiteSpace(action)) contentType += $"; action=\"{action}\"";
-                    headers.Add(new KeyValuePairRequest { Key = "Content-Type", Value = contentType, Enabled = true });
-                }
-                else
-                {
-                    headers.Add(new KeyValuePairRequest { Key = "Content-Type", Value = "text/xml; charset=utf-8", Enabled = true });
-                    headers.Add(new KeyValuePairRequest { Key = "SOAPAction", Value = $"\"{action}\"", Enabled = true });
-                }
+                var headers = SoapUiSoapHeaders(isSoap12, action);
 
                 output.Add(new SoapUiRequest
                 {
@@ -238,7 +242,7 @@ public partial class CollectionImportService
 
     private static void CollectSoapUiRest(XElement iface, List<SoapUiRequest> output, List<string> warnings)
     {
-        var interfaceName = (string?)iface.Attribute("name") ?? "REST";
+        var interfaceName = SafeFolderName((string?)iface.Attribute("name"), "REST");
         var basePath = (string?)iface.Attribute("basePath") ?? "";
         var interfaceEndpoint = FirstEndpoint(iface);
 
@@ -303,6 +307,15 @@ public partial class CollectionImportService
                         KidText(param, "value") ?? KidText(param, "default") ?? "");
                 }
 
+                // Request-level values are stored as <con:entry key="" value=""/> under <con:parameters>.
+                foreach (var entry in callSources.SelectMany(p => Kids(p, "entry")))
+                {
+                    var key = (string?)entry.Attribute("key");
+                    if (string.IsNullOrWhiteSpace(key)) continue;
+                    var entryValue = (string?)entry.Attribute("value") ?? "";
+                    values[key] = (values.TryGetValue(key, out var known) ? known.Style : "QUERY", entryValue);
+                }
+
                 var resolvedPath = path;
                 var headers = new List<KeyValuePairRequest>();
                 var queryParams = new List<KeyValuePairRequest>();
@@ -352,6 +365,140 @@ public partial class CollectionImportService
                 });
             }
         }
+    }
+
+    private static string SafeFolderName(string? name, string fallback) =>
+        string.IsNullOrWhiteSpace(name) ? fallback : name.Replace('/', '-').Trim();
+
+    private static List<KeyValuePairRequest> SoapUiSoapHeaders(bool isSoap12, string action)
+    {
+        var headers = new List<KeyValuePairRequest>();
+        if (isSoap12)
+        {
+            var contentType = "application/soap+xml; charset=utf-8";
+            if (!string.IsNullOrWhiteSpace(action)) contentType += $"; action=\"{action}\"";
+            headers.Add(new KeyValuePairRequest { Key = "Content-Type", Value = contentType, Enabled = true });
+        }
+        else
+        {
+            headers.Add(new KeyValuePairRequest { Key = "Content-Type", Value = "text/xml; charset=utf-8", Enabled = true });
+            headers.Add(new KeyValuePairRequest { Key = "SOAPAction", Value = $"\"{action}\"", Enabled = true });
+        }
+        return headers;
+    }
+
+    // ---------- Test suite request steps ----------
+
+    private static void CollectSoapUiTestSteps(XElement root, List<SoapUiRequest> output, List<string> warnings)
+    {
+        var interfaces = Kids(root, "interface").ToList();
+
+        foreach (var suite in Kids(root, "testSuite"))
+        {
+            var suiteName = SafeFolderName((string?)suite.Attribute("name"), "Test Suite");
+            foreach (var testCase in Kids(suite, "testCase"))
+            {
+                var folder = $"Test Suites/{suiteName}/{SafeFolderName((string?)testCase.Attribute("name"), "Test Case")}";
+                foreach (var step in Kids(testCase, "testStep"))
+                {
+                    var stepName = (string?)step.Attribute("name") ?? "Step";
+                    var type = ((string?)step.Attribute("type") ?? "").ToLowerInvariant();
+                    var config = Kids(step, "config").FirstOrDefault();
+                    if (config == null) continue;
+
+                    if (type == "request") AddSoapUiSoapStep(config, stepName, folder, interfaces, output, warnings);
+                    else if (type == "restrequest") AddSoapUiRestStep(config, stepName, folder, interfaces, output, warnings);
+                }
+            }
+        }
+    }
+
+    private static void AddSoapUiSoapStep(
+        XElement config, string stepName, string folder, List<XElement> interfaces,
+        List<SoapUiRequest> output, List<string> warnings)
+    {
+        var call = Kids(config, "request").FirstOrDefault();
+        if (call == null) return;
+
+        var iface = interfaces.FirstOrDefault(i => (string?)i.Attribute("name") == KidText(config, "interface"));
+        var operationName = KidText(config, "operation");
+        var operation = iface == null ? null : Kids(iface, "operation").FirstOrDefault(o => (string?)o.Attribute("name") == operationName);
+        var action = (string?)operation?.Attribute("action") ?? "";
+        var isSoap12 = ((string?)iface?.Attribute("soapVersion") ?? "1.1").Contains("1.2");
+
+        var url = Kids(call, "endpoint").FirstOrDefault()?.Value.Trim();
+        if (string.IsNullOrWhiteSpace(url) && iface != null) url = FirstEndpoint(iface);
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            warnings.Add($"Skipped test step '{stepName}' because it has no endpoint.");
+            return;
+        }
+
+        output.Add(new SoapUiRequest
+        {
+            Name = stepName,
+            Folder = folder,
+            Method = "POST",
+            Url = url,
+            Body = KidText(call, "request") ?? "",
+            BodyType = "xml",
+            Headers = SoapUiSoapHeaders(isSoap12, action),
+            Auth = SoapUiAuth(call),
+        });
+    }
+
+    private static void AddSoapUiRestStep(
+        XElement config, string stepName, string folder, List<XElement> interfaces,
+        List<SoapUiRequest> output, List<string> warnings)
+    {
+        var call = Kids(config, "restRequest").FirstOrDefault();
+        if (call == null) return;
+
+        var iface = interfaces.FirstOrDefault(i => (string?)i.Attribute("name") == (string?)config.Attribute("service"));
+        var method = NormalizeHttpMethod((string?)call.Attribute("method"));
+        if (method == null)
+        {
+            warnings.Add($"Skipped test step '{stepName}' because the HTTP method is not recognized.");
+            return;
+        }
+
+        var endpoint = Kids(call, "endpoint").FirstOrDefault()?.Value.Trim();
+        if (string.IsNullOrWhiteSpace(endpoint) && iface != null) endpoint = FirstEndpoint(iface);
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            warnings.Add($"Skipped test step '{stepName}' because it has no endpoint.");
+            return;
+        }
+
+        var path = JoinUrlPath((string?)iface?.Attribute("basePath") ?? "", (string?)config.Attribute("resourcePath") ?? "");
+        var queryParams = new List<KeyValuePairRequest>();
+        foreach (var entry in Kids(call, "parameters").SelectMany(p => Kids(p, "entry")))
+        {
+            var key = (string?)entry.Attribute("key");
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            var value = (string?)entry.Attribute("value") ?? "";
+            if (path.Contains("{" + key + "}")) path = path.Replace("{" + key + "}", value);
+            else queryParams.Add(new KeyValuePairRequest { Key = key, Value = value, Enabled = true });
+        }
+
+        var body = KidText(call, "request");
+        var mediaType = (string?)call.Attribute("mediaType");
+        var headers = new List<KeyValuePairRequest>();
+        if (!string.IsNullOrWhiteSpace(body) && !string.IsNullOrWhiteSpace(mediaType))
+            headers.Add(new KeyValuePairRequest { Key = "Content-Type", Value = mediaType, Enabled = true });
+
+        output.Add(new SoapUiRequest
+        {
+            Name = stepName,
+            Folder = folder,
+            Method = method,
+            Url = endpoint!.TrimEnd('/') + path,
+            Body = string.IsNullOrWhiteSpace(body) ? null : body,
+            BodyType = string.IsNullOrWhiteSpace(body) ? "none" : InferBodyTypeFromContentType(mediaType),
+            Headers = headers,
+            Params = queryParams,
+            Auth = SoapUiAuth(call),
+        });
     }
 
     private static string JoinUrlPath(string parent, string child)

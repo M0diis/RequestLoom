@@ -17,6 +17,8 @@ import { useScriptFileStore, type ScriptFileEntry } from '../../stores/scriptFil
 import { exportImportApi, requestsApi, serviceFilesApi } from '../../services/api';
 import type { ApiRequest } from '../../types';
 
+const REQUEST_INDENTS = ['pl-8', 'pl-12', 'pl-16', 'pl-20', 'pl-24', 'pl-28'];
+
 const METHOD_COLORS: Record<string, string> = {
   GET: 'text-emerald-400',
   POST: 'text-sky-400',
@@ -148,6 +150,7 @@ export function Sidebar() {
     updateFolder,
     deleteFolder,
     reorderFolders,
+    moveFolder,
     moveRequestToFolder,
     reorderRequest,
     moveRequestToService,
@@ -190,10 +193,12 @@ export function Sidebar() {
     mode: 'create' | 'rename';
     serviceId: string;
     folderId?: string;
+    parentFolderId?: string | null;
     initialValue: string;
   } | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<{ serviceId: string; id: string; name: string } | null>(null);
   const [moveRequestId, setMoveRequestId] = useState<string | null>(null);
+  const [bulkMove, setBulkMove] = useState<{ kind: 'folder' | 'collection'; ids: string[] } | null>(null);
   const [moveRequestToCollectionId, setMoveRequestToCollectionId] = useState<string | null>(null);
   const [showCodeForRequest, setShowCodeForRequest] = useState<ApiRequest | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
@@ -204,6 +209,9 @@ export function Sidebar() {
   const [scriptToDelete, setScriptToDelete] = useState<ScriptFileEntry | null>(null);
   const [deletingScript, setDeletingScript] = useState(false);
   const [draggingRequestId, setDraggingRequestId] = useState<string | null>(null);
+  const [draggingRequestIds, setDraggingRequestIds] = useState<string[]>([]);
+  const [selectedRequestIds, setSelectedRequestIds] = useState<Set<string>>(new Set());
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null);
   const [draggingServiceId, setDraggingServiceId] = useState<string | null>(null);
   const [dragOverRequestId, setDragOverRequestId] = useState<string | null>(null);
@@ -388,12 +396,15 @@ export function Sidebar() {
 
   const handleContextMenu = (e: React.MouseEvent, type: 'service' | 'request' | 'folder' | 'script', id: string) => {
     e.preventDefault();
+    if (type !== 'request' || !selectedRequestIds.has(id)) {
+      if (selectedRequestIds.size > 0) setSelectedRequestIds(new Set());
+    }
     setContextMenu({ type, id, x: e.clientX, y: e.clientY });
   };
 
-  const openCreateFolderDialog = (serviceId: string) => {
+  const openCreateFolderDialog = (serviceId: string, parentFolderId: string | null = null) => {
     setContextMenu(null);
-    setFolderDialog({ mode: 'create', serviceId, initialValue: '' });
+    setFolderDialog({ mode: 'create', serviceId, parentFolderId, initialValue: '' });
   };
 
   const openRenameFolderDialog = (serviceId: string, folderId: string, name: string) => {
@@ -405,7 +416,11 @@ export function Sidebar() {
     if (!folderDialog) return;
     try {
       if (folderDialog.mode === 'create') {
-        await createFolder(activeWorkspaceId, folderDialog.serviceId, name);
+        await createFolder(activeWorkspaceId, folderDialog.serviceId, name, folderDialog.parentFolderId);
+        if (folderDialog.parentFolderId) {
+          const parentId = folderDialog.parentFolderId;
+          setCollapsedFolders((previous) => { const next = new Set(previous); next.delete(parentId); return next; });
+        }
       } else if (folderDialog.folderId) {
         await updateFolder(activeWorkspaceId, folderDialog.serviceId, folderDialog.folderId, name);
       }
@@ -451,6 +466,7 @@ export function Sidebar() {
 
   const clearDragState = () => {
     setDraggingRequestId(null);
+    setDraggingRequestIds([]);
     setDraggingFolderId(null);
     setDraggingServiceId(null);
     setDragOverRequestId(null);
@@ -463,6 +479,73 @@ export function Sidebar() {
   const getDraggedRequestId = (event: React.DragEvent) =>
     event.dataTransfer.getData('text/plain') || draggingRequestId;
 
+  const getDraggedRequestIds = (event: React.DragEvent): string[] => {
+    try {
+      const raw = event.dataTransfer.getData('application/x-requestloom-requests');
+      const parsed: unknown = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed.filter((id): id is string => typeof id === 'string');
+    } catch {
+      // Fall through to the single-request payload.
+    }
+    if (draggingRequestIds.length > 0) return draggingRequestIds;
+    const single = getDraggedRequestId(event);
+    return single ? [single] : [];
+  };
+
+  const getVisibleRequestOrder = (): string[] => {
+    const ids: string[] = [];
+    if (!topLevelCollapsed) topLevelRequests.forEach((request) => ids.push(request.id));
+    for (const service of services) {
+      if (collapsedServices.has(service.id)) continue;
+      const knownFolderIds = new Set(service.folders.map((folder) => folder.id));
+      const walk = (parentId: string | null) => {
+        const children = service.folders.filter((folder) => parentId === null
+          ? !folder.parentFolderId || !knownFolderIds.has(folder.parentFolderId)
+          : folder.parentFolderId === parentId);
+        for (const folder of children) {
+          if (collapsedFolders.has(folder.id)) continue;
+          walk(folder.id);
+          service.requests.filter((request) => request.folderId === folder.id).forEach((request) => ids.push(request.id));
+        }
+      };
+      walk(null);
+      service.requests.filter((request) => !request.folderId).forEach((request) => ids.push(request.id));
+    }
+    return ids;
+  };
+
+  /** Handles Shift/Ctrl selection. Returns true when the click was consumed (no navigation). */
+  const handleRequestSelectionClick = (event: React.MouseEvent, requestId: string): boolean => {
+    const additive = event.ctrlKey || event.metaKey;
+    if (!event.shiftKey && !additive) {
+      if (selectedRequestIds.size > 0) setSelectedRequestIds(new Set());
+      setSelectionAnchorId(requestId);
+      return false;
+    }
+
+    const order = getVisibleRequestOrder();
+    const base = selectedRequestIds.size === 0 && activeRequestId && order.includes(activeRequestId)
+      ? new Set([activeRequestId])
+      : new Set(selectedRequestIds);
+
+    if (event.shiftKey) {
+      const anchor = selectionAnchorId && order.includes(selectionAnchorId) ? selectionAnchorId : activeRequestId ?? requestId;
+      const from = order.indexOf(anchor);
+      const to = order.indexOf(requestId);
+      const range = from < 0 || to < 0
+        ? [requestId]
+        : order.slice(Math.min(from, to), Math.max(from, to) + 1);
+      setSelectedRequestIds(new Set(additive ? [...base, ...range] : range));
+      if (!selectionAnchorId) setSelectionAnchorId(anchor);
+    } else {
+      if (base.has(requestId)) base.delete(requestId);
+      else base.add(requestId);
+      setSelectedRequestIds(base);
+      setSelectionAnchorId(requestId);
+    }
+    return true;
+  };
+
   const getDraggedFolderId = (event: React.DragEvent) =>
     event.dataTransfer.getData('application/x-requestloom-folder') || draggingFolderId;
 
@@ -472,23 +555,24 @@ export function Sidebar() {
   const handleDropOnRequest = (event: React.DragEvent, target: ApiRequest) => {
     event.preventDefault();
     event.stopPropagation();
-    const requestId = getDraggedRequestId(event);
-    if (!requestId || requestId === target.id) {
+    const requestIds = getDraggedRequestIds(event).filter((id) => id !== target.id);
+    if (requestIds.length === 0) {
       clearDragState();
       return;
     }
 
-    const source = allRequests.find((request) => request.id === requestId);
-    if (!source) {
-      clearDragState();
-      return;
-    }
-
-    const move = source.serviceId !== target.serviceId
-      ? target.serviceId
-        ? moveRequestToService(requestId, target.serviceId)
-        : moveRequestToTopLevel(requestId)
-      : reorderRequest(requestId, target.folderId ?? null, target.id);
+    const move = (async () => {
+      for (const requestId of requestIds) {
+        const source = allRequests.find((request) => request.id === requestId);
+        if (!source) continue;
+        if (source.serviceId !== target.serviceId) {
+          if (target.serviceId) await moveRequestToService(requestId, target.serviceId);
+          else await moveRequestToTopLevel(requestId);
+        } else {
+          await reorderRequest(requestId, target.folderId ?? null, target.id);
+        }
+      }
+    })();
 
     void move
       .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
@@ -498,29 +582,42 @@ export function Sidebar() {
   const handleDropOnTopLevel = (event: React.DragEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    const requestId = getDraggedRequestId(event);
-    const source = requestId ? allRequests.find((request) => request.id === requestId) : null;
-    if (!requestId || !source || source.serviceId === null) {
+    const requestIds = getDraggedRequestIds(event)
+      .filter((id) => allRequests.find((request) => request.id === id)?.serviceId != null);
+    if (requestIds.length === 0) {
       clearDragState();
       return;
     }
 
-    void moveRequestToTopLevel(requestId)
+    void (async () => {
+      for (const requestId of requestIds) await moveRequestToTopLevel(requestId);
+    })()
       .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
       .finally(clearDragState);
   };
 
   const handleDropOnFolder = (event: React.DragEvent, folderId: string) => {
     event.preventDefault();
-    const requestId = getDraggedRequestId(event);
-    if (!requestId) {
+    const requestIds = getDraggedRequestIds(event);
+    if (requestIds.length === 0) {
       clearDragState();
       return;
     }
 
-    void reorderRequest(requestId, folderId, null)
+    void (async () => {
+      for (const requestId of requestIds) await reorderRequest(requestId, folderId, null);
+    })()
       .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
       .finally(clearDragState);
+  };
+
+  /** Dropping on the middle of a folder row nests; dropping near its top/bottom edge reorders. */
+  const getFolderDropZone = (event: React.DragEvent): 'nest' | 'before' | 'after' => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const offset = (event.clientY - bounds.top) / Math.max(bounds.height, 1);
+    if (offset < 0.25) return 'before';
+    if (offset > 0.75) return 'after';
+    return 'nest';
   };
 
   const handleDropOnFolderOrder = (event: React.DragEvent, serviceId: string, targetFolderId: string) => {
@@ -532,24 +629,51 @@ export function Sidebar() {
     }
 
     const service = services.find((item) => item.id === serviceId);
-    if (!service || !service.folders.some((folder) => folder.id === sourceFolderId)) {
+    const sourceFolder = service?.folders.find((folder) => folder.id === sourceFolderId);
+    const targetFolder = service?.folders.find((folder) => folder.id === targetFolderId);
+    if (!service || !sourceFolder || !targetFolder) {
       clearDragState();
       return;
     }
 
-    const nextFolderIds = service.folders.map((folder) => folder.id).filter((id) => id !== sourceFolderId);
-    const targetIndex = nextFolderIds.indexOf(targetFolderId);
-    if (targetIndex < 0) {
+    const zone = getFolderDropZone(event);
+    const run = async () => {
+      if (zone === 'nest') {
+        if (sourceFolder.parentFolderId !== targetFolderId) {
+          await moveFolder(activeWorkspaceId, serviceId, sourceFolderId, targetFolderId);
+        }
+        setCollapsedFolders((previous) => { const next = new Set(previous); next.delete(targetFolderId); return next; });
+        return;
+      }
+
+      // Reordering next to a folder with a different parent also re-parents the dragged folder.
+      if ((sourceFolder.parentFolderId ?? null) !== (targetFolder.parentFolderId ?? null)) {
+        await moveFolder(activeWorkspaceId, serviceId, sourceFolderId, targetFolder.parentFolderId ?? null);
+      }
+      const latest = useRequestStore.getState().services.find((item) => item.id === serviceId) ?? service;
+      const nextFolderIds = latest.folders.map((folder) => folder.id).filter((id) => id !== sourceFolderId);
+      const targetIndex = nextFolderIds.indexOf(targetFolderId);
+      if (targetIndex < 0) return;
+      nextFolderIds.splice(targetIndex + (zone === 'after' ? 1 : 0), 0, sourceFolderId);
+      await reorderFolders(activeWorkspaceId, serviceId, nextFolderIds);
+    };
+
+    void run()
+      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move folder'))
+      .finally(clearDragState);
+  };
+
+  const handleDropFolderOnService = (event: React.DragEvent, serviceId: string) => {
+    event.preventDefault();
+    const folderId = getDraggedFolderId(event);
+    const folder = services.find((item) => item.id === serviceId)?.folders.find((row) => row.id === folderId);
+    if (!folder || !folder.parentFolderId) {
       clearDragState();
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const insertIndex = targetIndex + (event.clientY >= bounds.top + bounds.height / 2 ? 1 : 0);
-    nextFolderIds.splice(insertIndex, 0, sourceFolderId);
-
-    void reorderFolders(activeWorkspaceId, serviceId, nextFolderIds)
-      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to reorder folders'))
+    void moveFolder(activeWorkspaceId, serviceId, folder.id, null)
+      .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move folder'))
       .finally(clearDragState);
   };
 
@@ -579,21 +703,16 @@ export function Sidebar() {
 
   const handleDropOnService = (event: React.DragEvent, serviceId: string) => {
     event.preventDefault();
-    const requestId = getDraggedRequestId(event);
-    const source = requestId ? allRequests.find((request) => request.id === requestId) : null;
-    if (source?.serviceId === serviceId) {
-      clearDragState();
-      return;
-    }
-    if (!requestId) {
+    const requestIds = getDraggedRequestIds(event)
+      .filter((id) => allRequests.find((request) => request.id === id)?.serviceId !== serviceId);
+    if (requestIds.length === 0) {
       clearDragState();
       return;
     }
 
-    const move = source?.serviceId !== serviceId
-      ? moveRequestToService(requestId, serviceId)
-      : Promise.resolve();
-    void move
+    void (async () => {
+      for (const requestId of requestIds) await moveRequestToService(requestId, serviceId);
+    })()
       .catch((error) => setAlertMessage(error instanceof Error ? error.message : 'Failed to move request'))
       .finally(clearDragState);
   };
@@ -742,6 +861,167 @@ export function Sidebar() {
     };
   }, [contextMenu]);
 
+  const renderFolderLevel = (service: (typeof services)[number], parentId: string | null, depth: number): React.ReactNode => {
+    const knownFolderIds = new Set(service.folders.map((folder) => folder.id));
+    return service.folders
+      .filter((folder) => parentId === null
+        ? !folder.parentFolderId || !knownFolderIds.has(folder.parentFolderId)
+        : folder.parentFolderId === parentId)
+      .map((folder) => {
+      const folderRequests = service.requests.filter((request) => request.folderId === folder.id);
+      const folderCollapsed = collapsedFolders.has(folder.id);
+      return (
+        <div key={folder.id}>
+          <div
+            draggable
+            style={{ paddingLeft: 12 + depth * 16 }}
+            className={`group flex cursor-pointer items-center gap-1.5 pr-3 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-900/60 ${
+              dragOverFolderOrderId === folder.id
+                ? 'border-t-2 border-cyan-400/80 bg-cyan-500/10'
+                : dragOverFolderId === folder.id
+                  ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
+                  : draggingFolderId === folder.id
+                    ? 'opacity-50'
+                    : ''
+            }`}
+            onDragStart={(event) => {
+              event.dataTransfer.setData('application/x-requestloom-folder', folder.id);
+              event.dataTransfer.effectAllowed = 'move';
+              setDraggingFolderId(folder.id);
+              setDraggingRequestId(null);
+            }}
+            onDragEnd={clearDragState}
+            onClick={() => {
+              if (draggingFolderId) return;
+              setCollapsedFolders((previous) => {
+                const next = new Set(previous);
+                if (next.has(folder.id)) next.delete(folder.id);
+                else next.add(folder.id);
+                return next;
+              });
+            }}
+            onContextMenu={(event) => handleContextMenu(event, 'folder', folder.id)}
+            onDragOver={(event) => {
+              if (draggingFolderId) {
+                if (draggingFolderId === folder.id) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                if (getFolderDropZone(event) === 'nest') {
+                  setDragOverFolderId(folder.id);
+                  setDragOverFolderOrderId(null);
+                } else {
+                  setDragOverFolderOrderId(folder.id);
+                  setDragOverFolderId(null);
+                }
+                setDragOverServiceId(null);
+                setDragOverRequestId(null);
+                return;
+              }
+              if (!getDraggedRequestId(event)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              setDragOverFolderId(folder.id);
+              setDragOverServiceId(null);
+              setDragOverRequestId(null);
+            }}
+            onDragLeave={(event) => {
+              if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
+                setDragOverFolderId((current) => current === folder.id ? null : current);
+                setDragOverFolderOrderId((current) => current === folder.id ? null : current);
+              }
+            }}
+            onDrop={(event) => {
+              if (getDraggedFolderId(event)) handleDropOnFolderOrder(event, service.id, folder.id);
+              else handleDropOnFolder(event, folder.id);
+            }}
+          >
+            <span
+              aria-hidden="true"
+              className="w-3 cursor-grab select-none text-[13px] leading-none text-gray-600 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-hover:text-gray-400 active:cursor-grabbing"
+              title="Drag to reorder folders"
+            >
+              ⠿
+            </span>
+            <svg className={`h-3 w-3 flex-shrink-0 text-gray-500 transition-transform ${folderCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+            <svg className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+            </svg>
+            <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+            <span
+              className="ml-auto min-w-5 text-right text-[10px] text-gray-500"
+              title={`${folderRequests.length} request${folderRequests.length === 1 ? '' : 's'}`}
+            >
+              {folderRequests.length}
+            </span>
+            {!compact && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setCollapsedFolders((previous) => { const next = new Set(previous); next.delete(folder.id); return next; });
+                  setAddingRequestToService(null);
+                  setAddingRequestToFolder({ serviceId: service.id, folderId: folder.id });
+                  setNewRequestName('');
+                }}
+                className="p-0.5 text-gray-500 hover:text-gray-200"
+                title="Add request to folder"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
+              </button>
+            )}
+            {!compact && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  setContextMenu({ type: 'folder', id: folder.id, x: bounds.right, y: bounds.bottom });
+                }}
+                className="p-0.5 text-gray-500 hover:text-gray-300"
+                title="Folder menu"
+                aria-label={`Open ${folder.name} menu`}
+              >
+                <span className="text-sm leading-none">⋯</span>
+              </button>
+            )}
+          </div>
+          {!folderCollapsed && renderFolderLevel(service, folder.id, depth + 1)}
+          {!folderCollapsed && folderRequests.map((request) => renderRequest(request, REQUEST_INDENTS[Math.min(depth, REQUEST_INDENTS.length - 1)]))}
+          {!folderCollapsed && addingRequestToFolder?.serviceId === service.id && addingRequestToFolder.folderId === folder.id && (
+            <div style={{ paddingLeft: 72 + depth * 16 }} className={`pr-3 py-1 ${QUICK_FORM_ROW}`}>
+              <input
+                autoFocus
+                className={QUICK_FORM_INPUT}
+                placeholder="Request name (Enter to add)"
+                value={newRequestName}
+                onChange={(event) => setNewRequestName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void handleAddRequest(service.id, folder.id);
+                  if (event.key === 'Escape') setAddingRequestToFolder(null);
+                }}
+                onBlur={() => {
+                  setTimeout(() => {
+                    if (!addRequestSubmitting.current) setAddingRequestToFolder(null);
+                  }, 150);
+                 }}
+               />
+              <button
+                type="button"
+                className={QUICK_FORM_CANCEL}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setAddingRequestToFolder(null)}
+              >
+                Cancel
+              </button>
+             </div>
+          )}
+        </div>
+      );
+      });
+  };
+
   const renderRequest = (request: ApiRequest, indentation = 'pl-2') => {
     if (renamingRequestId === request.id) {
       return (
@@ -780,9 +1060,16 @@ export function Sidebar() {
         key={request.id}
         draggable
         onDragStart={(event) => {
+          const dragsSelection = selectedRequestIds.has(request.id) && selectedRequestIds.size > 1;
+          const ids = dragsSelection
+            ? getVisibleRequestOrder().filter((id) => selectedRequestIds.has(id))
+            : [request.id];
+          if (!dragsSelection && selectedRequestIds.size > 0) setSelectedRequestIds(new Set());
           event.dataTransfer.setData('text/plain', request.id);
+          event.dataTransfer.setData('application/x-requestloom-requests', JSON.stringify(ids));
           event.dataTransfer.effectAllowed = 'move';
           setDraggingRequestId(request.id);
+          setDraggingRequestIds(ids);
         }}
         onDragEnd={clearDragState}
         onDragOver={(event) => {
@@ -801,16 +1088,23 @@ export function Sidebar() {
           }
         }}
         onDrop={(event) => handleDropOnRequest(event, request)}
-        className={`group relative ${indentation} transition-colors ${
+        className={`group relative select-none ${indentation} transition-colors ${
           dragOverRequestId === request.id
             ? 'border-t-2 border-cyan-400/80 bg-cyan-500/10'
-            : activeRequestId === request.id
+            : selectedRequestIds.has(request.id)
+              ? 'bg-cyan-500/20 ring-1 ring-inset ring-cyan-400/40'
+              : activeRequestId === request.id
               ? 'bg-gray-800/70'
               : 'hover:bg-gray-900/50'
         }`}
       >
         <button
-          onClick={() => { setServiceSettingsServiceId(null); setActiveScriptFile(null); void selectRequest(request.id); }}
+          onClick={(event) => {
+            if (handleRequestSelectionClick(event, request.id)) return;
+            setServiceSettingsServiceId(null);
+            setActiveScriptFile(null);
+            void selectRequest(request.id);
+          }}
           onContextMenu={(event) => handleContextMenu(event, 'request', request.id)}
           className={`flex w-full items-center gap-2 py-1 pr-3 text-left text-xs active:cursor-grabbing ${
             activeRequestId === request.id ? 'text-gray-100' : 'text-gray-400'
@@ -1097,7 +1391,11 @@ export function Sidebar() {
                     setDragOverRequestId(null);
                     return;
                   }
-                  if (!getDraggedRequestId(event)) return;
+                  if (draggingFolderId) {
+                    if (!service.folders.some((row) => row.id === draggingFolderId)) return;
+                  } else if (!getDraggedRequestId(event)) {
+                    return;
+                  }
                   event.preventDefault();
                   event.dataTransfer.dropEffect = 'move';
                   setDragOverServiceId(service.id);
@@ -1113,6 +1411,7 @@ export function Sidebar() {
                 }}
                 onDrop={(event) => {
                   if (getDraggedServiceId(event)) handleDropOnServiceOrder(event, service.id);
+                  else if (getDraggedFolderId(event)) handleDropFolderOnService(event, service.id);
                   else handleDropOnService(event, service.id);
                 }}
               >
@@ -1200,151 +1499,7 @@ export function Sidebar() {
               </div>
 
               {/* Request folders and direct service requests */}
-              {!collapsedServices.has(service.id) && service.folders.map((folder) => {
-                const folderRequests = service.requests.filter((request) => request.folderId === folder.id);
-                const folderCollapsed = collapsedFolders.has(folder.id);
-                return (
-                  <div key={folder.id}>
-                    <div
-                      draggable
-                      className={`group flex cursor-pointer items-center gap-1.5 px-3 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-900/60 ${
-                        dragOverFolderOrderId === folder.id
-                          ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
-                          : dragOverFolderId === folder.id
-                            ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70'
-                            : draggingFolderId === folder.id
-                              ? 'opacity-50'
-                              : ''
-                      }`}
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData('application/x-requestloom-folder', folder.id);
-                        event.dataTransfer.effectAllowed = 'move';
-                        setDraggingFolderId(folder.id);
-                        setDraggingRequestId(null);
-                      }}
-                      onDragEnd={clearDragState}
-                      onClick={() => {
-                        if (draggingFolderId) return;
-                        setCollapsedFolders((previous) => {
-                          const next = new Set(previous);
-                          if (next.has(folder.id)) next.delete(folder.id);
-                          else next.add(folder.id);
-                          return next;
-                        });
-                      }}
-                      onContextMenu={(event) => handleContextMenu(event, 'folder', folder.id)}
-                      onDragOver={(event) => {
-                        if (draggingFolderId) {
-                          event.preventDefault();
-                          event.dataTransfer.dropEffect = 'move';
-                          setDragOverFolderOrderId(folder.id);
-                          setDragOverFolderId(null);
-                          setDragOverServiceId(null);
-                          setDragOverRequestId(null);
-                          return;
-                        }
-                        if (!getDraggedRequestId(event)) return;
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = 'move';
-                        setDragOverFolderId(folder.id);
-                        setDragOverServiceId(null);
-                        setDragOverRequestId(null);
-                      }}
-                      onDragLeave={(event) => {
-                        if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) {
-                          setDragOverFolderId((current) => current === folder.id ? null : current);
-                          setDragOverFolderOrderId((current) => current === folder.id ? null : current);
-                        }
-                      }}
-                      onDrop={(event) => {
-                        if (getDraggedFolderId(event)) handleDropOnFolderOrder(event, service.id, folder.id);
-                        else handleDropOnFolder(event, folder.id);
-                      }}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="w-3 cursor-grab select-none text-[13px] leading-none text-gray-600 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-hover:text-gray-400 active:cursor-grabbing"
-                        title="Drag to reorder folders"
-                      >
-                        ⠿
-                      </span>
-                      <svg className={`h-3 w-3 flex-shrink-0 text-gray-500 transition-transform ${folderCollapsed ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                      <svg className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                        <path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                      </svg>
-                      <span className="min-w-0 flex-1 truncate">{folder.name}</span>
-                      <span
-                        className="ml-auto min-w-5 text-right text-[10px] text-gray-500"
-                        title={`${folderRequests.length} request${folderRequests.length === 1 ? '' : 's'}`}
-                      >
-                        {folderRequests.length}
-                      </span>
-                      {!compact && (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setCollapsedFolders((previous) => { const next = new Set(previous); next.delete(folder.id); return next; });
-                            setAddingRequestToService(null);
-                            setAddingRequestToFolder({ serviceId: service.id, folderId: folder.id });
-                            setNewRequestName('');
-                          }}
-                          className="p-0.5 text-gray-500 hover:text-gray-200"
-                          title="Add request to folder"
-                        >
-                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
-                        </button>
-                      )}
-                      {!compact && (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            const bounds = event.currentTarget.getBoundingClientRect();
-                            setContextMenu({ type: 'folder', id: folder.id, x: bounds.right, y: bounds.bottom });
-                          }}
-                          className="p-0.5 text-gray-500 hover:text-gray-300"
-                          title="Folder menu"
-                          aria-label={`Open ${folder.name} menu`}
-                        >
-                          <span className="text-sm leading-none">⋯</span>
-                        </button>
-                      )}
-                    </div>
-                    {!folderCollapsed && folderRequests.map((request) => renderRequest(request, 'pl-8'))}
-                    {!folderCollapsed && addingRequestToFolder?.serviceId === service.id && addingRequestToFolder.folderId === folder.id && (
-                      <div className={`pl-18 pr-3 py-1 ${QUICK_FORM_ROW}`}>
-                        <input
-                          autoFocus
-                          className={QUICK_FORM_INPUT}
-                          placeholder="Request name (Enter to add)"
-                          value={newRequestName}
-                          onChange={(event) => setNewRequestName(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') void handleAddRequest(service.id, folder.id);
-                            if (event.key === 'Escape') setAddingRequestToFolder(null);
-                          }}
-                          onBlur={() => {
-                            setTimeout(() => {
-                              if (!addRequestSubmitting.current) setAddingRequestToFolder(null);
-                            }, 150);
-                           }}
-                         />
-                        <button
-                          type="button"
-                          className={QUICK_FORM_CANCEL}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => setAddingRequestToFolder(null)}
-                        >
-                          Cancel
-                        </button>
-                       </div>
-                    )}
-                  </div>
-                );
-              })}
+              {!collapsedServices.has(service.id) && renderFolderLevel(service, null, 0)}
 
               {!collapsedServices.has(service.id) && service.requests
                 .filter((request) => !request.folderId)
@@ -1425,7 +1580,54 @@ export function Sidebar() {
           className="fixed z-50 max-h-[calc(100vh-1rem)] min-w-[210px] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-gray-700/80 bg-[#1b1b1b] p-1 shadow-[0_16px_36px_rgba(0,0,0,0.55)] ring-1 ring-black/40"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          {contextMenu.type === 'request' && (
+          {contextMenu.type === 'request' && selectedRequestIds.size > 1 && selectedRequestIds.has(contextMenu.id) && (() => {
+            const ids = getVisibleRequestOrder().filter((id) => selectedRequestIds.has(id));
+            const label = `${ids.length} requests`;
+            const selected = ids.map((id) => allRequests.find((request) => request.id === id)).filter((request): request is ApiRequest => !!request);
+            const sameCollection = selected.length > 0 && selected.every((request) => request.serviceId && request.serviceId === selected[0].serviceId);
+            return (
+              <>
+                <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-gray-500">{label} selected</div>
+                {selected.some((request) => request.serviceId) && (
+                  <ContextMenuItem
+                    icon="folder"
+                    onClick={() => {
+                      setContextMenu(null);
+                      void (async () => {
+                        try {
+                          for (const request of selected) if (request.serviceId) await moveRequestToTopLevel(request.id);
+                          setSelectedRequestIds(new Set());
+                        } catch (error) {
+                          setAlertMessage(error instanceof Error ? error.message : 'Failed to move requests');
+                        }
+                      })();
+                    }}
+                  >
+                    Move to top level
+                  </ContextMenuItem>
+                )}
+                {services.length > 0 && (
+                  <ContextMenuItem icon="folder" onClick={() => { setBulkMove({ kind: 'collection', ids }); setContextMenu(null); }}>
+                    Move to collection…
+                  </ContextMenuItem>
+                )}
+                {sameCollection && (
+                  <ContextMenuItem icon="folder" onClick={() => { setBulkMove({ kind: 'folder', ids }); setContextMenu(null); }}>
+                    Move to Folder…
+                  </ContextMenuItem>
+                )}
+                <div role="separator" className="my-1.5 border-t border-gray-800/80" />
+                <ContextMenuItem icon="trash" danger onClick={() => {
+                  setContextMenu(null);
+                  setSelectedRequestIds(new Set());
+                  ids.forEach((id) => { void deleteRequest(id); });
+                }}>
+                  Delete {label}
+                </ContextMenuItem>
+              </>
+            );
+          })()}
+          {contextMenu.type === 'request' && !(selectedRequestIds.size > 1 && selectedRequestIds.has(contextMenu.id)) && (
             <>
               <ContextMenuItem icon="play" onClick={() => { void handleRunRequest(contextMenu.id); }}>
                 Run Request
@@ -1619,6 +1821,9 @@ export function Sidebar() {
                 >
                   New Request
                 </ContextMenuItem>
+                <ContextMenuItem icon="folder-plus" onClick={() => { openCreateFolderDialog(service.id, folder.id); }}>
+                  New Subfolder
+                </ContextMenuItem>
                 <ContextMenuItem icon="play" onClick={() => { setShowCollectionRunner({ serviceId: service.id, folderId: folder.id }); setContextMenu(null); }}>
                   Run Folder
                 </ContextMenuItem>
@@ -1680,7 +1885,7 @@ export function Sidebar() {
 
       {folderDialog && (
         <TextInputModal
-          title={folderDialog.mode === 'create' ? 'Create request folder' : 'Rename request folder'}
+          title={folderDialog.mode === 'create' ? (folderDialog.parentFolderId ? 'Create request subfolder' : 'Create request folder') : 'Rename request folder'}
           label="Folder name"
           placeholder="e.g. Users"
           initialValue={folderDialog.initialValue}
@@ -1693,7 +1898,7 @@ export function Sidebar() {
       {folderToDelete && (
         <ConfirmModal
           title="Delete request folder"
-          message={`Delete ${folderToDelete.name}? Requests will remain in the service root.`}
+          message={`Delete ${folderToDelete.name}? Its requests and subfolders move up one level.`}
           confirmLabel="Delete"
           variant="danger"
           onConfirm={() => { void handleDeleteFolder(); }}
@@ -1724,15 +1929,63 @@ export function Sidebar() {
         );
       })()}
 
+      {bulkMove?.kind === 'folder' && (() => {
+        const requests = bulkMove.ids.map((id) => allRequests.find((item) => item.id === id)).filter((item): item is ApiRequest => !!item);
+        const service = services.find((item) => item.id === requests[0]?.serviceId);
+        if (!service) return null;
+        const sameFolder = requests.every((request) => request.folderId === requests[0].folderId);
+
+        return (
+          <MoveRequestFolderModal
+            requestName={`${requests.length} requests`}
+            folders={service.folders}
+            currentFolderId={sameFolder ? requests[0].folderId : null}
+            onConfirm={async (folderId) => {
+              try {
+                for (const request of requests) await moveRequestToFolder(request.id, folderId);
+                setBulkMove(null);
+              } catch (error) {
+                setAlertMessage(error instanceof Error ? error.message : 'Failed to move requests');
+              }
+            }}
+            onClose={() => setBulkMove(null)}
+          />
+        );
+      })()}
+
+      {bulkMove?.kind === 'collection' && (() => {
+        const requests = bulkMove.ids.map((id) => allRequests.find((item) => item.id === id)).filter((item): item is ApiRequest => !!item);
+        if (requests.length === 0) return null;
+
+        return (
+          <MoveRequestCollectionModal
+            requestName={`${requests.length} requests`}
+            collections={services.map((service) => ({ id: service.id, name: service.name }))}
+            currentCollectionId={null}
+            onConfirm={async (serviceId) => {
+              try {
+                for (const request of requests) {
+                  if (request.serviceId !== serviceId) await moveRequestToService(request.id, serviceId);
+                }
+                setBulkMove(null);
+              } catch (error) {
+                setAlertMessage(error instanceof Error ? error.message : 'Failed to move requests to collection');
+              }
+            }}
+            onClose={() => setBulkMove(null)}
+          />
+        );
+      })()}
+
       {moveRequestToCollectionId && (() => {
         const request = allRequests.find((item) => item.id === moveRequestToCollectionId);
-        if (!request || request.serviceId !== null || services.length === 0) return null;
+        if (!request || services.length === 0) return null;
 
         return (
           <MoveRequestCollectionModal
             requestName={request.name}
-            collections={services.map((service) => ({ id: service.id, name: service.name }))}
-            currentCollectionId={request.serviceId}
+            collections={services.filter((service) => service.id !== request.serviceId).map((service) => ({ id: service.id, name: service.name }))}
+            currentCollectionId={null}
             onConfirm={async (serviceId) => {
               try {
                 await moveRequestToService(request.id, serviceId);

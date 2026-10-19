@@ -86,13 +86,18 @@ public class ServiceRepository : IServiceRepository
         return await MapAsync(row, includeRequests: false);
     }
 
-    public async Task<RequestFolder?> CreateFolderAsync(string workspaceId, string serviceId, string name)
+    public async Task<RequestFolder?> CreateFolderAsync(string workspaceId, string serviceId, string name, string? parentFolderId = null)
     {
         var serviceExists = await _db.Services.AnyAsync(s => s.Id == serviceId && s.WorkspaceId == workspaceId);
         if (!serviceExists) return null;
 
+        parentFolderId = string.IsNullOrWhiteSpace(parentFolderId) ? null : parentFolderId;
+        if (parentFolderId != null &&
+            !await _db.RequestFolders.AnyAsync(f => f.Id == parentFolderId && f.ServiceId == serviceId))
+            return null;
+
         var maxSort = await _db.RequestFolders
-            .Where(f => f.ServiceId == serviceId)
+            .Where(f => f.ServiceId == serviceId && f.ParentFolderId == parentFolderId)
             .Select(f => (int?)f.SortOrder)
             .MaxAsync() ?? -1;
 
@@ -100,6 +105,7 @@ public class ServiceRepository : IServiceRepository
         {
             Id = Guid.NewGuid().ToString("N"),
             ServiceId = serviceId,
+            ParentFolderId = parentFolderId,
             Name = name,
             SortOrder = maxSort + 1,
             CreatedAt = DateTime.UtcNow.ToString("o"),
@@ -123,6 +129,38 @@ public class ServiceRepository : IServiceRepository
         return MapFolder(row);
     }
 
+    public async Task<RequestFolder?> MoveFolderAsync(string workspaceId, string serviceId, string folderId, string? parentFolderId)
+    {
+        parentFolderId = string.IsNullOrWhiteSpace(parentFolderId) ? null : parentFolderId;
+        var rows = await _db.RequestFolders
+            .Join(_db.Services, folder => folder.ServiceId, service => service.Id, (folder, service) => new { folder, service })
+            .Where(x => x.folder.ServiceId == serviceId && x.service.WorkspaceId == workspaceId)
+            .Select(x => x.folder)
+            .ToListAsync();
+        var row = rows.FirstOrDefault(folder => folder.Id == folderId);
+        if (row == null) return null;
+        if (row.ParentFolderId == parentFolderId) return MapFolder(row);
+
+        if (parentFolderId != null)
+        {
+            // The target must exist and must not be the folder itself or one of its descendants.
+            var byId = rows.ToDictionary(folder => folder.Id);
+            if (!byId.ContainsKey(parentFolderId)) return null;
+            var seen = new HashSet<string>();
+            for (var current = parentFolderId; current != null && seen.Add(current);
+                 current = byId.TryGetValue(current, out var node) ? node.ParentFolderId : null)
+            {
+                if (current == folderId) return null;
+            }
+        }
+
+        row.ParentFolderId = parentFolderId;
+        row.SortOrder = rows.Where(folder => folder.ParentFolderId == parentFolderId && folder.Id != folderId)
+            .Select(folder => folder.SortOrder).DefaultIfEmpty(-1).Max() + 1;
+        await _db.SaveChangesAsync();
+        return MapFolder(row);
+    }
+
     public async Task<bool> DeleteFolderAsync(string workspaceId, string serviceId, string folderId)
     {
         var row = await _db.RequestFolders
@@ -132,9 +170,14 @@ public class ServiceRepository : IServiceRepository
             .FirstOrDefaultAsync();
         if (row == null) return false;
 
+        // Children and requests move up to the deleted folder's parent.
+        var parentId = row.ParentFolderId;
         await _db.Requests
             .Where(request => request.FolderId == folderId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.FolderId, (string?)null));
+            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.FolderId, parentId));
+        await _db.RequestFolders
+            .Where(folder => folder.ParentFolderId == folderId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(folder => folder.ParentFolderId, parentId));
         _db.RequestFolders.Remove(row);
         await _db.SaveChangesAsync();
         return true;
@@ -295,6 +338,7 @@ public class ServiceRepository : IServiceRepository
         {
             Id = row.Id,
             ServiceId = row.ServiceId,
+            ParentFolderId = row.ParentFolderId,
             Name = row.Name,
             SortOrder = row.SortOrder,
             CreatedAt = row.CreatedAt,

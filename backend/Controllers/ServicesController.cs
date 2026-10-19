@@ -77,7 +77,7 @@ public class ServicesController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Name))
             return BadRequest("Folder name is required");
 
-        var folder = await _repo.CreateFolderAsync(workspaceId, id, request.Name.Trim());
+        var folder = await _repo.CreateFolderAsync(workspaceId, id, request.Name.Trim(), request.ParentFolderId);
         return folder == null ? NotFound() : Ok(folder);
     }
 
@@ -89,6 +89,13 @@ public class ServicesController : ControllerBase
 
         var folder = await _repo.UpdateFolderAsync(workspaceId, id, folderId, request.Name.Trim());
         return folder == null ? NotFound() : Ok(folder);
+    }
+
+    [HttpPut("{id}/folders/{folderId}/move")]
+    public async Task<IActionResult> MoveFolder(string workspaceId, string id, string folderId, [FromBody] MoveRequestFolderRequest request)
+    {
+        var folder = await _repo.MoveFolderAsync(workspaceId, id, folderId, request.ParentFolderId);
+        return folder == null ? BadRequest("Folder cannot be moved there") : Ok(folder);
     }
 
     [HttpPut("{id}/folders/reorder")]

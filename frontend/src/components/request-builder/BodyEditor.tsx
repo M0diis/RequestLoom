@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { BodyType } from '../../types';
 import { CodeEditor } from '../common/CodeEditor';
 import { MultipartFormEditor } from './MultipartFormEditor';
@@ -5,6 +6,7 @@ import { createEmptyMultipartBody } from './multipartUtils';
 import { DocHelpButton } from '../documentation/DocumentationLink';
 import { VariablePreview } from '../common/VariablePreview';
 import type { ResolvedVariableLookup } from '../common/variablePreviewUtils';
+import { formatJson, formatXml } from './formatBody';
 
 interface Props {
   body: string | null;
@@ -33,7 +35,21 @@ const LANGUAGE_MAP: Record<string, string> = {
 };
 
 export function BodyEditor({ body, bodyType, requestId, onChange, dynamicSuggestions = [], resolvedVariables, variableResolutionReady = true }: Props) {
+  const [formatError, setFormatError] = useState<string | null>(null);
+  const canFormat = bodyType === 'json' || bodyType === 'xml';
+
+  const formatBody = () => {
+    try {
+      const formatted = bodyType === 'json' ? formatJson(body ?? '') : formatXml(body ?? '');
+      setFormatError(null);
+      onChange(formatted, bodyType);
+    } catch (error) {
+      setFormatError(error instanceof Error ? error.message : 'Unable to format body');
+    }
+  };
+
   const changeBodyType = (nextType: BodyType) => {
+    setFormatError(null);
     if (nextType === 'none') {
       onChange(null, nextType);
       return;
@@ -92,7 +108,18 @@ export function BodyEditor({ body, bodyType, requestId, onChange, dynamicSuggest
             {bt.label}
           </button>
         ))}
+        {canFormat && (
+          <button
+            onClick={formatBody}
+            disabled={!body?.trim()}
+            title={`Format ${bodyType.toUpperCase()}`}
+            className="ml-auto border border-gray-700 bg-gray-900 px-3 py-1 text-xs font-medium text-gray-300 hover:bg-gray-800 disabled:opacity-50"
+          >
+            Format {bodyType.toUpperCase()}
+          </button>
+        )}
       </div>
+      {formatError && canFormat && <p className="mb-2 text-xs text-red-400">{formatError}</p>}
 
       {bodyType === 'multipart' ? (
         <MultipartFormEditor

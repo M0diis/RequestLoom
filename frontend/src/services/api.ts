@@ -82,10 +82,12 @@ export const servicesApi = {
     auth: AuthRequest | null = null,
   ) =>
     api.put<Service>(`/workspaces/${workspaceId}/services/${id}`, { name, description, headers, auth }).then(r => r.data),
-  createFolder: (workspaceId: string, serviceId: string, name: string) =>
-    api.post<RequestFolder>(`/workspaces/${workspaceId}/services/${serviceId}/folders`, { name }).then(r => r.data),
+  createFolder: (workspaceId: string, serviceId: string, name: string, parentFolderId?: string | null) =>
+    api.post<RequestFolder>(`/workspaces/${workspaceId}/services/${serviceId}/folders`, { name, parentFolderId }).then(r => r.data),
   updateFolder: (workspaceId: string, serviceId: string, folderId: string, name: string) =>
     api.put<RequestFolder>(`/workspaces/${workspaceId}/services/${serviceId}/folders/${folderId}`, { name }).then(r => r.data),
+  moveFolder: (workspaceId: string, serviceId: string, folderId: string, parentFolderId: string | null) =>
+    api.put<RequestFolder>(`/workspaces/${workspaceId}/services/${serviceId}/folders/${folderId}/move`, { parentFolderId }).then(r => r.data),
   reorderFolders: (workspaceId: string, serviceId: string, folderIds: string[]) =>
     api.put(`/workspaces/${workspaceId}/services/${serviceId}/folders/reorder`, folderIds),
   deleteFolder: (workspaceId: string, serviceId: string, folderId: string) =>

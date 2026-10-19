@@ -66,6 +66,12 @@ public class AppDbContext : DbContext
             .HasForeignKey(f => f.ServiceId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        modelBuilder.Entity<RequestFolderRow>()
+            .HasOne<RequestFolderRow>()
+            .WithMany()
+            .HasForeignKey(f => f.ParentFolderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         modelBuilder.Entity<ApiRequestRow>()
             .HasOne<RequestFolderRow>()
             .WithMany()

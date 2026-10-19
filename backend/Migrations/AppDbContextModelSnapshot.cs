@@ -468,6 +468,10 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("name");
 
+                    b.Property<string>("ParentFolderId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("parent_folder_id");
+
                     b.Property<string>("ServiceId")
                         .IsRequired()
                         .HasColumnType("TEXT")
@@ -478,6 +482,8 @@ namespace RequestLoom.Api.Migrations
                         .HasColumnName("sort_order");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ParentFolderId");
 
                     b.HasIndex("ServiceId");
 
@@ -921,6 +927,11 @@ namespace RequestLoom.Api.Migrations
 
             modelBuilder.Entity("RequestLoom.Api.Data.Entities.RequestFolderRow", b =>
                 {
+                    b.HasOne("RequestLoom.Api.Data.Entities.RequestFolderRow", null)
+                        .WithMany()
+                        .HasForeignKey("ParentFolderId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("RequestLoom.Api.Data.Entities.ServiceRow", null)
                         .WithMany()
                         .HasForeignKey("ServiceId")

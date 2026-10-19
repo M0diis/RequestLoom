@@ -91,9 +91,10 @@ interface RequestState {
   deleteService: (workspaceId: string, id: string) => Promise<void>;
   moveService: (workspaceId: string, id: string, direction: -1 | 1) => Promise<void>;
   reorderServices: (workspaceId: string, serviceIds: string[]) => Promise<void>;
-  createFolder: (workspaceId: string, serviceId: string, name: string) => Promise<RequestFolder>;
+  createFolder: (workspaceId: string, serviceId: string, name: string, parentFolderId?: string | null) => Promise<RequestFolder>;
   updateFolder: (workspaceId: string, serviceId: string, folderId: string, name: string) => Promise<void>;
   deleteFolder: (workspaceId: string, serviceId: string, folderId: string) => Promise<void>;
+  moveFolder: (workspaceId: string, serviceId: string, folderId: string, parentFolderId: string | null) => Promise<void>;
   reorderFolders: (workspaceId: string, serviceId: string, folderIds: string[]) => Promise<void>;
 
   selectRequest: (id: string) => Promise<void>;
@@ -184,8 +185,15 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     );
 
     const folderIds = new Map<string, string>();
-    for (const folder of source.folders) {
-      const createdFolder = await servicesApi.createFolder(workspaceId, created.id, folder.name);
+    const pendingFolders = [...source.folders];
+    while (pendingFolders.length > 0) {
+      // Create parents before their children.
+      const index = pendingFolders.findIndex((folder) => !folder.parentFolderId || folderIds.has(folder.parentFolderId));
+      const [folder] = pendingFolders.splice(index < 0 ? 0 : index, 1);
+      const createdFolder = await servicesApi.createFolder(
+        workspaceId, created.id, folder.name,
+        folder.parentFolderId ? folderIds.get(folder.parentFolderId) ?? null : null,
+      );
       folderIds.set(folder.id, createdFolder.id);
     }
 
@@ -358,8 +366,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     }
   },
 
-  createFolder: async (workspaceId, serviceId, name) => {
-    const folder = await servicesApi.createFolder(workspaceId, serviceId, name);
+  createFolder: async (workspaceId, serviceId, name, parentFolderId) => {
+    const folder = await servicesApi.createFolder(workspaceId, serviceId, name, parentFolderId);
     set((s) => ({
       services: s.services.map((service) => service.id === serviceId
         ? { ...service, folders: [...service.folders, folder].sort((a, b) => a.sortOrder - b.sortOrder) }
@@ -379,15 +387,36 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
   deleteFolder: async (workspaceId, serviceId, folderId) => {
     await servicesApi.deleteFolder(workspaceId, serviceId, folderId);
+    set((s) => {
+      // Children and requests move up to the deleted folder's parent.
+      const parentId = s.services.find((service) => service.id === serviceId)
+        ?.folders.find((folder) => folder.id === folderId)?.parentFolderId ?? null;
+      return {
+        services: s.services.map((service) => service.id === serviceId
+          ? {
+            ...service,
+            folders: service.folders
+              .filter((folder) => folder.id !== folderId)
+              .map((folder) => folder.parentFolderId === folderId ? { ...folder, parentFolderId: parentId } : folder),
+            requests: service.requests.map((request) => request.folderId === folderId ? { ...request, folderId: parentId } : request),
+          }
+          : service),
+        activeRequest: s.activeRequest?.folderId === folderId ? { ...s.activeRequest, folderId: parentId } : s.activeRequest,
+      };
+    });
+  },
+
+  moveFolder: async (workspaceId, serviceId, folderId, parentFolderId) => {
+    const moved = await servicesApi.moveFolder(workspaceId, serviceId, folderId, parentFolderId);
     set((s) => ({
       services: s.services.map((service) => service.id === serviceId
         ? {
           ...service,
-          folders: service.folders.filter((folder) => folder.id !== folderId),
-          requests: service.requests.map((request) => request.folderId === folderId ? { ...request, folderId: null } : request),
+          folders: service.folders
+            .map((folder) => folder.id === folderId ? moved : folder)
+            .sort((a, b) => a.sortOrder - b.sortOrder),
         }
         : service),
-      activeRequest: s.activeRequest?.folderId === folderId ? { ...s.activeRequest, folderId: null } : s.activeRequest,
     }));
   },
 

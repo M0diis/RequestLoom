@@ -19,6 +19,7 @@ public class RequestFolder
 {
     public string Id { get; set; } = "";
     public string ServiceId { get; set; } = "";
+    public string? ParentFolderId { get; set; }
     public string Name { get; set; } = "";
     public int SortOrder { get; set; }
     public string CreatedAt { get; set; } = "";
@@ -27,6 +28,12 @@ public class RequestFolder
 public class CreateRequestFolderRequest
 {
     public string Name { get; set; } = "";
+    public string? ParentFolderId { get; set; }
+}
+
+public class MoveRequestFolderRequest
+{
+    public string? ParentFolderId { get; set; }
 }
 
 public class UpdateRequestFolderRequest

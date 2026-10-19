@@ -41,6 +41,7 @@ export interface Service {
 export interface RequestFolder {
   id: string;
   serviceId: string;
+  parentFolderId?: string | null;
   name: string;
   sortOrder: number;
   createdAt: string;
