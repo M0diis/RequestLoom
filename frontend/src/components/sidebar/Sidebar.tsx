@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, type ReactNode } from 'react';
 import { useRequestStore } from '../../stores/requestStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -842,6 +842,18 @@ export function Sidebar() {
     setContextMenu(null);
     setTerminalCwd(service.storagePath || settings?.storagePath || '');
   };
+
+  // Keep the menu fully inside the window when opened near the right/bottom edge.
+  useLayoutEffect(() => {
+    const menu = contextMenuRef.current;
+    if (!contextMenu || !menu) return;
+    const margin = 8;
+    const { width, height } = menu.getBoundingClientRect();
+    const left = Math.max(margin, Math.min(contextMenu.x, window.innerWidth - width - margin));
+    const top = Math.max(margin, Math.min(contextMenu.y, window.innerHeight - height - margin));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }, [contextMenu]);
 
   useEffect(() => {
     if (!contextMenu) return;
