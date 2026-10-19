@@ -41,6 +41,8 @@ export function TopBar() {
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
+  const lastTitlebarDownRef = useRef<{ time: number; x: number; y: number } | null>(null);
+
   const handleTitlebarPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !desktopShell) return;
     if ((event.target as HTMLElement).closest('.titlebar-no-drag')) return;
@@ -49,6 +51,17 @@ export function TopBar() {
 
     event.preventDefault();
     event.stopPropagation();
+
+    // The manual drag swallows native dblclick, so detect a double-click on the title bar ourselves.
+    const previous = lastTitlebarDownRef.current;
+    if (previous && event.timeStamp - previous.time < 400
+      && Math.abs(event.clientX - previous.x) < 6 && Math.abs(event.clientY - previous.y) < 6) {
+      lastTitlebarDownRef.current = null;
+      void desktopShell.stopDrag();
+      void desktopShell.maximizeToggle();
+      return;
+    }
+    lastTitlebarDownRef.current = { time: event.timeStamp, x: event.clientX, y: event.clientY };
 
     const titlebar = event.currentTarget;
     const pointerId = event.pointerId;

@@ -73,6 +73,9 @@ public sealed class TemplateResolutionSession
     private static readonly System.Text.RegularExpressions.Regex VariablePattern =
         new(@"\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}", System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    private static readonly System.Text.RegularExpressions.Regex SinglePathVariablePattern =
+        new(@"(?<!\{)\{\s*([a-zA-Z0-9_.-]+)\s*\}(?!\})", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private readonly Dictionary<string, string> _rawVariables;
     private readonly Dictionary<string, string> _variables;
     private readonly Dictionary<string, string> _generatedVariableCache = new(StringComparer.Ordinal);
@@ -148,6 +151,20 @@ public sealed class TemplateResolutionSession
 
         var withVariables = ResolveMaterializedValue(input);
         return RestoreEscapedTokens(ExpandDynamicTokens(withVariables, owner: null));
+    }
+
+    /// <summary>
+    /// Resolves a URL, additionally supporting single-brace path variables such as
+    /// "/cases/{customer_number}" (matching the editor's variable highlighting).
+    /// Unknown names are left untouched.
+    /// </summary>
+    public string ResolveUrl(string? input)
+    {
+        var resolved = Resolve(input);
+        if (string.IsNullOrEmpty(resolved)) return resolved;
+
+        return SinglePathVariablePattern.Replace(resolved, match =>
+            GetVariable(match.Groups[1].Value) is { } value ? Uri.EscapeDataString(value) : match.Value);
     }
 
     internal string ResolveOrdinary(string? input)

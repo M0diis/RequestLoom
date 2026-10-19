@@ -134,7 +134,7 @@ public class RequestExecutionService
             var effectiveAuth = ResolveEffectiveAuth(payload.Auth, serviceDefaults?.Auth);
 
             // Resolve variables
-            var resolvedUrl = resolutionSession.Resolve(requestState.Url);
+            var resolvedUrl = resolutionSession.ResolveUrl(requestState.Url);
             urlForDiagnostics = resolvedUrl;
             var resolvedBody = requestState.Body != null
                 ? resolutionSession.Resolve(requestState.Body)
