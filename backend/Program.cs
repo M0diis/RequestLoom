@@ -82,6 +82,7 @@ builder.Services.AddScoped<JavaScriptRunnerService>();
 builder.Services.AddScoped<MockServerService>();
 builder.Services.AddScoped<ExampleDataService>();
 builder.Services.AddScoped<StorageMigrationService>();
+builder.Services.AddHostedService<ParentProcessWatcher>();
 
 var app = builder.Build();
 

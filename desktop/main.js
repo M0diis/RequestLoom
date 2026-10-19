@@ -11,8 +11,12 @@ const PREFERRED_PORT = 5056;
 let APP_URL = process.env.REQUESTLOOM_APP_URL || `http://127.0.0.1:${PREFERRED_PORT}`;
 const DEBUG_MODE = process.env.REQUESTLOOM_ELECTRON_DEBUG === '1';
 const HEALTH_PATH = '/api/workspaces';
-const STARTUP_TIMEOUT_MS = 120000;
+const STARTUP_TIMEOUT_MS = 60000;
+const PAGE_LOAD_TIMEOUT_MS = 30000;
 const RETRY_INTERVAL_MS = 500;
+
+// Escape hatch for machines whose GPU driver hangs under Chromium compositing.
+if (process.env.REQUESTLOOM_DISABLE_GPU === '1') app.disableHardwareAcceleration();
 
 let backendProcess = null;
 let shuttingDown = false;
@@ -144,9 +148,29 @@ function openExternalIfSafe(url) {
   }
 }
 
+const MAX_LOG_BYTES = 5 * 1024 * 1024;
+let logStream = null;
+
+// Backend output is logged per chunk; a synchronous append on the main thread
+// (often re-scanned by antivirus) stalls the UI, so write through a stream and
+// rotate the file once it gets large.
+function getLogStream() {
+  if (logStream) return logStream;
+  const logPath = getBackendLogPath();
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  try {
+    if (fs.statSync(logPath).size > MAX_LOG_BYTES) fs.renameSync(logPath, `${logPath}.1`);
+  } catch {
+    // No existing log to rotate.
+  }
+  logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  logStream.on('error', () => {});
+  return logStream;
+}
+
 function appendLog(message) {
   try {
-    fs.appendFileSync(getBackendLogPath(), `${new Date().toISOString()} ${message}\n`);
+    getLogStream().write(`${new Date().toISOString()} ${message}\n`);
   } catch {
     // Ignore logging failures in desktop shell.
   }
@@ -275,15 +299,14 @@ function registerDesktopUtilityHandlers() {
         await win.loadFile(path.join(__dirname, 'loading.html'));
       }
       startBackend();
-      await waitForBackendReady(APP_URL, STARTUP_TIMEOUT_MS);
+      await waitForBackendReady(APP_URL, STARTUP_TIMEOUT_MS, backendProcess);
       if (win && !win.isDestroyed()) {
-        await win.loadURL(APP_URL);
+        await loadAppUrl(win);
       }
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      appendLog(`Application reload failed: ${message}`);
-      dialog.showErrorBox('Failed To Reload RequestLoom', message);
+      // A window without a working backend is useless; release everything.
+      shutDownWithError('Failed To Reload RequestLoom', error);
       return false;
     } finally {
       reloadingBackend = false;
@@ -395,12 +418,18 @@ function broadcastMaximizedState(win) {
   win.webContents.send('window:maximized-changed', win.isMaximized());
 }
 
-function waitForBackendReady(baseUrl, timeoutMs) {
+function waitForBackendReady(baseUrl, timeoutMs, child) {
   const started = Date.now();
   const targetUrl = new URL(HEALTH_PATH, baseUrl);
 
   return new Promise((resolve, reject) => {
     const tryOnce = () => {
+      // No point polling for the full timeout once the backend has died.
+      if (child && child.exitCode !== null) {
+        reject(new Error(`Backend exited during startup (code ${child.exitCode}).`));
+        return;
+      }
+
       const req = http.get(targetUrl, (res) => {
         res.resume();
 
@@ -433,6 +462,38 @@ function waitForBackendReady(baseUrl, timeoutMs) {
 
     tryOnce();
   });
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function loadAppUrl(win) {
+  return withTimeout(win.loadURL(APP_URL), PAGE_LOAD_TIMEOUT_MS, 'The RequestLoom window did not finish loading in time.');
+}
+
+// Single exit path for failures: release the backend, terminals and windows first,
+// then report, then exit without waiting on anything that may be hung.
+function shutDownWithError(title, error) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  const message = error instanceof Error ? error.message : String(error);
+  appendLog(`${title}: ${message}`);
+
+  stopActiveDrag();
+  stopTerminalSessions();
+  stopBackend();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.destroy();
+  }
+
+  dialog.showErrorBox(title, `${message}\n\nSee desktop-backend.log in the RequestLoom user data folder (logs) for details.`);
+  app.exit(1);
 }
 
 function waitForProcessExit(process, timeoutMs = 10000) {
@@ -473,6 +534,10 @@ function startBackend() {
       ...process.env,
       ASPNETCORE_URLS: APP_URL,
       REQUESTLOOM_DATA_DIR: dataDir,
+      // Force workstation GC even for backends published before the csproj change.
+      DOTNET_gcServer: '0',
+      // Lets the backend stop itself if this process crashes or is force-killed.
+      REQUESTLOOM_PARENT_PID: String(process.pid),
     },
     windowsHide: true,
     stdio: 'pipe',
@@ -495,12 +560,10 @@ function startBackend() {
       return;
     }
 
-    dialog.showErrorBox(
+    shutDownWithError(
       'RequestLoom Backend Stopped',
-      `The embedded backend exited unexpectedly.\nCode: ${code ?? 'null'}\nSignal: ${signal ?? 'null'}\n\nSee desktop-backend.log in the RequestLoom user data folder (logs) for details.`
+      `The embedded backend exited unexpectedly.\nCode: ${code ?? 'null'}\nSignal: ${signal ?? 'null'}`
     );
-
-    app.quit();
   });
 
   child.on('error', (err) => {
@@ -621,16 +684,13 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 
   try {
     startBackend();
-    await waitForBackendReady(APP_URL, STARTUP_TIMEOUT_MS);
-    await mainWindow.loadURL(APP_URL);
+    await waitForBackendReady(APP_URL, STARTUP_TIMEOUT_MS, backendProcess);
+    await loadAppUrl(mainWindow);
 
     if (DEBUG_MODE) {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    dialog.showErrorBox('Failed To Start RequestLoom', message);
-    stopBackend();
-    app.quit();
+    shutDownWithError('Failed To Start RequestLoom', err);
   }
 });
