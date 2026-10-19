@@ -153,13 +153,31 @@ function appendLog(message) {
 }
 
 function stopActiveDrag() {
+  if (!activeDrag) return;
+
+  const { win, winX, winY, width, height, startX, startY, resizeLocked } = activeDrag;
   activeDrag = null;
+
+  if (!resizeLocked || win.isDestroyed()) return;
+
+  win.setResizable(true);
+  // Toggling the thick frame can nudge the size on Windows; pin it back to the
+  // size the drag started with at the final position.
+  const { x, y } = screen.getCursorScreenPoint();
+  win.setBounds({
+    x: Math.round(winX + (x - startX)),
+    y: Math.round(winY + (y - startY)),
+    width,
+    height,
+  }, false);
 }
 
 function registerWindowControlHandlers() {
   trustedHandle('window:start-drag', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed() || win.isMaximized()) return false;
+
+    stopActiveDrag();
 
     const bounds = win.getBounds();
     const { x: startX, y: startY } = screen.getCursorScreenPoint();
@@ -171,6 +189,7 @@ function registerWindowControlHandlers() {
       height: bounds.height,
       startX,
       startY,
+      resizeLocked: false,
     };
     return true;
   });
@@ -182,6 +201,14 @@ function registerWindowControlHandlers() {
     if (win.isDestroyed()) {
       activeDrag = null;
       return;
+    }
+
+    // On Windows 11 a resizable frameless window grows towards the right/bottom
+    // while it is moved programmatically. Drop the thick frame for the drag;
+    // done lazily so plain clicks and double-clicks never toggle it.
+    if (!activeDrag.resizeLocked && win.isResizable()) {
+      win.setResizable(false);
+      activeDrag.resizeLocked = true;
     }
 
     const { x, y } = screen.getCursorScreenPoint();
@@ -207,6 +234,9 @@ function registerWindowControlHandlers() {
     if (!win) {
       return false;
     }
+
+    // Maximizing while the drag has resizing disabled misbehaves on Windows.
+    stopActiveDrag();
 
     if (win.isMaximized()) {
       win.unmaximize();
