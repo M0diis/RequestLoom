@@ -275,6 +275,7 @@ const IMPORT_FORMATS = [
   { format: 'Swagger', input: 'Swagger 2.0 JSON/YAML', result: 'Uses the OpenAPI importer; Swagger 2.0 definitions are converted into RequestLoom requests.' },
   { format: 'Postman', input: 'Collection JSON file or pasted JSON', result: 'Imports folders, request methods, URLs, headers, bodies, and common auth settings.' },
   { format: 'cURL', input: 'A pasted command', result: 'Parses method, URL, headers, body, and auth into a request you can review before sending.' },
+  { format: 'SoapUI', input: 'Project XML file (.xml)', result: 'Imports SOAP calls (with SOAPAction and basic auth) and REST requests (with parameters), grouped into folders by interface. Test suites and mock services are skipped.' },
   { format: 'Bruno', input: 'One or more .bru files', result: 'Imports Bruno request files, including files selected from nested collection folders.' },
   { format: 'WSDL', input: 'URL, XML, or local-compatible source', result: 'Discovers SOAP operations and creates request-ready service entries.' },
   { format: 'RequestLoom JSON', input: 'Workspace export file', result: 'Restores a workspace, service, or request export into a new workspace or the current one.' },

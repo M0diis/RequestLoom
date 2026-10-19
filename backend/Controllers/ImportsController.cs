@@ -59,6 +59,20 @@ public class ImportsController : ControllerBase
         }
     }
 
+    [HttpPost("soapui")]
+    public async Task<IActionResult> ImportSoapUi(string workspaceId, [FromBody] ImportSpecificationRequest request)
+    {
+        try
+        {
+            var result = await _collectionImportService.ImportSoapUiAsync(workspaceId, request);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
     [HttpPost("bruno")]
     public async Task<IActionResult> ImportBruno(string workspaceId, [FromForm] IFormFileCollection files, [FromForm] string? serviceId, [FromForm] string? serviceName, [FromForm] bool topLevel = false)
     {

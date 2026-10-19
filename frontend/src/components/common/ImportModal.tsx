@@ -10,7 +10,7 @@ interface Props {
   workspaceId: string;
 }
 
-type ImportKind = 'openapi' | 'wsdl' | 'curl' | 'postman' | 'bruno';
+type ImportKind = 'openapi' | 'wsdl' | 'curl' | 'postman' | 'soapui' | 'bruno';
 type SourceType = 'url' | 'raw';
 
 const KIND_LABELS: Record<ImportKind, string> = {
@@ -18,6 +18,7 @@ const KIND_LABELS: Record<ImportKind, string> = {
   wsdl: 'WSDL',
   curl: 'cURL',
   postman: 'Postman',
+  soapui: 'SoapUI',
   bruno: 'Bruno',
 };
 
@@ -53,7 +54,8 @@ export function ImportModal({ onClose, workspaceId }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const isCurl = kind === 'curl';
-  const isPostman = kind === 'postman';
+  const isSoapUi = kind === 'soapui';
+  const isPostman = kind === 'postman' || isSoapUi;
   const isBruno = kind === 'bruno';
   const busy = specBusy || curlBusy || curlImporting || brunoBusy;
   const isTopLevel = serviceId === '__top_level__';
@@ -76,7 +78,9 @@ export function ImportModal({ onClose, workspaceId }: Props) {
         ? await importsApi.openApi(workspaceId, payload)
         : kind === 'wsdl'
           ? await importsApi.wsdl(workspaceId, payload)
-          : await importsApi.postman(workspaceId, payload);
+          : isSoapUi
+            ? await importsApi.soapui(workspaceId, payload)
+            : await importsApi.postman(workspaceId, payload);
 
       await loadServices(workspaceId);
 
@@ -311,7 +315,9 @@ export function ImportModal({ onClose, workspaceId }: Props) {
           {(isPostman || isBruno) && (
             <>
               <p className="text-xs text-gray-500">
-                {isPostman
+                {isSoapUi
+                  ? 'Select a SoapUI project XML file to import its SOAP and REST requests.'
+                  : isPostman
                   ? 'Select a Postman collection JSON file to import all of its requests.'
                   : "Select one or more Bruno request files (.bru, including folders' files) to import them."}
               </p>
@@ -321,11 +327,11 @@ export function ImportModal({ onClose, workspaceId }: Props) {
                   <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 {isPostman
-                  ? (source ? 'Replace collection file' : 'Choose a Postman collection (.json)')
+                  ? (source ? 'Replace collection file' : isSoapUi ? 'Choose a SoapUI project (.xml)' : 'Choose a Postman collection (.json)')
                   : (brunoFiles.length > 0 ? `${brunoFiles.length} file(s) selected` : 'Choose .bru file(s)')}
                 <input
                   type="file"
-                  accept={isPostman ? '.json,application/json' : '.bru'}
+                  accept={isSoapUi ? '.xml,text/xml,application/xml' : isPostman ? '.json,application/json' : '.bru'}
                   multiple={!isPostman}
                   className="hidden"
                   disabled={busy}
@@ -368,7 +374,7 @@ export function ImportModal({ onClose, workspaceId }: Props) {
                 <textarea
                   value={source}
                   onChange={e => setSource(e.target.value)}
-                  placeholder="Paste Postman collection content…"
+                  placeholder={`Paste ${KIND_LABELS[kind]} content…`}
                   className={`${INPUT_CLASS} h-32 font-mono resize-none`}
                   disabled={busy}
                 />

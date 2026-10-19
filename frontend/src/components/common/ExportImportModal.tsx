@@ -355,7 +355,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs font-semibold text-gray-200">Import a request source</div>
-                    <p className="mt-1 text-[11px] leading-4 text-gray-500">OpenAPI, WSDL, cURL, Postman, or Bruno files.</p>
+                    <p className="mt-1 text-[11px] leading-4 text-gray-500">OpenAPI, WSDL, cURL, Postman, SoapUI, or Bruno files.</p>
                   </div>
                   <button
                     type="button"

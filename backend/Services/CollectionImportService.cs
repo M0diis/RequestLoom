@@ -6,7 +6,7 @@ using RequestLoom.Api.Models;
 
 namespace RequestLoom.Api.Services;
 
-public class CollectionImportService
+public partial class CollectionImportService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IServiceRepository _serviceRepository;
