@@ -645,8 +645,14 @@ function createMainWindow() {
   win.on('unmaximize', () => broadcastMaximizedState(win));
 
   win.once('ready-to-show', () => {
+    appendLog('Startup: window ready to show.');
     broadcastMaximizedState(win);
     win.show();
+  });
+  win.on('unresponsive', () => appendLog('Window became unresponsive.'));
+  win.on('responsive', () => appendLog('Window became responsive again.'));
+  win.webContents.on('render-process-gone', (_event, details) => {
+    appendLog(`Renderer process gone (reason=${details.reason}, exitCode=${details.exitCode}).`);
   });
 
   win.loadFile(path.join(__dirname, 'loading.html'));
@@ -676,7 +682,35 @@ if (!hasSingleInstanceLock) {
   });
 }
 
+// Running from a OneDrive folder means every file is hydrated and scanned through
+// the cloud-files driver on launch, which can stall Explorer along with the app.
+function getCloudSyncedRoot() {
+  const exePath = path.resolve(process.execPath).toLowerCase();
+  const roots = [process.env.OneDrive, process.env.OneDriveCommercial, process.env.OneDriveConsumer]
+    .filter(Boolean)
+    .map((root) => path.resolve(root).toLowerCase());
+  return roots.find((root) => exePath.startsWith(root + path.sep)) ?? null;
+}
+
+function warnIfCloudSynced(win) {
+  const root = getCloudSyncedRoot();
+  if (!root) return;
+  appendLog(`Running from a OneDrive folder (${root}); startup may be slow or hang.`);
+  dialog.showMessageBox(win, {
+    type: 'warning',
+    title: 'RequestLoom is running from OneDrive',
+    message: 'RequestLoom is running from a OneDrive-synced folder.',
+    detail: `This can make startup very slow or freeze Explorer.\n\nClose RequestLoom and move its folder somewhere local, for example:\n${path.join(process.env.LOCALAPPDATA || 'C:\\', 'Programs', 'RequestLoom')}`,
+  }).catch(() => {});
+}
+
+// GPU/utility process crashes are the usual sign of a graphics driver problem.
+app.on('child-process-gone', (_event, details) => {
+  appendLog(`Child process gone (type=${details.type}, reason=${details.reason}, exitCode=${details.exitCode}).`);
+});
+
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
+  appendLog(`Startup: Electron ${process.versions.electron} ready (pid=${process.pid}, gpu=${app.isHardwareAccelerationEnabled() ? 'on' : 'off'}, path=${process.execPath}).`);
   APP_URL = await resolveAppUrl();
   registerWindowControlHandlers();
   registerDesktopUtilityHandlers();
@@ -684,8 +718,12 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 
   try {
     startBackend();
+    appendLog(`Startup: backend spawned (pid=${backendProcess?.pid ?? 'none'}), waiting on ${APP_URL}.`);
     await waitForBackendReady(APP_URL, STARTUP_TIMEOUT_MS, backendProcess);
+    appendLog('Startup: backend ready, loading app.');
     await loadAppUrl(mainWindow);
+    appendLog('Startup: app loaded.');
+    warnIfCloudSynced(mainWindow);
 
     if (DEBUG_MODE) {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
