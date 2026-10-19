@@ -9,7 +9,7 @@ import type {
   MockServer, CreateMockServerRequest, UpdateMockServerRequest,
   MockServerEndpoint, CreateMockEndpointRequest, UpdateMockEndpointRequest,
   AppSettings, SettingsUpdate, ApiRequestSettings, StoredRequestFile, ServiceFileResponse, JavaScriptRunResponse,
-  CookieJarEntry, RequestFileUploadResponse, RequestFolder,
+  CookieJarEntry, RequestFileUploadResponse, RequestFolder, FolderContentsAction,
   OAuth2Configuration, OAuthDiscoveryResponse, OAuthTokenExchangeResponse, OAuthTokenStatus,
 } from '../types';
 
@@ -90,8 +90,10 @@ export const servicesApi = {
     api.put<RequestFolder>(`/workspaces/${workspaceId}/services/${serviceId}/folders/${folderId}/move`, { parentFolderId }).then(r => r.data),
   reorderFolders: (workspaceId: string, serviceId: string, folderIds: string[]) =>
     api.put(`/workspaces/${workspaceId}/services/${serviceId}/folders/reorder`, folderIds),
-  deleteFolder: (workspaceId: string, serviceId: string, folderId: string) =>
-    api.delete(`/workspaces/${workspaceId}/services/${serviceId}/folders/${folderId}`),
+  deleteFolder: (workspaceId: string, serviceId: string, folderId: string, contents: FolderContentsAction = 'parent', targetFolderId?: string | null) =>
+    api.delete(`/workspaces/${workspaceId}/services/${serviceId}/folders/${folderId}`, {
+      params: { contents, targetFolderId: targetFolderId ?? undefined },
+    }),
   reorder: (workspaceId: string, serviceIds: string[]) =>
     api.put(`/workspaces/${workspaceId}/services/reorder`, serviceIds),
   delete: (workspaceId: string, id: string) =>

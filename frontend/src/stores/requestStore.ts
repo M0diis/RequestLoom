@@ -9,6 +9,7 @@ import type {
   KeyValuePairRequest,
   AuthRequest,
   RequestFolder,
+  FolderContentsAction,
 } from '../types';
 import { servicesApi, requestsApi, executeApi, serviceVariablesApi } from '../services/api';
 import { useDevToolsStore } from './devToolsStore';
@@ -93,7 +94,7 @@ interface RequestState {
   reorderServices: (workspaceId: string, serviceIds: string[]) => Promise<void>;
   createFolder: (workspaceId: string, serviceId: string, name: string, parentFolderId?: string | null) => Promise<RequestFolder>;
   updateFolder: (workspaceId: string, serviceId: string, folderId: string, name: string) => Promise<void>;
-  deleteFolder: (workspaceId: string, serviceId: string, folderId: string) => Promise<void>;
+  deleteFolder: (workspaceId: string, serviceId: string, folderId: string, contents?: FolderContentsAction, targetFolderId?: string | null) => Promise<void>;
   moveFolder: (workspaceId: string, serviceId: string, folderId: string, parentFolderId: string | null) => Promise<void>;
   reorderFolders: (workspaceId: string, serviceId: string, folderIds: string[]) => Promise<void>;
 
@@ -385,12 +386,61 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     }));
   },
 
-  deleteFolder: async (workspaceId, serviceId, folderId) => {
-    await servicesApi.deleteFolder(workspaceId, serviceId, folderId);
+  deleteFolder: async (workspaceId, serviceId, folderId, contents = 'parent', targetFolderId = null) => {
+    await servicesApi.deleteFolder(workspaceId, serviceId, folderId, contents, targetFolderId);
     set((s) => {
-      // Children and requests move up to the deleted folder's parent.
-      const parentId = s.services.find((service) => service.id === serviceId)
-        ?.folders.find((folder) => folder.id === folderId)?.parentFolderId ?? null;
+      const folders = s.services.find((service) => service.id === serviceId)?.folders ?? [];
+
+      if (contents === 'delete') {
+        const removedFolderIds = new Set<string>([folderId]);
+        for (let grew = true; grew;) {
+          grew = false;
+          for (const folder of folders) {
+            if (folder.parentFolderId && removedFolderIds.has(folder.parentFolderId) && !removedFolderIds.has(folder.id)) {
+              removedFolderIds.add(folder.id);
+              grew = true;
+            }
+          }
+        }
+        const removedRequestIds = new Set(
+          (s.services.find((service) => service.id === serviceId)?.requests ?? [])
+            .filter((request) => request.folderId && removedFolderIds.has(request.folderId))
+            .map((request) => request.id),
+        );
+        removedRequestIds.forEach((id) => {
+          const timer = requestSaveTimers.get(id);
+          if (timer) clearTimeout(timer);
+          requestSaveTimers.delete(id);
+          requestSaveVersions.set(id, (requestSaveVersions.get(id) ?? 0) + 1);
+        });
+        const nextIds = s.openRequestIds.filter((id) => !removedRequestIds.has(id));
+        const activeRemoved = s.activeRequestId !== null && removedRequestIds.has(s.activeRequestId);
+        const responses = { ...s.responses };
+        const draftsById = { ...s.draftsById };
+        removedRequestIds.forEach((id) => {
+          delete responses[id];
+          delete draftsById[id];
+        });
+        return {
+          services: s.services.map((service) => service.id === serviceId
+            ? {
+              ...service,
+              folders: service.folders.filter((folder) => !removedFolderIds.has(folder.id)),
+              requests: service.requests.filter((request) => !removedRequestIds.has(request.id)),
+            }
+            : service),
+          responses,
+          draftsById,
+          dirtyRequests: new Set([...s.dirtyRequests].filter((id) => !removedRequestIds.has(id))),
+          openRequestIds: nextIds,
+          activeRequestId: activeRemoved ? (nextIds[nextIds.length - 1] ?? null) : s.activeRequestId,
+          activeRequest: activeRemoved ? null : s.activeRequest,
+        };
+      }
+
+      // Children and requests move to the chosen destination.
+      const deletedParentId = folders.find((folder) => folder.id === folderId)?.parentFolderId ?? null;
+      const parentId = contents === 'root' ? null : contents === 'folder' ? (targetFolderId ?? null) : deletedParentId;
       return {
         services: s.services.map((service) => service.id === serviceId
           ? {

@@ -106,9 +106,17 @@ public class ServicesController : ControllerBase
     }
 
     [HttpDelete("{id}/folders/{folderId}")]
-    public async Task<IActionResult> DeleteFolder(string workspaceId, string id, string folderId)
+    public async Task<IActionResult> DeleteFolder(
+        string workspaceId,
+        string id,
+        string folderId,
+        [FromQuery] FolderContentsAction contents = FolderContentsAction.Parent,
+        [FromQuery] string? targetFolderId = null)
     {
-        var deleted = await _repo.DeleteFolderAsync(workspaceId, id, folderId);
+        if (contents == FolderContentsAction.Folder && string.IsNullOrWhiteSpace(targetFolderId))
+            return BadRequest("A target folder is required");
+
+        var deleted = await _repo.DeleteFolderAsync(workspaceId, id, folderId, contents, targetFolderId);
         return deleted ? NoContent() : NotFound();
     }
 

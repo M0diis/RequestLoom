@@ -161,7 +161,7 @@ public class ServiceRepository : IServiceRepository
         return MapFolder(row);
     }
 
-    public async Task<bool> DeleteFolderAsync(string workspaceId, string serviceId, string folderId)
+    public async Task<bool> DeleteFolderAsync(string workspaceId, string serviceId, string folderId, FolderContentsAction contents = FolderContentsAction.Parent, string? targetFolderId = null)
     {
         var row = await _db.RequestFolders
             .Join(_db.Services, folder => folder.ServiceId, service => service.Id, (folder, service) => new { folder, service })
@@ -170,14 +170,40 @@ public class ServiceRepository : IServiceRepository
             .FirstOrDefaultAsync();
         if (row == null) return false;
 
-        // Children and requests move up to the deleted folder's parent.
-        var parentId = row.ParentFolderId;
-        await _db.Requests
-            .Where(request => request.FolderId == folderId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.FolderId, parentId));
-        await _db.RequestFolders
-            .Where(folder => folder.ParentFolderId == folderId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(folder => folder.ParentFolderId, parentId));
+        var serviceFolders = await _db.RequestFolders.Where(folder => folder.ServiceId == serviceId).ToListAsync();
+        var subtree = FolderDeletion.CollectSubtree(serviceFolders, folderId);
+
+        if (contents == FolderContentsAction.Delete)
+        {
+            var folderIds = subtree.Select(folder => folder.Id).ToList();
+            var requests = await _db.Requests.Where(request => request.FolderId != null && folderIds.Contains(request.FolderId)).ToListAsync();
+            _db.Requests.RemoveRange(requests);
+            _db.RequestFolders.RemoveRange(subtree);
+            await _db.SaveChangesAsync();
+            return true;
+        }
+
+        string? destination = null;
+        if (contents == FolderContentsAction.Parent) destination = row.ParentFolderId;
+        else if (contents == FolderContentsAction.Folder)
+        {
+            destination = string.IsNullOrWhiteSpace(targetFolderId) ? null : targetFolderId;
+            if (destination == null || subtree.Any(folder => folder.Id == destination)
+                || !serviceFolders.Any(folder => folder.Id == destination)) return false;
+        }
+
+        var nextOrder = (await _db.Requests
+            .Where(request => request.ServiceId == serviceId && request.FolderId == destination)
+            .Select(request => (int?)request.SortOrder)
+            .MaxAsync() ?? -1) + 1;
+        var moving = await _db.Requests.Where(request => request.FolderId == folderId).OrderBy(request => request.SortOrder).ToListAsync();
+        foreach (var request in moving)
+        {
+            request.FolderId = destination;
+            request.SortOrder = nextOrder++;
+        }
+        foreach (var child in serviceFolders.Where(folder => folder.ParentFolderId == folderId))
+            child.ParentFolderId = destination;
         _db.RequestFolders.Remove(row);
         await _db.SaveChangesAsync();
         return true;

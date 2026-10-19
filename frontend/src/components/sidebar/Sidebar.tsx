@@ -11,11 +11,12 @@ import { AlertModal } from '../common/AlertModal';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { TextInputModal } from '../common/TextInputModal';
 import { MoveRequestFolderModal } from '../common/MoveRequestFolderModal';
+import { DeleteRequestFolderModal } from '../common/DeleteRequestFolderModal';
 import { MoveRequestCollectionModal } from '../common/MoveRequestCollectionModal';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useScriptFileStore, type ScriptFileEntry } from '../../stores/scriptFileStore';
 import { exportImportApi, requestsApi, serviceFilesApi } from '../../services/api';
-import type { ApiRequest } from '../../types';
+import type { ApiRequest, FolderContentsAction } from '../../types';
 
 const REQUEST_INDENTS = ['pl-8', 'pl-12', 'pl-16', 'pl-20', 'pl-24', 'pl-28'];
 
@@ -431,10 +432,10 @@ export function Sidebar() {
     }
   };
 
-  const handleDeleteFolder = async () => {
+  const handleDeleteFolder = async (contents: FolderContentsAction, targetFolderId?: string | null) => {
     if (!folderToDelete) return;
     try {
-      await deleteFolder(activeWorkspaceId, folderToDelete.serviceId, folderToDelete.id);
+      await deleteFolder(activeWorkspaceId, folderToDelete.serviceId, folderToDelete.id, contents, targetFolderId);
       setCollapsedFolders((previous) => {
         const next = new Set(previous);
         next.delete(folderToDelete.id);
@@ -1907,16 +1908,21 @@ export function Sidebar() {
         />
       )}
 
-      {folderToDelete && (
-        <ConfirmModal
-          title="Delete request folder"
-          message={`Delete ${folderToDelete.name}? Its requests and subfolders move up one level.`}
-          confirmLabel="Delete"
-          variant="danger"
-          onConfirm={() => { void handleDeleteFolder(); }}
-          onClose={() => setFolderToDelete(null)}
-        />
-      )}
+      {folderToDelete && (() => {
+        const service = services.find((item) => item.id === folderToDelete.serviceId);
+        const folder = service?.folders.find((item) => item.id === folderToDelete.id);
+        if (!service || !folder) return null;
+
+        return (
+          <DeleteRequestFolderModal
+            folder={folder}
+            folders={service.folders}
+            requestFolderIds={service.requests.map((request) => request.folderId ?? null)}
+            onConfirm={(contents, targetFolderId) => handleDeleteFolder(contents, targetFolderId)}
+            onClose={() => setFolderToDelete(null)}
+          />
+        );
+      })()}
 
       {moveRequestId && (() => {
         const request = allRequests.find((item) => item.id === moveRequestId);

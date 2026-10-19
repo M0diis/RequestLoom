@@ -36,6 +36,18 @@ public class MoveRequestFolderRequest
     public string? ParentFolderId { get; set; }
 }
 
+public enum FolderContentsAction
+{
+    /// <summary>Move requests and subfolders to the deleted folder's parent (default).</summary>
+    Parent,
+    /// <summary>Move requests and subfolders to the collection root.</summary>
+    Root,
+    /// <summary>Move requests and subfolders into another folder of the same collection.</summary>
+    Folder,
+    /// <summary>Delete the folder together with all subfolders and requests inside it.</summary>
+    Delete,
+}
+
 public class UpdateRequestFolderRequest
 {
     public string Name { get; set; } = "";

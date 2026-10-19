@@ -226,36 +226,70 @@ public class JsonServiceRepository : IServiceRepository
         return Task.FromResult(moved == null ? null : CloneFolder(moved));
     }
 
-    public Task<bool> DeleteFolderAsync(string workspaceId, string serviceId, string folderId)
+    public Task<bool> DeleteFolderAsync(string workspaceId, string serviceId, string folderId, FolderContentsAction contents = FolderContentsAction.Parent, string? targetFolderId = null)
     {
         var deleted = false;
         string? serviceName = null;
         string? storagePath = null;
-        string? folderName = null;
+        var folderNames = new List<string>();
         _store.Mutate(doc =>
         {
             var service = doc.Services.FirstOrDefault(row => row.Id == serviceId && row.WorkspaceId == workspaceId);
-            var folder = doc.RequestFolders.FirstOrDefault(row => row.Id == folderId && row.ServiceId == serviceId);
+            var serviceFolders = doc.RequestFolders.Where(row => row.ServiceId == serviceId).ToList();
+            var folder = serviceFolders.FirstOrDefault(row => row.Id == folderId);
             if (service == null || folder == null) return;
+
+            // The folder and all of its descendants, deepest first.
+            var subtree = FolderDeletion.CollectSubtree(serviceFolders, folderId);
+
+            string? destination = null;
+            if (contents == FolderContentsAction.Parent) destination = folder.ParentFolderId;
+            else if (contents == FolderContentsAction.Folder)
+            {
+                destination = string.IsNullOrWhiteSpace(targetFolderId) ? null : targetFolderId;
+                if (destination == null || subtree.Any(row => row.Id == destination)
+                    || !serviceFolders.Any(row => row.Id == destination)) return;
+            }
 
             serviceName = service.Name;
             storagePath = service.StoragePath;
-            folderName = JsonDataStore.BuildFolderPath(doc.RequestFolders, folder);
-            // Children and requests move up to the deleted folder's parent.
-            foreach (var request in doc.Requests.Where(request => request.FolderId == folderId))
-                request.FolderId = folder.ParentFolderId;
-            foreach (var child in doc.RequestFolders.Where(row => row.ParentFolderId == folderId))
-                child.ParentFolderId = folder.ParentFolderId;
+
+            if (contents == FolderContentsAction.Delete)
+            {
+                folderNames = subtree.Select(row => JsonDataStore.BuildFolderPath(doc.RequestFolders, row)).ToList();
+                var folderIds = subtree.Select(row => row.Id).ToHashSet();
+                var requestIds = doc.Requests
+                    .Where(request => request.FolderId != null && folderIds.Contains(request.FolderId))
+                    .Select(request => request.Id)
+                    .ToHashSet();
+                doc.Requests.RemoveAll(request => requestIds.Contains(request.Id));
+                doc.RequestSettings.RemoveAll(setting => requestIds.Contains(setting.RequestId));
+                doc.RequestFolders.RemoveAll(row => folderIds.Contains(row.Id));
+                deleted = true;
+                return;
+            }
+
+            folderNames = [JsonDataStore.BuildFolderPath(doc.RequestFolders, folder)];
+            var nextOrder = doc.Requests
+                .Where(request => request.ServiceId == serviceId && request.FolderId == destination)
+                .Select(request => request.SortOrder)
+                .DefaultIfEmpty(-1).Max() + 1;
+            foreach (var request in doc.Requests.Where(request => request.FolderId == folderId).OrderBy(request => request.SortOrder).ToList())
+            {
+                request.FolderId = destination;
+                request.SortOrder = nextOrder++;
+            }
+            foreach (var child in serviceFolders.Where(row => row.ParentFolderId == folderId))
+                child.ParentFolderId = destination;
             deleted = doc.RequestFolders.Remove(folder);
         });
 
         if (deleted)
         {
-            _store.DeleteRequestFolderDirectory(
-                serviceId,
-                serviceName ?? "collection",
-                storagePath,
-                folderName ?? "folder");
+            foreach (var name in folderNames)
+            {
+                _store.DeleteRequestFolderDirectory(serviceId, serviceName ?? "collection", storagePath, name);
+            }
         }
 
         return Task.FromResult(deleted);

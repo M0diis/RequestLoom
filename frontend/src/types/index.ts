@@ -38,6 +38,8 @@ export interface Service {
   requests: ApiRequest[];
 }
 
+export type FolderContentsAction = 'parent' | 'root' | 'folder' | 'delete';
+
 export interface RequestFolder {
   id: string;
   serviceId: string;
