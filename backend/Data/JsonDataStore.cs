@@ -44,6 +44,7 @@ public class JsonDataStore
     {
         lock (_lock)
         {
+            JsonFileTransaction.Recover(_filePath);
             LoadRootLocked();
 
             if (IsPerCollection)
@@ -197,8 +198,10 @@ public class JsonDataStore
     {
         lock (_lock)
         {
-            action(_doc);
-            SaveLocked();
+            var working = CloneDocument(_doc);
+            action(working);
+            SaveDocumentLocked(working, _filePath, IsPerCollection);
+            _doc = working;
         }
     }
 
@@ -391,12 +394,11 @@ public class JsonDataStore
         try
         {
             _doc = JsonSerializer.Deserialize<JsonDataDocument>(File.ReadAllText(_filePath), JsonOptions)
-                ?? new JsonDataDocument();
+                ?? throw new JsonException("Storage document is null.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to read JSON data file {Path}; starting with an empty store.", _filePath);
-            _doc = new JsonDataDocument();
+            throw new InvalidDataException($"Cannot read JSON storage '{_filePath}'. The file was preserved. Restore a valid backup from '{_filePath}.bak' before restarting.", ex);
         }
     }
 
@@ -416,6 +418,7 @@ public class JsonDataStore
         foreach (var service in _doc.Services)
         {
             service.Requests = [];
+            var hasFileReference = !string.IsNullOrWhiteSpace(service.StoragePath);
             service.StoragePath = ResolveCollectionPath(service.Id, service.Name, service.StoragePath);
 
             if (File.Exists(service.StoragePath))
@@ -423,7 +426,8 @@ public class JsonDataStore
                 try
                 {
                     var collection = JsonSerializer.Deserialize<JsonCollectionDocument>(
-                        File.ReadAllText(service.StoragePath), JsonOptions);
+                        File.ReadAllText(service.StoragePath), JsonOptions)
+                        ?? throw new JsonException("Collection document is null.");
                     if (collection != null)
                     {
                         var serviceRequests = collection.Requests.Where(row => row.ServiceId == service.Id).ToList();
@@ -440,8 +444,12 @@ public class JsonDataStore
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to read collection file {Path}; falling back to root data.", service.StoragePath);
+                    throw new InvalidDataException($"Cannot read collection '{service.StoragePath}'. The file was preserved. Restore its .bak backup before restarting.", ex);
                 }
+            }
+            else if (hasFileReference && !legacyRequests.Any(row => row.ServiceId == service.Id))
+            {
+                throw new FileNotFoundException("A referenced collection file is missing; storage was preserved.", service.StoragePath);
             }
 
             var legacyServiceRequests = legacyRequests.Where(row => row.ServiceId == service.Id).ToList();
@@ -470,8 +478,11 @@ public class JsonDataStore
                 service.StoragePath = "";
             }
 
-            WriteJsonFile(filePath, document);
             EnsureRequestFolderDirectoriesLocked(document, filePath, SettingsService.JsonSingleFile);
+            JsonFileTransaction.Commit(filePath, new Dictionary<string, string>
+            {
+                [filePath] = JsonSerializer.Serialize(document, JsonOptions),
+            });
             return;
         }
 
@@ -500,7 +511,7 @@ public class JsonDataStore
             History = document.History,
             MockServers = document.MockServers,
         };
-        WriteJsonFile(filePath, manifest);
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var service in document.Services)
         {
@@ -516,10 +527,14 @@ public class JsonDataStore
             };
             collection.Service.Requests = [];
             collection.Service.Folders = [];
-            WriteJsonFile(service.StoragePath, collection);
+            if (!files.TryAdd(service.StoragePath, JsonSerializer.Serialize(collection, JsonOptions)))
+                throw new InvalidOperationException("Collections must use distinct storage files.");
         }
 
         EnsureRequestFolderDirectoriesLocked(document, filePath, SettingsService.JsonPerCollection);
+        if (!files.TryAdd(filePath, JsonSerializer.Serialize(manifest, JsonOptions)))
+            throw new InvalidOperationException("A collection cannot overwrite the workspace manifest.");
+        JsonFileTransaction.Commit(filePath, files);
     }
 
     private static void EnsureRequestFolderDirectoriesLocked(

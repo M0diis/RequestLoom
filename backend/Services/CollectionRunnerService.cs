@@ -77,6 +77,7 @@ public class CollectionRunnerService
 
         // Chained variables across requests
         var chainedVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var context = new RequestExecutionContext { EnvironmentId = environmentId };
 
         foreach (var req in requests)
         {
@@ -94,7 +95,8 @@ public class CollectionRunnerService
             try
             {
                 var payload = BuildPayload(req, service.WorkspaceId, chainedVariables);
-                var response = await _executionService.ExecuteAsync(payload, cancellationToken);
+                var response = await _executionService.ExecuteAsync(payload, cancellationToken, context);
+                cancellationToken.ThrowIfCancellationRequested();
 
                 requestResult.StatusCode = response.StatusCode;
                 requestResult.ResponseTimeMs = response.ResponseTimeMs;
@@ -113,7 +115,7 @@ public class CollectionRunnerService
 
                 if (!string.IsNullOrWhiteSpace(req.TestScript) && string.IsNullOrWhiteSpace(response.Error))
                 {
-                    var tests = RunTests(req.TestScript, response, chainedVariables);
+                    var tests = response.TestResults;
                     requestResult.Tests = tests;
                     if (tests.Any(t => !t.Passed))
                         requestResult.Passed = false;
@@ -123,6 +125,10 @@ public class CollectionRunnerService
                     result.PassedRequests++;
                 else
                     result.FailedRequests++;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -152,13 +158,12 @@ public class CollectionRunnerService
 
     private static ExecuteRequestPayload BuildPayload(ApiRequest req, string workspaceId, Dictionary<string, string> chainedVars)
     {
-        // Inject chained variables into request variable values
-        var variables = req.Variables.Where(v => v.Enabled).Select(v =>
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var variable in req.Variables.Where(v => v.Enabled)) values[variable.Key] = variable.Value;
+        foreach (var (key, value) in chainedVars) values[key] = value;
+        var variables = values.Select(pair => new RequestVariableRequest
         {
-            var value = v.Value;
-            if (chainedVars.TryGetValue(v.Key, out var cv))
-                value = cv;
-            return new RequestVariableRequest { Key = v.Key, Value = value, Enabled = v.Enabled };
+            Key = pair.Key, Value = pair.Value, Enabled = true,
         }).ToList();
 
         return new ExecuteRequestPayload

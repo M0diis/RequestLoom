@@ -27,6 +27,16 @@ jobs:
       - name: Build
         run: dotnet build --no-restore -c Release
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Regression tests
+        working-directory: .
+        env:
+          REQUESTLOOM_TEST_CONFIGURATION: Release
+        run: python -I tests/backend/test_regressions.py
+
   frontend:
     name: Frontend (Node)
     runs-on: ubuntu-latest
@@ -48,6 +58,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build

@@ -64,6 +64,7 @@ public class SettingsController : ControllerBase
 
         try
         {
+            _settings.ValidateUpdate(request);
             var targetMode = string.IsNullOrWhiteSpace(request.StorageMode) ? _settings.Mode : request.StorageMode;
             var targetStrategy = string.IsNullOrWhiteSpace(request.JsonStorageStrategy)
                 ? _settings.JsonStorageStrategy

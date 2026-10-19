@@ -23,6 +23,7 @@ import {
   type ResolvedVariableInfo,
 } from '../common/variablePreviewUtils';
 import { getDynamicValueSuggestions } from '../../lib/dynamicValues';
+import { appendQueryParameter } from '../../lib/requestUrl';
 import type {
   HttpMethod,
   BodyType,
@@ -366,6 +367,15 @@ export function RequestBuilder() {
     for (const [key, variable] of scopedWorkspaceLookup.entries()) {
       map.set(key, variable);
     }
+    for (const variable of activeEnvironment?.variables ?? []) {
+      if (!variable.enabled || !variable.key.trim()) continue;
+      const key = variable.key.trim().toLowerCase();
+      const explicitlyScoped = workspaceVariables.some(value => value.enabled &&
+        value.environmentId === activeEnvironment?.id && value.key.trim().toLowerCase() === key);
+      if (!explicitlyScoped) map.set(key, {
+        value: variable.value, source: `environment (${activeEnvironment?.name})`, isSecret: variable.isSecret,
+      });
+    }
 
     const scopedServiceLookup = buildScopedServiceLookup(
       serviceVariables,
@@ -458,8 +468,6 @@ export function RequestBuilder() {
       true,
     );
 
-    const queryParts: string[] = [];
-    const maskedQueryParts: string[] = [];
     for (const param of activeRequest.params) {
       if (!param.enabled) continue;
 
@@ -479,13 +487,8 @@ export function RequestBuilder() {
         maskedSecretVariables,
         true,
       );
-      queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
-      maskedQueryParts.push(`${encodeURIComponent(maskedKey)}=${encodeURIComponent(maskedValue)}`);
-    }
-
-    if (queryParts.length > 0) {
-      resolvedUrl += (resolvedUrl.includes('?') ? '&' : '?') + queryParts.join('&');
-      maskedUrl += (maskedUrl.includes('?') ? '&' : '?') + maskedQueryParts.join('&');
+      resolvedUrl = appendQueryParameter(resolvedUrl, key, value);
+      maskedUrl = appendQueryParameter(maskedUrl, maskedKey, maskedValue);
     }
 
     return {
@@ -625,9 +628,6 @@ export function RequestBuilder() {
           <HighlightedUrlInput
             value={activeRequest.url}
             onChange={handleUrlChange}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleSend();
-            }}
             placeholder="{{baseUrl}}/api/endpoint"
             variableStates={urlVariableStates}
             dynamicSuggestions={dynamicSuggestions}

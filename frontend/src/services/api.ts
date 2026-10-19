@@ -17,6 +17,15 @@ const api = axios.create({
   baseURL: '/api',
 });
 
+api.interceptors.response.use(response => response, (error: unknown) => {
+  if (axios.isAxiosError(error)) {
+    const body = error.response?.data;
+    const message = typeof body === 'string' ? body : body?.error;
+    if (typeof message === 'string' && message.trim()) error.message = message;
+  }
+  return Promise.reject(error);
+});
+
 function notifyServiceVariablesUpdated(serviceId: string, invalidateRuntime = false) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent('service-variables:updated', {
@@ -254,16 +263,16 @@ export const importsApi = {
 
 // Export / Import
 export const exportImportApi = {
-  export: (workspaceId: string) =>
-    api.get<WorkspaceExport>(`/workspaces/${workspaceId}/export`).then(r => r.data),
+  export: (workspaceId: string, options: { includeSecrets?: boolean; includeHistory?: boolean } = {}) =>
+    api.get<WorkspaceExport>(`/workspaces/${workspaceId}/export`, { params: options }).then(r => r.data),
   exportService: (serviceId: string) =>
     api.get<ServiceExport>(`/services/${serviceId}/export`).then(r => r.data),
   exportRequest: (requestId: string) =>
     api.get<RequestExport>(`/requests/${requestId}/export`).then(r => r.data),
   import: (data: WorkspaceExport) =>
-    api.post<Workspace>('/workspaces/import', data).then(r => r.data),
+    api.post<Workspace & { warnings?: string[] }>('/workspaces/import', data).then(r => r.data),
   importInto: (workspaceId: string, data: WorkspaceExport) =>
-    api.post(`/workspaces/${workspaceId}/import`, data),
+    api.post<{ message: string; warnings?: string[] }>(`/workspaces/${workspaceId}/import`, data).then(r => r.data),
 };
 
 // Tools: cURL & Snippets

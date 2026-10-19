@@ -11,6 +11,7 @@ public class ExecuteRequestPayload
     public List<RequestVariableRequest> Variables { get; set; } = [];
     public AuthRequest? Auth { get; set; }
     public string? WorkspaceId { get; set; }
+    public string? EnvironmentId { get; set; }
     public string? ServiceId { get; set; }
     public string? RequestId { get; set; }
     public string? PreRequestScript { get; set; }
@@ -18,6 +19,13 @@ public class ExecuteRequestPayload
     public string? TestScript { get; set; }
     public bool IgnoreSslErrors { get; set; }
     public MtlsConfig? Mtls { get; set; }
+}
+
+/// <summary>Runtime service variables owned by one collection run, rather than the interactive session.</summary>
+public sealed class RequestExecutionContext
+{
+    public string? EnvironmentId { get; init; }
+    public Dictionary<string, RuntimeScriptVariable> ServiceVariables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public class MtlsConfig

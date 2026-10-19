@@ -33,9 +33,10 @@ public class VariableResolutionService
         string workspaceId,
         string? serviceId = null,
         Dictionary<string, string>? requestVariables = null,
-        IReadOnlyDictionary<string, string>? runtimeVariables = null)
+        IReadOnlyDictionary<string, string>? runtimeVariables = null,
+        string? environmentId = null)
     {
-        var variables = await BuildVariableMapAsync(workspaceId, serviceId, requestVariables);
+        var variables = await BuildVariableMapAsync(workspaceId, serviceId, requestVariables, environmentId);
 
         // Runtime variables have the highest precedence. Request-scoped
         // runtime values override service-scoped runtime values.
@@ -55,17 +56,27 @@ public class VariableResolutionService
 
     public async Task<Dictionary<string, string>> BuildVariableMapAsync(string workspaceId,
         string? serviceId = null,
-        Dictionary<string, string>? requestVariables = null)
+        Dictionary<string, string>? requestVariables = null,
+        string? environmentId = null)
     {
         var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         var environments = await _environmentRepo.GetByWorkspaceAsync(workspaceId);
-        var activeEnv = environments.FirstOrDefault(e => e.IsActive);
+        var activeEnv = string.IsNullOrWhiteSpace(environmentId)
+            ? environments.FirstOrDefault(e => e.IsActive)
+            : environments.FirstOrDefault(e => e.Id == environmentId)
+                ?? throw new ArgumentException("The selected environment does not belong to this workspace.");
         var activeEnvironmentId = activeEnv?.Id;
 
         // Global variables: ALL scope first, then active-environment scope override.
-        var workspaceVars = await _workspaceVarRepo.GetByWorkspaceForEnvironmentAsync(workspaceId, activeEnvironmentId);
-        foreach (var v in workspaceVars.Where(v => v.Enabled))
+        var workspaceVars = (await _workspaceVarRepo.GetByWorkspaceForEnvironmentAsync(workspaceId, activeEnvironmentId)).ToList();
+        foreach (var v in workspaceVars.Where(v => v.Enabled && v.EnvironmentId == null))
+            variables[v.Key] = v.Value;
+
+        // Legacy environment variables override ALL, but scoped workspace values override legacy values.
+        foreach (var v in activeEnv?.Variables.Where(v => v.Enabled) ?? [])
+            variables[v.Key] = v.Value;
+        foreach (var v in workspaceVars.Where(v => v.Enabled && v.EnvironmentId != null))
             variables[v.Key] = v.Value;
 
         // Service variables (override global variables)

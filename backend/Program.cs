@@ -4,12 +4,13 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using RequestLoom.Api.Data;
 using RequestLoom.Api.Data.Repositories;
+using RequestLoom.Api.Controllers;
 using RequestLoom.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // JSON serialization
-builder.Services.AddControllers()
+builder.Services.AddControllers(options => options.Filters.Add<ResourceOwnershipFilter>())
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
@@ -35,6 +36,7 @@ builder.Services.AddHttpClient();
 // Storage configuration
 var settingsService = new SettingsService(builder.Configuration);
 builder.Services.AddSingleton(settingsService);
+builder.Services.AddSingleton<StorageWriteGuard>();
 builder.Services.AddSingleton<JsonDataStore>();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(new SqliteConnectionStringBuilder { DataSource = settingsService.DatabasePath }.ToString()));
@@ -105,6 +107,30 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api") &&
+        context.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE")
+    {
+        using var lease = context.RequestServices.GetRequiredService<StorageWriteGuard>()
+            .TryEnter(context.Request.Path.Equals("/api/settings/migrate", StringComparison.OrdinalIgnoreCase));
+        if (lease == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = settingsService.RestartRequired
+                    ? "Storage migration is complete. Restart RequestLoom before making more changes."
+                    : "Storage migration requires an idle application. Wait for current requests to finish and retry.",
+            });
+            return;
+        }
+        await next();
+        return;
+    }
+    await next();
+});
 
 // Mock Server middleware: intercepts /mock/* before static files/SPA fallback
 app.Use(async (context, next) =>

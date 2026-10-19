@@ -886,7 +886,6 @@ export function Sidebar() {
           <div className="border-b border-gray-800/80 px-3 py-2.5">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Workspace</span>
-              <span className="text-[10px] text-gray-600">Quick start</span>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               <button

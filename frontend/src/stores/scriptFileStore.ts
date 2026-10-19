@@ -16,7 +16,11 @@ export interface ScriptFileTab extends ScriptFileEntry {
   error: string | null;
 }
 
+let loadVersion = 0;
+
 interface ScriptFileState {
+  workspaceId: string | null;
+  error: string | null;
   files: ScriptFileEntry[];
   tabs: ScriptFileTab[];
   openFileKeys: string[];
@@ -54,6 +58,8 @@ function toTab(entry: ScriptFileEntry): ScriptFileTab {
 }
 
 export const useScriptFileStore = create<ScriptFileState>((set, get) => ({
+  workspaceId: null,
+  error: null,
   files: [],
   tabs: [],
   openFileKeys: [],
@@ -61,32 +67,33 @@ export const useScriptFileStore = create<ScriptFileState>((set, get) => ({
   loading: false,
 
   load: async (workspaceId, serviceIds) => {
-    set({ loading: true });
-    const responses = await Promise.all(
-      serviceIds.map(async (serviceId) => {
-        try {
-          return await serviceFilesApi.list(workspaceId, serviceId);
-        } catch {
-          return [];
+    const version = ++loadVersion;
+    if (get().workspaceId !== workspaceId) set({ workspaceId, files: [], openFileKeys: [], activeFileKey: null });
+    set({ loading: true, error: null });
+    try {
+      const responses = await Promise.all(serviceIds.map(async serviceId => {
+        try { return await serviceFilesApi.list(workspaceId, serviceId); }
+        catch (error) {
+          // Collection files are intentionally unavailable in SQLite mode.
+          if ((error as { response?: { status: number } }).response?.status === 400) return [];
+          throw error;
         }
-      }),
-    );
-    const files = responses.flatMap((serviceFiles, index) =>
-      serviceFiles.map((file) => toEntry(serviceIds[index], file)),
-    );
-
-    set((state) => {
-      const fileMap = new Map(files.map((file) => [file.key, file]));
-      const tabs = state.tabs
-        .filter((tab) => fileMap.has(tab.key))
-        .map((tab) => ({ ...tab, ...fileMap.get(tab.key) } as ScriptFileTab));
-      const openFileKeys = tabs.map((tab) => tab.key);
-      const activeFileKey = state.activeFileKey && fileMap.has(state.activeFileKey)
-        ? state.activeFileKey
-        : (openFileKeys[openFileKeys.length - 1] ?? null);
-
-      return { files, tabs, openFileKeys, activeFileKey, loading: false };
-    });
+      }));
+      if (version !== loadVersion) return;
+      const files = responses.flatMap((serviceFiles, index) => serviceFiles.map(file => toEntry(serviceIds[index], file)));
+      set(state => {
+        const fileMap = new Map(files.map(file => [file.key, file]));
+        const tabs = state.tabs.filter(tab => fileMap.has(tab.key) || tab.code !== tab.savedCode)
+          .map(tab => ({ ...tab, ...fileMap.get(tab.key) } as ScriptFileTab));
+        const openFileKeys = state.openFileKeys.filter(key => fileMap.has(key));
+        const activeFileKey = state.activeFileKey && openFileKeys.includes(state.activeFileKey)
+          ? state.activeFileKey : openFileKeys[openFileKeys.length - 1] ?? null;
+        return { files, tabs, openFileKeys, activeFileKey, loading: false };
+      });
+    } catch (error) {
+      if (version === loadVersion) set({ loading: false,
+        error: error instanceof Error ? error.message : 'Could not load collection files. Your drafts are retained.' });
+    }
   },
 
   addFile: (serviceId, file) => {
@@ -125,12 +132,12 @@ export const useScriptFileStore = create<ScriptFileState>((set, get) => ({
       const index = state.openFileKeys.indexOf(key);
       const openFileKeys = state.openFileKeys.filter((item) => item !== key);
       if (state.activeFileKey !== key) {
-        return { tabs: state.tabs.filter((tab) => tab.key !== key), openFileKeys };
+        return { tabs: state.tabs.filter((tab) => tab.key !== key || tab.code !== tab.savedCode), openFileKeys };
       }
 
       const replacement = openFileKeys[index - 1] ?? openFileKeys[index] ?? null;
       return {
-        tabs: state.tabs.filter((tab) => tab.key !== key),
+        tabs: state.tabs.filter((tab) => tab.key !== key || tab.code !== tab.savedCode),
         openFileKeys,
         activeFileKey: replacement,
       };
@@ -163,7 +170,7 @@ export const useScriptFileStore = create<ScriptFileState>((set, get) => ({
 
   save: async (workspaceId, key) => {
     const tab = get().tabs.find((item) => item.key === key);
-    if (!tab) return;
+    if (!tab || tab.saving || tab.running) return;
 
     set((state) => ({
       tabs: state.tabs.map((item) => item.key === key ? { ...item, saving: true, error: null } : item),
@@ -172,7 +179,7 @@ export const useScriptFileStore = create<ScriptFileState>((set, get) => ({
       await serviceFilesApi.save(workspaceId, tab.serviceId, tab.name, tab.code);
       set((state) => ({
         tabs: state.tabs.map((item) => item.key === key
-          ? { ...item, savedCode: item.code, content: item.code, saving: false }
+          ? { ...item, savedCode: tab.code, content: tab.code, saving: false }
           : item),
         files: state.files.map((item) => item.key === key ? { ...item, content: tab.code } : item),
       }));
@@ -187,7 +194,7 @@ export const useScriptFileStore = create<ScriptFileState>((set, get) => ({
 
   run: async (workspaceId, key) => {
     const tab = get().tabs.find((item) => item.key === key);
-    if (!tab) return;
+    if (!tab || tab.saving || tab.running) return;
 
     set((state) => ({
       tabs: state.tabs.map((item) => item.key === key
@@ -198,7 +205,7 @@ export const useScriptFileStore = create<ScriptFileState>((set, get) => ({
       const runResponse = await serviceFilesApi.run(workspaceId, tab.serviceId, tab.name, tab.code);
       set((state) => ({
         tabs: state.tabs.map((item) => item.key === key
-          ? { ...item, savedCode: item.code, content: item.code, running: false, runResponse }
+          ? { ...item, savedCode: tab.code, content: tab.code, running: false, runResponse }
           : item),
         files: state.files.map((item) => item.key === key ? { ...item, content: tab.code } : item),
       }));

@@ -22,11 +22,11 @@ public class ExportImportController : ControllerBase
     /// Export all data for a workspace.
     /// </summary>
     [HttpGet("api/workspaces/{workspaceId}/export")]
-    public async Task<IActionResult> ExportWorkspace(string workspaceId)
+    public async Task<IActionResult> ExportWorkspace(string workspaceId, [FromQuery] bool includeSecrets = true, [FromQuery] bool includeHistory = true)
     {
         try
         {
-            var data = await _exportImportService.ExportWorkspaceAsync(workspaceId);
+            var data = await _exportImportService.ExportWorkspaceAsync(workspaceId, new WorkspaceExportOptions(includeSecrets, includeHistory));
             return Ok(data);
         }
         catch (InvalidOperationException)
@@ -52,6 +52,10 @@ public class ExportImportController : ControllerBase
             var workspace = await _exportImportService.ImportWorkspaceAsync(data);
             return CreatedAtAction(nameof(ImportAsNewWorkspace), new { id = workspace.Id }, workspace);
         }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
         catch (Exception ex)
         {
             return StatusCode(500, new { error = $"Import failed: {ex.Message}" });
@@ -69,12 +73,16 @@ public class ExportImportController : ControllerBase
 
         try
         {
-            await _exportImportService.ImportIntoWorkspaceAsync(workspaceId, data);
-            return Ok(new { message = "Import successful" });
+            var warnings = await _exportImportService.ImportIntoWorkspaceAsync(workspaceId, data);
+            return Ok(new { message = "Import successful", warnings });
         }
         catch (InvalidOperationException)
         {
             return NotFound(new { error = "Workspace not found" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {

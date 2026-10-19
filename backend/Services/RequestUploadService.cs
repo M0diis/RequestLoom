@@ -44,6 +44,23 @@ public sealed class RequestUploadService
         };
     }
 
+    public static bool IsStoredPath(string? storedPath) =>
+        !string.IsNullOrWhiteSpace(storedPath) &&
+        storedPath.Trim().Replace('\\', '/').StartsWith(UploadDirectoryName + "/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Restores an archived upload under a new stored name so it never replaces an existing file.</summary>
+    public string StoreArchived(string archivedPath, byte[] content)
+    {
+        var originalName = Path.GetFileName(ResolvePath(archivedPath));
+        // Stored names are "{guid}_{name}"; keep the user's file name, not the old GUID.
+        var separator = originalName.IndexOf('_');
+        var fileName = SanitizeFileName(separator == 32 ? originalName[(separator + 1)..] : originalName);
+        Directory.CreateDirectory(_rootDirectory);
+        var storedName = $"{Guid.NewGuid():N}_{fileName}";
+        File.WriteAllBytes(ResolveWithinRoot(storedName), content);
+        return $"{UploadDirectoryName}/{storedName}";
+    }
+
     public string ResolvePath(string storedPath)
     {
         if (string.IsNullOrWhiteSpace(storedPath))

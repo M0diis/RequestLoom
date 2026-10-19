@@ -39,7 +39,7 @@ export function RequestScriptEditor({ request, onUpdate, stage }: Props) {
 
   useEffect(() => {
     setDraft(scriptValue ?? '');
-  }, [editorScopeKey]);
+  }, [editorScopeKey, scriptValue]);
 
   const handleChange = (value: string) => {
     setDraft(value);

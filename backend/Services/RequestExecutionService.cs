@@ -59,13 +59,13 @@ public class RequestExecutionService
         _uploadService = uploadService;
     }
 
-    public async Task<ExecuteResponse> ExecuteAsync(ExecuteRequestPayload payload, CancellationToken cancellationToken)
+    public async Task<ExecuteResponse> ExecuteAsync(ExecuteRequestPayload payload, CancellationToken cancellationToken, RequestExecutionContext? executionContext = null)
     {
         var workspaceId = payload.WorkspaceId ?? "default";
-        var requestRuntimeVariables = _runtimeVariableStore.GetRequest(
+        var requestRuntimeVariables = executionContext != null ? new Dictionary<string, RuntimeScriptVariable>(StringComparer.OrdinalIgnoreCase) : _runtimeVariableStore.GetRequest(
             workspaceId,
             payload.RequestId);
-        var serviceRuntimeVariables = _runtimeVariableStore.GetService(
+        var serviceRuntimeVariables = executionContext?.ServiceVariables != null ? CloneRuntimeVariables(executionContext.ServiceVariables) : _runtimeVariableStore.GetService(
             workspaceId,
             payload.ServiceId);
         var runtimeVariables = MergeRuntimeVariables(
@@ -84,7 +84,8 @@ public class RequestExecutionService
                 workspaceId,
                 payload.ServiceId,
                 requestVariables,
-                runtimeVariables.ToDictionary(pair => pair.Key, pair => pair.Value.Value, StringComparer.OrdinalIgnoreCase));
+                runtimeVariables.ToDictionary(pair => pair.Key, pair => pair.Value.Value, StringComparer.OrdinalIgnoreCase),
+                executionContext?.EnvironmentId ?? payload.EnvironmentId);
 
             var requestState = new ScriptRequestState
             {
@@ -143,18 +144,13 @@ public class RequestExecutionService
             if (requestState.Params.Count > 0)
             {
                 var enabledParams = requestState.Params.Where(p => p.Enabled);
-                var queryParts = new List<string>();
                 foreach (var p in enabledParams)
                 {
                     var key = resolutionSession.Resolve(p.Key);
                     var value = resolutionSession.Resolve(p.Value);
-                    queryParts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
+                    resolvedUrl = RequestUrl.AppendQueryParameter(resolvedUrl, key, value);
                 }
-                if (queryParts.Count > 0)
-                {
-                    resolvedUrl += (resolvedUrl.Contains('?') ? "&" : "?") + string.Join("&", queryParts);
-                    urlForDiagnostics = resolvedUrl;
-                }
+                urlForDiagnostics = resolvedUrl;
             }
 
             // Create HttpClient
@@ -196,6 +192,8 @@ public class RequestExecutionService
             var handler = new HttpClientHandler
             {
                 AllowAutoRedirect = followRedirects,
+                UseProxy = useProxy,
+                AutomaticDecompression = DecompressionMethods.All,
                 MaxAutomaticRedirections = maxRedirects,
             };
 
@@ -222,15 +220,20 @@ public class RequestExecutionService
 
             using var client = new HttpClient(handler);
 
-            client.Timeout = requestSettings?.TimeoutSeconds is > 0
+            var timeout = requestSettings?.TimeoutSeconds is > 0
                 ? TimeSpan.FromSeconds(requestSettings.TimeoutSeconds.Value)
                 : _settings.RequestTimeoutMs > 0
                     ? TimeSpan.FromMilliseconds(_settings.RequestTimeoutMs)
                     : Timeout.InfiniteTimeSpan;
 
+            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            if (timeout != Timeout.InfiniteTimeSpan) timeoutSource.CancelAfter(timeout);
+            var transportToken = timeoutSource.Token;
+            client.Timeout = Timeout.InfiniteTimeSpan;
+
             // Build request
             var httpMethod = new HttpMethod((requestState.Method ?? payload.Method).ToUpperInvariant());
-            var request = new HttpRequestMessage(httpMethod, resolvedUrl);
+            using var request = new HttpRequestMessage(httpMethod, resolvedUrl);
 
             var resolvedHeaders = new List<KeyValuePairRequest>();
 
@@ -355,18 +358,26 @@ public class RequestExecutionService
                 }
             }
 
-            // Execute
-            var response = await client.SendAsync(request, cancellationToken);
+            var requestHeaderNames = request.Headers.Select(header => header.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var header in resolvedHeaders.Where(h => !requestHeaderNames.Contains(h.Key)))
+            {
+                request.Content ??= new ByteArrayContent([]);
+                request.Content.Headers.Remove(header.Key);
+                if (!request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value))
+                    throw new ArgumentException($"Invalid request header: {header.Key}");
+            }
+
+            // Keep transport timeout/cancellation active while consuming the streamed body.
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, transportToken);
             if (_settings.PersistCookies && request.RequestUri != null &&
                 response.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders))
             {
                 var responseUri = response.RequestMessage?.RequestUri ?? request.RequestUri;
                 _cookieJar.StoreResponseCookies(workspaceId, responseUri, setCookieHeaders);
             }
+            var maxBodyBytes = checked(_settings.MaxResponseBodySizeMb * 1024 * 1024);
+            var (responseBody, bodyTruncated, responseSize) = await ResponseBodyReader.ReadAsync(response, maxBodyBytes, transportToken);
             stopwatch.Stop();
-
-            var maxBodyBytes = _settings.MaxResponseBodySizeMb * 1024 * 1024;
-            var (responseBody, bodyTruncated) = await ReadResponseBodyAsync(response, maxBodyBytes, cancellationToken);
             var responseHeaders = response.Headers
                 .Concat(response.Content.Headers)
                 .ToDictionary(h => h.Key, h => h.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
@@ -379,9 +390,7 @@ public class RequestExecutionService
                 Body = responseBody,
                 ContentType = response.Content.Headers.ContentType?.MediaType ?? "",
                 ResponseTimeMs = stopwatch.ElapsedMilliseconds,
-                ResponseSizeBytes = bodyTruncated && response.Content.Headers.ContentLength is long contentLength
-                    ? contentLength
-                    : Encoding.UTF8.GetByteCount(responseBody),
+                ResponseSizeBytes = responseSize,
                 IsTruncated = bodyTruncated
             };
 
@@ -418,6 +427,8 @@ public class RequestExecutionService
                 serviceVariablesToPersist,
                 serviceVariablesToDelete);
 
+            if (executionContext == null)
+            {
             _runtimeVariableStore.SetRequest(
                 workspaceId,
                 payload.RequestId,
@@ -426,6 +437,8 @@ public class RequestExecutionService
                 workspaceId,
                 payload.ServiceId,
                 serviceRuntimeVariables);
+            }
+            else executionContext.ServiceVariables = CloneRuntimeVariables(serviceRuntimeVariables);
             result.ScriptVariables = CloneRuntimeVariables(runtimeVariables);
             result.ServiceScriptVariables = CloneRuntimeVariables(serviceRuntimeVariables);
             result.ScriptLogs = scriptLogs;
@@ -470,14 +483,14 @@ public class RequestExecutionService
 
             return result;
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException)
         {
             stopwatch.Stop();
             return new ExecuteResponse
             {
                 StatusCode = 0,
-                StatusText = "Cancelled",
-                Error = "Request was cancelled",
+                StatusText = cancellationToken.IsCancellationRequested ? "Cancelled" : "Timeout",
+                Error = cancellationToken.IsCancellationRequested ? "Request was cancelled" : "Request timed out",
                 ResponseTimeMs = stopwatch.ElapsedMilliseconds,
                 ScriptVariables = CloneRuntimeVariables(runtimeVariables),
                 ServiceScriptVariables = CloneRuntimeVariables(serviceRuntimeVariables),
@@ -509,35 +522,6 @@ public class RequestExecutionService
         }
 
         return $"{message} (URL: {attemptedUrl})";
-    }
-
-    private static async Task<(string Body, bool Truncated)> ReadResponseBodyAsync(
-        HttpResponseMessage response,
-        long maxBytes,
-        CancellationToken cancellationToken)
-    {
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream);
-
-        if (maxBytes <= 0)
-        {
-            return (await reader.ReadToEndAsync(cancellationToken), false);
-        }
-
-        var sb = new StringBuilder((int)Math.Min(maxBytes, 8192));
-        var buffer = new char[8192];
-        var total = 0L;
-
-        while (total < maxBytes)
-        {
-            var toRead = (int)Math.Min(buffer.Length, maxBytes - total);
-            var read = await reader.ReadAsync(buffer.AsMemory(0, toRead), cancellationToken);
-            if (read == 0) break;
-            sb.Append(buffer, 0, read);
-            total += read;
-        }
-
-        return (sb.ToString(), total > 0 && reader.Peek() >= 0);
     }
 
     private async Task<string> ResolvePreRequestScriptAsync(ExecuteRequestPayload payload)

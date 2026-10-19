@@ -41,16 +41,26 @@ public class SettingsService
     private readonly string _settingsFilePath;
     private readonly object _lock = new();
     private Dictionary<string, string> _overrides = [];
+    private readonly string _activeMode;
+    private readonly string _activeJsonStorageStrategy;
 
     public SettingsService(IConfiguration config)
     {
         _config = config;
-        _settingsFilePath = Path.GetFullPath("requestloom.settings.json");
+        _settingsFilePath = Path.GetFullPath(ResolveDataPath("requestloom.settings.json"));
         LoadSettingsFile();
+        _activeMode = ConfiguredMode;
+        _activeJsonStorageStrategy = ConfiguredJsonStorageStrategy;
     }
 
     /// <summary>Effective storage mode for this process.</summary>
-    public string Mode
+    public string Mode => _activeMode;
+
+    public string JsonStorageStrategy => _activeJsonStorageStrategy;
+
+    public bool RestartRequired => ConfiguredMode != Mode || ConfiguredJsonStorageStrategy != JsonStorageStrategy;
+
+    private string ConfiguredMode
     {
         get
         {
@@ -72,7 +82,7 @@ public class SettingsService
 
     public bool UseJson => string.Equals(Mode, JsonMode, StringComparison.OrdinalIgnoreCase);
 
-    public string JsonStorageStrategy
+    private string ConfiguredJsonStorageStrategy
     {
         get
         {
@@ -83,13 +93,24 @@ public class SettingsService
         }
     }
 
+    /// <summary>
+    /// Resolves relative data paths against REQUESTLOOM_DATA_DIR when set (the desktop shell
+    /// points it at the per-user data folder); otherwise against the working directory.
+    /// </summary>
+    private static string ResolveDataPath(string path)
+    {
+        var dataDir = Environment.GetEnvironmentVariable("REQUESTLOOM_DATA_DIR");
+        if (string.IsNullOrWhiteSpace(dataDir) || Path.IsPathRooted(path)) return path;
+        return Path.Combine(dataDir, path);
+    }
+
     /// <summary>Full path of the JSON data file used in json mode.</summary>
     public string JsonDataPath
     {
         get
         {
             var configured = _config["Storage:JsonPath"];
-            return Path.GetFullPath(string.IsNullOrWhiteSpace(configured) ? "requestloom-data.json" : configured);
+            return Path.GetFullPath(ResolveDataPath(string.IsNullOrWhiteSpace(configured) ? "requestloom-data.json" : configured));
         }
     }
 
@@ -99,7 +120,7 @@ public class SettingsService
         get
         {
             var configured = _config["Database:Path"];
-            return Path.GetFullPath(string.IsNullOrWhiteSpace(configured) ? "RequestLoom.db" : configured);
+            return Path.GetFullPath(ResolveDataPath(string.IsNullOrWhiteSpace(configured) ? "RequestLoom.db" : configured));
         }
     }
 
@@ -152,7 +173,9 @@ public class SettingsService
             StorageMode = Mode,
             StoragePath = StoragePath,
             JsonStorageStrategy = JsonStorageStrategy,
-            RestartRequired = false,
+            RestartRequired = RestartRequired,
+            PendingStorageMode = RestartRequired ? ConfiguredMode : null,
+            PendingJsonStorageStrategy = RestartRequired ? ConfiguredJsonStorageStrategy : null,
             RequestTimeoutMs = RequestTimeoutMs,
             AutoSave = AutoSave,
             FollowRedirects = FollowRedirects,
@@ -174,7 +197,7 @@ public class SettingsService
     /// Null fields in the request keep their current values. A storage mode
     /// change takes effect on the next restart.
     /// </summary>
-    public AppSettingsDto Update(UpdateSettingsRequest request)
+    private (string? Mode, string? Strategy) Validate(UpdateSettingsRequest request)
     {
         string? newMode = null;
         if (!string.IsNullOrWhiteSpace(request.StorageMode))
@@ -211,13 +234,22 @@ public class SettingsService
             !Uri.TryCreate(request.ProxyUrl, UriKind.Absolute, out _))
             throw new ArgumentException("Invalid proxy URL. Expected an absolute URL such as 'http://localhost:8888'.");
 
-        var restartRequired = (newMode != null &&
-            !string.Equals(newMode, Mode, StringComparison.OrdinalIgnoreCase)) ||
-            (newJsonStorageStrategy != null &&
-             !string.Equals(newJsonStorageStrategy, JsonStorageStrategy, StringComparison.OrdinalIgnoreCase));
+        var forcedMode = Environment.GetEnvironmentVariable("STORAGE_MODE");
+        if (newMode != null && !string.IsNullOrWhiteSpace(forcedMode) && newMode != Normalize(forcedMode))
+            throw new ArgumentException("STORAGE_MODE fixes the storage backend for this process. Change that environment variable before switching storage.");
+        return (newMode, newJsonStorageStrategy);
+    }
 
+    public void ValidateUpdate(UpdateSettingsRequest request) => Validate(request);
+
+    public AppSettingsDto Update(UpdateSettingsRequest request)
+    {
+        var (newMode, newJsonStorageStrategy) = Validate(request);
         lock (_lock)
         {
+            var previous = new Dictionary<string, string>(_overrides);
+            try
+            {
             if (newMode != null) _overrides[KeyStorageMode] = newMode;
             if (newJsonStorageStrategy != null) _overrides[KeyJsonStorageStrategy] = newJsonStorageStrategy;
             if (request.RequestTimeoutMs.HasValue) _overrides[KeyRequestTimeoutMs] = request.RequestTimeoutMs.Value.ToString(CultureInfo.InvariantCulture);
@@ -234,29 +266,15 @@ public class SettingsService
             if (request.ProxyUsername is not null) _overrides[KeyProxyUsername] = request.ProxyUsername;
             if (request.ProxyPassword is not null) _overrides[KeyProxyPassword] = request.ProxyPassword;
             Persist();
+            }
+            catch
+            {
+                _overrides = previous;
+                throw;
+            }
         }
 
-        var effectiveMode = newMode ?? Mode;
-        return new AppSettingsDto
-        {
-            StorageMode = effectiveMode,
-            StoragePath = effectiveMode == JsonMode ? JsonDataPath : DatabasePath,
-            JsonStorageStrategy = JsonStorageStrategy,
-            RestartRequired = restartRequired,
-            RequestTimeoutMs = RequestTimeoutMs,
-            AutoSave = AutoSave,
-            FollowRedirects = FollowRedirects,
-            MaxRedirects = MaxRedirects,
-            IgnoreSslErrors = IgnoreSslErrors,
-            MaxResponseBodySizeMb = MaxResponseBodySizeMb,
-            SaveHistory = SaveHistory,
-            PersistCookies = PersistCookies,
-            ResponseFormat = ResponseFormat,
-            ProxyEnabled = ProxyEnabled,
-            ProxyUrl = ProxyUrl,
-            ProxyUsername = ProxyUsername,
-            ProxyPassword = ProxyPassword
-        };
+        return GetSettings();
     }
 
     private string GetString(string key, string fallback)
@@ -323,6 +341,8 @@ public class AppSettingsDto
     public string StoragePath { get; set; } = "";
     public string JsonStorageStrategy { get; set; } = SettingsService.JsonSingleFile;
     public bool RestartRequired { get; set; }
+    public string? PendingStorageMode { get; set; }
+    public string? PendingJsonStorageStrategy { get; set; }
     public long RequestTimeoutMs { get; set; } = 120_000;
     public bool AutoSave { get; set; } = true;
     public bool FollowRedirects { get; set; } = true;

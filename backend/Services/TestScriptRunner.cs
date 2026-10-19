@@ -20,22 +20,36 @@ public static class TestScriptRunner
 
         try
         {
-            var engine = new Engine(options => options.TimeoutInterval(TimeSpan.FromSeconds(5)));
+            var engine = new Engine(options => options.TimeoutInterval(TimeSpan.FromSeconds(5)).LimitRecursion(64).LimitMemory(32_000_000));
 
             // Define expect() as a plain JS function that returns assertion methods
             engine.Execute(@"
+                function __deepEqual(a, b, seen) {
+                    if (Object.is(a, b)) return true;
+                    if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+                    if (Object.prototype.toString.call(a) !== Object.prototype.toString.call(b)) return false;
+                    if (a instanceof Date) return Object.is(a.getTime(), b.getTime());
+                    seen = seen || [];
+                    for (var n = 0; n < seen.length; n++) {
+                        if (seen[n][0] === a && seen[n][1] === b) return true;
+                    }
+                    seen.push([a, b]);
+                    var keys = Object.keys(a);
+                    if (keys.length !== Object.keys(b).length) return false;
+                    for (var i = 0; i < keys.length; i++) {
+                        var key = keys[i];
+                        if (!Object.prototype.hasOwnProperty.call(b, key) || !__deepEqual(a[key], b[key], seen)) return false;
+                    }
+                    return true;
+                }
                 function expect(actual) {
                     return {
                         _actual: actual,
                         toBe: function(expected) {
-                            var a = actual == null ? '' : String(actual);
-                            var e = expected == null ? '' : String(expected);
-                            if (a !== e) throw new Error('Expected ' + JSON.stringify(e) + ' but got ' + JSON.stringify(a));
+                            if (!Object.is(actual, expected)) throw new Error('Expected ' + JSON.stringify(expected) + ' but got ' + JSON.stringify(actual));
                         },
                         toEqual: function(expected) {
-                            var a = actual == null ? '' : String(actual);
-                            var e = expected == null ? '' : String(expected);
-                            if (a !== e) throw new Error('Expected ' + JSON.stringify(e) + ' but got ' + JSON.stringify(a));
+                            if (!__deepEqual(actual, expected)) throw new Error('Expected ' + JSON.stringify(expected) + ' but got ' + JSON.stringify(actual));
                         },
                         toContain: function(substring) {
                             var a = actual == null ? '' : String(actual);
@@ -54,14 +68,10 @@ public static class TestScriptRunner
                         },
                         not: {
                             toBe: function(expected) {
-                                var a = actual == null ? '' : String(actual);
-                                var e = expected == null ? '' : String(expected);
-                                if (a === e) throw new Error('Expected ' + JSON.stringify(a) + ' not to be ' + JSON.stringify(e));
+                                if (Object.is(actual, expected)) throw new Error('Expected values not to be identical');
                             },
                             toEqual: function(expected) {
-                                var a = actual == null ? '' : String(actual);
-                                var e = expected == null ? '' : String(expected);
-                                if (a === e) throw new Error('Expected ' + JSON.stringify(a) + ' not to equal ' + JSON.stringify(e));
+                                if (__deepEqual(actual, expected)) throw new Error('Expected values not to be structurally equal');
                             }
                         }
                     };

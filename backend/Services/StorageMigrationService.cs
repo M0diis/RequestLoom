@@ -219,6 +219,7 @@ public sealed class StorageMigrationService
 
     private static void RemoveSqliteTargetAfterBackup(string targetPath)
     {
+        SqliteConnection.ClearAllPools();
         foreach (var path in new[] { targetPath, $"{targetPath}-wal", $"{targetPath}-shm" })
         {
             if (File.Exists(path)) File.Delete(path);

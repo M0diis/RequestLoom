@@ -1,10 +1,14 @@
 const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
+const net = require('net');
 const path = require('path');
 const fs = require('fs');
 
-const APP_URL = process.env.REQUESTLOOM_APP_URL || 'http://127.0.0.1:5056';
+const PREFERRED_PORT = 5056;
+// Resolved at startup: the preferred port when free (keeps the web origin, and so
+// its localStorage, stable between launches), otherwise a free loopback port.
+let APP_URL = process.env.REQUESTLOOM_APP_URL || `http://127.0.0.1:${PREFERRED_PORT}`;
 const DEBUG_MODE = process.env.REQUESTLOOM_ELECTRON_DEBUG === '1';
 const HEALTH_PATH = '/api/workspaces';
 const STARTUP_TIMEOUT_MS = 120000;
@@ -30,8 +34,114 @@ function getBackendExecutablePath() {
   return path.join(getBackendDir(), exeName);
 }
 
+function getDataDir() {
+  return process.env.REQUESTLOOM_DATA_DIR || path.join(app.getPath('userData'), 'data');
+}
+
 function getBackendLogPath() {
-  return path.join(getBackendDir(), 'desktop-backend.log');
+  return path.join(app.getPath('userData'), 'logs', 'desktop-backend.log');
+}
+
+const DATA_FILE_NAMES = ['RequestLoom.db', 'RequestLoom.db-wal', 'RequestLoom.db-shm', 'requestloom-data.json', 'requestloom.settings.json'];
+const DATA_DIR_NAMES = ['uploads', 'requestloom-data'];
+
+// Earlier builds kept mutable data beside the bundled backend. Copy it once into the
+// per-user data directory (never overwriting) and leave the original in place.
+function migrateLegacyData(dataDir) {
+  const legacyDir = getBackendDir();
+  if (path.resolve(legacyDir) === path.resolve(dataDir)) return;
+  const marker = path.join(dataDir, '.legacy-migrated');
+  if (fs.existsSync(marker)) return;
+
+  try {
+    for (const name of DATA_FILE_NAMES) {
+      const from = path.join(legacyDir, name);
+      const to = path.join(dataDir, name);
+      if (fs.existsSync(from) && !fs.existsSync(to)) fs.copyFileSync(from, to);
+    }
+    for (const name of DATA_DIR_NAMES) {
+      const from = path.join(legacyDir, name);
+      const to = path.join(dataDir, name);
+      if (fs.existsSync(from) && !fs.existsSync(to)) fs.cpSync(from, to, { recursive: true });
+    }
+    fs.writeFileSync(marker, new Date().toISOString());
+    appendLog(`Copied legacy data from ${legacyDir} to ${dataDir}.`);
+  } catch (error) {
+    appendLog(`Legacy data migration failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => server.close(() => resolve(true)));
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function resolveAppUrl() {
+  if (process.env.REQUESTLOOM_APP_URL) return process.env.REQUESTLOOM_APP_URL;
+  const port = (await isPortFree(PREFERRED_PORT)) ? PREFERRED_PORT : await getFreePort();
+  return `http://127.0.0.1:${port}`;
+}
+
+function isTrustedUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'file:') {
+      return path.resolve(decodeURIComponent(parsed.pathname.replace(/^\/([A-Za-z]:)/, '$1'))) === path.resolve(__dirname, 'loading.html');
+    }
+    return parsed.origin === new URL(APP_URL).origin;
+  } catch {
+    return false;
+  }
+}
+
+// Privileged IPC is only honoured for the app's own frames.
+function isTrustedSender(event) {
+  const url = event.senderFrame?.url || event.sender?.getURL?.() || '';
+  return isTrustedUrl(url);
+}
+
+function trustedHandle(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!isTrustedSender(event)) {
+      appendLog(`Rejected IPC ${channel} from untrusted sender.`);
+      throw new Error('Untrusted IPC sender.');
+    }
+    return handler(event, ...args);
+  });
+}
+
+function trustedOn(channel, handler) {
+  ipcMain.on(channel, (event, ...args) => {
+    if (!isTrustedSender(event)) {
+      appendLog(`Rejected IPC ${channel} from untrusted sender.`);
+      return;
+    }
+    handler(event, ...args);
+  });
+}
+
+function openExternalIfSafe(url) {
+  try {
+    const { protocol } = new URL(url);
+    if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') shell.openExternal(url);
+  } catch {
+    // Ignore malformed URLs.
+  }
 }
 
 function appendLog(message) {
@@ -47,7 +157,7 @@ function stopActiveDrag() {
 }
 
 function registerWindowControlHandlers() {
-  ipcMain.handle('window:start-drag', (event) => {
+  trustedHandle('window:start-drag', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed() || win.isMaximized()) return false;
 
@@ -65,7 +175,7 @@ function registerWindowControlHandlers() {
     return true;
   });
 
-  ipcMain.on('window:drag-move', () => {
+  trustedOn('window:drag-move', () => {
     if (!activeDrag) return;
 
     const { win, winX, winY, width, height, startX, startY } = activeDrag;
@@ -83,16 +193,16 @@ function registerWindowControlHandlers() {
     }, false);
   });
 
-  ipcMain.handle('window:stop-drag', () => {
+  trustedHandle('window:stop-drag', () => {
     stopActiveDrag();
   });
 
-  ipcMain.handle('window:minimize', (event) => {
+  trustedHandle('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     win?.minimize();
   });
 
-  ipcMain.handle('window:maximize-toggle', (event) => {
+  trustedHandle('window:maximize-toggle', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) {
       return false;
@@ -107,19 +217,19 @@ function registerWindowControlHandlers() {
     return win.isMaximized();
   });
 
-  ipcMain.handle('window:close', (event) => {
+  trustedHandle('window:close', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     win?.close();
   });
 
-  ipcMain.handle('window:is-maximized', (event) => {
+  trustedHandle('window:is-maximized', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     return win?.isMaximized() ?? false;
   });
 }
 
 function registerDesktopUtilityHandlers() {
-  ipcMain.handle('app:reload', async (event) => {
+  trustedHandle('app:reload', async (event) => {
     if (reloadingBackend) return false;
 
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -150,7 +260,7 @@ function registerDesktopUtilityHandlers() {
     }
   });
 
-  ipcMain.handle('shell:select-directory', async () => {
+  trustedHandle('shell:select-directory', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
       title: 'Choose collection folder',
@@ -158,7 +268,7 @@ function registerDesktopUtilityHandlers() {
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle('shell:reveal-path', (_event, targetPath) => {
+  trustedHandle('shell:reveal-path', (_event, targetPath) => {
     if (typeof targetPath !== 'string' || !targetPath.trim()) return false;
     const resolved = path.resolve(targetPath);
     if (!fs.existsSync(resolved)) return false;
@@ -166,7 +276,7 @@ function registerDesktopUtilityHandlers() {
     return true;
   });
 
-  ipcMain.handle('terminal:start', (event, cwd) => {
+  trustedHandle('terminal:start', (event, cwd) => {
     const requestedCwd = typeof cwd === 'string' ? cwd.trim() : '';
     let terminalCwd = process.cwd();
     if (requestedCwd) {
@@ -224,7 +334,7 @@ function registerDesktopUtilityHandlers() {
     return terminalId;
   });
 
-  ipcMain.on('terminal:write', (_event, terminalId, input) => {
+  trustedOn('terminal:write', (_event, terminalId, input) => {
     const session = terminalSessions.get(String(terminalId));
     if (!session || typeof input !== 'string') return;
     const stdin = session.child?.stdin;
@@ -238,7 +348,7 @@ function registerDesktopUtilityHandlers() {
     }
   });
 
-  ipcMain.handle('terminal:kill', (_event, terminalId) => {
+  trustedHandle('terminal:kill', (_event, terminalId) => {
     const session = terminalSessions.get(String(terminalId));
     if (!session) return false;
     terminalSessions.delete(String(terminalId));
@@ -322,11 +432,17 @@ function startBackend() {
 
   appendLog(`Starting backend executable: ${exePath}`);
 
+  const dataDir = getDataDir();
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.mkdirSync(path.dirname(getBackendLogPath()), { recursive: true });
+  migrateLegacyData(dataDir);
+
   const child = spawn(exePath, [], {
     cwd: backendDir,
     env: {
       ...process.env,
       ASPNETCORE_URLS: APP_URL,
+      REQUESTLOOM_DATA_DIR: dataDir,
     },
     windowsHide: true,
     stdio: 'pipe',
@@ -351,7 +467,7 @@ function startBackend() {
 
     dialog.showErrorBox(
       'RequestLoom Backend Stopped',
-      `The embedded backend exited unexpectedly.\nCode: ${code ?? 'null'}\nSignal: ${signal ?? 'null'}\n\nSee desktop-backend.log in the app folder for details.`
+      `The embedded backend exited unexpectedly.\nCode: ${code ?? 'null'}\nSignal: ${signal ?? 'null'}\n\nSee desktop-backend.log in the RequestLoom user data folder (logs) for details.`
     );
 
     app.quit();
@@ -414,6 +530,16 @@ function createMainWindow() {
 
   const win = new BrowserWindow(windowOptions);
 
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalIfSafe(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isTrustedUrl(url)) return;
+    event.preventDefault();
+    openExternalIfSafe(url);
+  });
+
   // Only suppress native resize messages while our custom titlebar drag is
   // active. Normal edge/corner resizing must remain available to the user.
   win.on('will-resize', (event) => {
@@ -445,7 +571,20 @@ app.on('before-quit', () => {
   stopBackend();
 });
 
-app.whenReady().then(async () => {
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const [win] = BrowserWindow.getAllWindows();
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  });
+}
+
+if (hasSingleInstanceLock) app.whenReady().then(async () => {
+  APP_URL = await resolveAppUrl();
   registerWindowControlHandlers();
   registerDesktopUtilityHandlers();
   const mainWindow = createMainWindow();

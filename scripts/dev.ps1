@@ -39,7 +39,8 @@ $DOTNET_HOME = if ($env:DOTNET_ROOT) { $env:DOTNET_ROOT } else { Join-Path $env:
 if (Test-Path $DOTNET_HOME) {
     $env:PATH = "$DOTNET_HOME;$env:PATH"
 }
-if (-not $env:DOTNET_ROOT) {
+# Only pin DOTNET_ROOT to a user-local install that actually has a runtime; otherwise let .NET find the system install.
+if (-not $env:DOTNET_ROOT -and (Test-Path (Join-Path $DOTNET_HOME "shared"))) {
     $env:DOTNET_ROOT = $DOTNET_HOME
 }
 if (-not $env:DOTNET_SYSTEM_GLOBALIZATION_INVARIANT) {

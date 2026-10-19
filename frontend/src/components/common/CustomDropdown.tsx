@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface DropdownOption {
@@ -6,6 +7,15 @@ export interface DropdownOption {
   label: string;
   helperText?: string;
   className?: string;
+}
+
+export interface DropdownAction {
+  label: string;
+  onSelect: () => void;
+  disabled?: boolean;
+  title?: string;
+  variant?: 'default' | 'danger';
+  icon?: ReactNode;
 }
 
 interface CustomDropdownProps {
@@ -19,6 +29,7 @@ interface CustomDropdownProps {
   buttonClassName?: string;
   menuClassName?: string;
   align?: 'left' | 'right';
+  actions?: DropdownAction[];
 }
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -36,6 +47,7 @@ export function CustomDropdown({
   buttonClassName,
   menuClassName,
   align = 'left',
+  actions = [],
 }: CustomDropdownProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -114,7 +126,7 @@ export function CustomDropdown({
         aria-expanded={open}
         disabled={disabled}
         onClick={() => {
-          if (disabled || options.length === 0) return;
+          if (disabled || (options.length === 0 && actions.length === 0)) return;
           setOpen((prev) => !prev);
         }}
         className={cx(
@@ -179,6 +191,36 @@ export function CustomDropdown({
                   );
                 })}
               </ul>
+            )}
+            {actions.length > 0 && (
+              <div className="border-t border-gray-800 px-1 py-1">
+                {actions.map((action) => (
+                  <button
+                    key={action.label}
+                    type="button"
+                    role="menuitem"
+                    title={action.title}
+                    disabled={action.disabled}
+                    onClick={() => {
+                      if (action.disabled) return;
+                      setOpen(false);
+                      action.onSelect();
+                    }}
+                    className={cx(
+                      'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs transition-colors',
+                      'disabled:cursor-not-allowed disabled:opacity-40',
+                      action.variant === 'danger'
+                        ? 'text-rose-300 hover:bg-rose-950/35 hover:text-rose-200'
+                        : 'text-gray-300 hover:bg-gray-900 hover:text-gray-100',
+                    )}
+                  >
+                    <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-gray-500" aria-hidden="true">
+                      {action.icon}
+                    </span>
+                    <span>{action.label}</span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>,
           document.body,

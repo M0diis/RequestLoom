@@ -22,7 +22,7 @@ import type { ApiRequest, HttpMethod } from './types';
 
 function App() {
   const { activeWorkspaceId, load: loadWorkspaces } = useWorkspaceStore();
-  const { load: loadEnvironments } = useEnvironmentStore();
+  const { load: loadEnvironments, error: environmentError } = useEnvironmentStore();
   const {
     loadServices,
     sendRequest,
@@ -33,11 +33,15 @@ function App() {
     createService,
     createTopLevelRequest,
     selectRequest,
+    workspaceId: loadedWorkspaceId,
+    loading: requestsLoading,
+    error: requestError,
   } = useRequestStore();
-  const { load: loadScriptFiles, activeFileKey } = useScriptFileStore();
-  const { load: loadMockServers } = useMockServerStore();
+  const { load: loadScriptFiles, activeFileKey, error: scriptError } = useScriptFileStore();
+  const { load: loadMockServers, error: mockServerError } = useMockServerStore();
   const { load: loadSettings } = useSettingsStore();
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
   const {
     sidebarTab,
     docsSection,
@@ -60,8 +64,8 @@ function App() {
 
   // Load data on startup and workspace change
   useEffect(() => {
-    loadWorkspaces();
-    loadSettings();
+    void Promise.all([loadWorkspaces(), loadSettings()])
+      .catch(error => setStartupError(error instanceof Error ? error.message : 'Could not load application data.'));
   }, [loadWorkspaces, loadSettings]);
 
   useEffect(() => {
@@ -71,13 +75,27 @@ function App() {
   }, [activeWorkspaceId, loadEnvironments, loadServices, loadMockServers]);
 
   useEffect(() => {
+    if (loadedWorkspaceId !== activeWorkspaceId || requestsLoading) return;
     const serviceIds = (JSON.parse(serviceSignature) as { id: string }[]).map((service) => service.id);
     void loadScriptFiles(activeWorkspaceId, serviceIds);
-  }, [activeWorkspaceId, loadScriptFiles, serviceSignature]);
+  }, [activeWorkspaceId, loadScriptFiles, serviceSignature, loadedWorkspaceId, requestsLoading]);
+
+  useEffect(() => {
+    const protectDrafts = (event: BeforeUnloadEvent) => {
+      if (useRequestStore.getState().dirtyRequests.size > 0 ||
+          useScriptFileStore.getState().tabs.some(tab => tab.code !== tab.savedCode)) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', protectDrafts);
+    return () => window.removeEventListener('beforeunload', protectDrafts);
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat) return;
       const mod = e.ctrlKey || e.metaKey;
 
       if (mod && e.altKey && !e.shiftKey) {
@@ -113,7 +131,8 @@ function App() {
       if (mod && !e.altKey && !e.shiftKey) {
         const key = e.key.toLowerCase();
         if (key === 's') {
-          if (activeRequestId) void saveRequest(activeRequestId);
+          if (activeFileKey) void useScriptFileStore.getState().save(activeWorkspaceId, activeFileKey).catch(() => {});
+          else if (activeRequestId) void saveRequest(activeRequestId);
           e.preventDefault();
           return;
         }
@@ -127,7 +146,8 @@ function App() {
       if (sidebarTab !== 'services' || serviceSettingsServiceId) return;
       if (mod && e.key === 'Enter') {
         e.preventDefault();
-        sendRequest(activeWorkspaceId);
+        if (activeFileKey) void useScriptFileStore.getState().run(activeWorkspaceId, activeFileKey).catch(() => {});
+        else void sendRequest(activeWorkspaceId);
       }
     };
     window.addEventListener('keydown', handler);
@@ -135,6 +155,7 @@ function App() {
   }, [
     activeWorkspaceId,
     activeRequestId,
+    activeFileKey,
     saveRequest,
     setNewRequestModalOpen,
     sendRequest,
@@ -213,6 +234,17 @@ function App() {
         sidebar={<Sidebar />}
         main={(
         <>
+          {startupError || requestError || environmentError || mockServerError || scriptError ? (
+            <div role="alert" className="flex items-center gap-3 border-b border-rose-900 bg-rose-950/30 px-3 py-2 text-xs text-rose-200">
+              <span className="flex-1">{startupError || requestError || environmentError || mockServerError || scriptError}</span>
+              <button type="button" onClick={() => {
+                setStartupError(null);
+                void Promise.all([loadWorkspaces(), loadSettings(), loadServices(activeWorkspaceId),
+                  loadEnvironments(activeWorkspaceId), loadMockServers(activeWorkspaceId)])
+                  .catch(error => setStartupError(error instanceof Error ? error.message : 'Could not reload application data.'));
+              }} className="underline">Retry loading</button>
+            </div>
+          ) : null}
           {showRequestTabs ? <RequestTabBar /> : null}
           <div
             ref={panelContainerRef}

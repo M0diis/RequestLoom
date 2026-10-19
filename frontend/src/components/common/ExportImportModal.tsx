@@ -2,7 +2,7 @@ import { useState, useRef, useMemo } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useRequestStore } from '../../stores/requestStore';
 import { exportImportApi } from '../../services/api';
-import type { WorkspaceExport } from '../../types';
+import type { WorkspaceExport, ServiceExport, RequestExport } from '../../types';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 import { ImportModal } from './ImportModal';
 
@@ -47,6 +47,9 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
   const [exportScope, setExportScope] = useState<ExportScope>('workspace');
   const [exportServiceId, setExportServiceId] = useState('');
   const [exportRequestId, setExportRequestId] = useState('');
+  const [includeSecrets, setIncludeSecrets] = useState(true);
+  const [includeHistory, setIncludeHistory] = useState(true);
+  const [importWarnings, setImportWarnings] = useState<string[] | null>(null);
 
   // Import state
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -94,7 +97,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
     setError(null);
     try {
       if (exportScope === 'workspace') {
-        const data = await exportImportApi.export(workspaceId);
+        const data = await exportImportApi.export(workspaceId, { includeSecrets, includeHistory });
         const safeName = (workspace?.name ?? 'workspace').replace(/[^a-zA-Z0-9_-]/g, '_');
         downloadJson(data, `RequestLoom-${safeName}-${new Date().toISOString().slice(0, 10)}.json`);
       } else if (exportScope === 'service') {
@@ -135,20 +138,20 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
 
     try {
       const text = await file.text();
-      const data = JSON.parse(text) as WorkspaceExport;
-
-      if (!data.services && !data.environments) {
-        setError('Invalid file: missing services or environments data');
-        setImportPreview(null);
-        return;
-      }
-
-      // If it looks like a single ServiceExport (has requests but no environments/workspaceVariables)
-      // wrap it as a workspace export
-      if (!data.environments && !data.workspaceVariables && data.services) {
-        setImportPreview(data);
+      const data = JSON.parse(text);
+      if (!data || typeof data !== 'object') throw new Error('Invalid archive');
+      const base: WorkspaceExport = { formatVersion: data.formatVersion ?? 1, name: data.name ?? 'Imported Workspace',
+        environments: data.environments ?? [], workspaceVariables: [], services: [], topLevelRequests: [], history: [] };
+      if (Array.isArray(data.services) || Array.isArray(data.topLevelRequests) || Array.isArray(data.workspaceVariables)) {
+        setImportPreview({ ...base, ...data });
+      } else if (Array.isArray(data.requests)) {
+        setImportPreview({ ...base, services: [data as ServiceExport] });
+      } else if (typeof data.method === 'string' && typeof data.url === 'string') {
+        setImportPreview({ ...base, topLevelRequests: [data as RequestExport] });
+      } else if (Array.isArray(data.environments)) {
+        setImportPreview({ ...base, ...data });
       } else {
-        setImportPreview(data);
+        throw new Error('Invalid archive');
       }
     } catch {
       setError('Invalid JSON file');
@@ -162,14 +165,16 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
     setBusy(true);
     setError(null);
     try {
-      if (importTarget === 'new') {
-        await exportImportApi.import(importPreview);
-        window.location.reload();
-      } else {
-        await exportImportApi.importInto(workspaceId, importPreview);
-        onClose();
-        window.location.reload();
+      const result = importTarget === 'new'
+        ? await exportImportApi.import(importPreview)
+        : await exportImportApi.importInto(workspaceId, importPreview);
+      if (result.warnings && result.warnings.length > 0) {
+        // Keep the dialog open so the warnings can be read; reload on dismiss.
+        setImportWarnings(result.warnings);
+        return;
       }
+      if (importTarget !== 'new') onClose();
+      window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed');
     } finally {
@@ -258,6 +263,22 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
                   ))}
                 </div>
               </div>
+
+              {exportScope === 'workspace' && (
+                <div className="space-y-1.5 text-xs text-gray-400">
+                  <p className="text-gray-500">
+                    Includes environments, variables, collections, requests, JavaScript files, uploaded files and mock servers.
+                  </p>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={includeHistory} onChange={(e) => setIncludeHistory(e.target.checked)} />
+                    Include request history
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={includeSecrets} onChange={(e) => setIncludeSecrets(e.target.checked)} />
+                    Include secrets (secret variable values, authentication, proxy passwords, cookies)
+                  </label>
+                </div>
+              )}
 
               {/* Service selector */}
               {exportScope === 'service' && (
@@ -419,6 +440,22 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {importWarnings && (
+            <div className="mt-4 rounded border border-amber-900/60 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+              <p className="mb-1 font-semibold">Import completed with warnings</p>
+              <ul className="list-disc space-y-0.5 pl-4">
+                {importWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+              </ul>
+              <button
+                type="button"
+                className="mt-2 rounded border border-amber-700/60 px-2 py-1 text-amber-100 hover:bg-amber-900/30"
+                onClick={() => window.location.reload()}
+              >
+                Done
+              </button>
             </div>
           )}
 

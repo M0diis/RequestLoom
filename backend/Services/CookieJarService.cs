@@ -150,6 +150,41 @@ public sealed class CookieJarService
         }
     }
 
+    /// <summary>Copies a workspace's unexpired cookies, including values, for a backup archive.</summary>
+    public List<PersistedCookie> Export(string workspaceId)
+    {
+        lock (_lock)
+        {
+            EnsureLoadedLocked();
+            var cookies = GetWorkspaceCookiesLocked(workspaceId);
+            RemoveExpiredLocked(cookies);
+            return cookies.Select(cookie => new PersistedCookie
+            {
+                Name = cookie.Name, Value = cookie.Value, Domain = cookie.Domain, Path = cookie.Path,
+                ExpiresAt = cookie.ExpiresAt, Secure = cookie.Secure, HttpOnly = cookie.HttpOnly,
+            }).ToList();
+        }
+    }
+
+    /// <summary>Merges archived cookies; an archived cookie replaces one with the same name, domain and path.</summary>
+    public void Import(string workspaceId, IEnumerable<PersistedCookie> imported)
+    {
+        lock (_lock)
+        {
+            EnsureLoadedLocked();
+            var cookies = GetWorkspaceCookiesLocked(workspaceId);
+            foreach (var cookie in imported.Where(cookie => !string.IsNullOrWhiteSpace(cookie.Name) && !IsExpired(cookie)))
+            {
+                cookies.RemoveAll(existing =>
+                    string.Equals(existing.Name, cookie.Name, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(NormalizeDomain(existing.Domain), NormalizeDomain(cookie.Domain), StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(NormalizePath(existing.Path), NormalizePath(cookie.Path), StringComparison.Ordinal));
+                cookies.Add(cookie);
+            }
+            PersistLocked();
+        }
+    }
+
     private List<PersistedCookie> GetWorkspaceCookiesLocked(string workspaceId)
     {
         var key = NormalizeWorkspaceId(workspaceId);

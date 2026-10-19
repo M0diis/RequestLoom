@@ -70,6 +70,7 @@ public class ServiceRepository : IServiceRepository
             return null;
         }
 
+        await using var transaction = await _db.Database.BeginTransactionAsync();
         row.Name = name;
         row.Description = description;
 
@@ -80,6 +81,7 @@ public class ServiceRepository : IServiceRepository
         ApplyAuth(id, auth);
 
         await _db.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return await MapAsync(row, includeRequests: false);
     }

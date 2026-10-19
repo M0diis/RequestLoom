@@ -13,7 +13,7 @@ const METHOD_COLORS: Record<string, string> = {
 };
 
 export function RequestTabBar() {
-  const { services, topLevelRequests, openRequestIds, activeRequestId, selectRequest, closeRequest } = useRequestStore();
+  const { services, topLevelRequests, openRequestIds, activeRequestId, selectRequest, closeRequest, dirtyRequests } = useRequestStore();
   const { tabs: scriptTabs, openFileKeys, activeFileKey, setActiveFile, closeFile } = useScriptFileStore();
 
   const openRequests = useMemo(() => {
@@ -74,6 +74,7 @@ export function RequestTabBar() {
               {req.method}
             </span>
             <span className="max-w-[180px] truncate">{req.name}</span>
+            {dirtyRequests.has(req.id) ? <span aria-label="Unsaved changes" className="h-1.5 w-1.5 bg-amber-400" /> : null}
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); closeRequest(req.id); }}

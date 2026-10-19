@@ -16,6 +16,9 @@ import { useSettingsStore } from './settingsStore';
 
 const requestSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const requestSaveVersions = new Map<string, number>();
+const requestSaveQueues = new Map<string, Promise<void>>();
+let workspaceLoadVersion = 0;
+let selectionVersion = 0;
 
 function buildUpdatePayload(request: ApiRequest): UpdateApiRequestPayload {
   return {
@@ -59,6 +62,9 @@ function findRequestById(services: Service[], topLevelRequests: ApiRequest[], id
 }
 
 interface RequestState {
+  workspaceId: string | null;
+  error: string | null;
+  draftsById: Record<string, ApiRequest>;
   services: Service[];
   topLevelRequests: ApiRequest[];
   activeRequestId: string | null;
@@ -115,6 +121,9 @@ interface RequestState {
 }
 
 export const useRequestStore = create<RequestState>((set, get) => ({
+  workspaceId: null,
+  error: null,
+  draftsById: {},
   services: [],
   topLevelRequests: [],
   activeRequestId: null,
@@ -128,44 +137,30 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   dirtyRequests: new Set<string>(),
 
   loadServices: async (workspaceId) => {
-    set({ loading: true });
-    const [services, topLevelRequests] = await Promise.all([
-      servicesApi.getAll(workspaceId),
-      requestsApi.getTopLevel(workspaceId),
-    ]);
-
-    set((state) => {
-      if (!state.activeRequestId) {
-        return { services, topLevelRequests, loading: false };
-      }
-
-      const activeStillExists = services.some((service) =>
-        service.requests.some((request) => request.id === state.activeRequestId)
-      ) || topLevelRequests.some((request) => request.id === state.activeRequestId);
-
-      if (activeStillExists) {
-        return { services, topLevelRequests, loading: false };
-      }
-
-      const knownIds = new Set<string>();
-      for (const svc of services) {
-        for (const req of svc.requests) knownIds.add(req.id);
-      }
-      for (const req of topLevelRequests) knownIds.add(req.id);
-
-      const responses = Object.fromEntries(
-        Object.entries(state.responses).filter(([rid]) => knownIds.has(rid))
-      );
-
-      return {
-        services,
-        topLevelRequests,
-        loading: false,
-        activeRequestId: null,
-        activeRequest: null,
-        responses,
-      };
-    });
+    const version = ++workspaceLoadVersion;
+    if (get().workspaceId !== workspaceId) {
+      ++selectionVersion;
+      get().cancelRequest();
+      set({ workspaceId, services: [], topLevelRequests: [], activeRequestId: null, activeRequest: null,
+        openRequestIds: [], responses: {}, runtimeScriptVariablesByRequest: {} });
+    }
+    set({ loading: true, error: null });
+    try {
+      const [services, topLevelRequests] = await Promise.all([
+        servicesApi.getAll(workspaceId), requestsApi.getTopLevel(workspaceId),
+      ]);
+      if (version !== workspaceLoadVersion) return;
+      const draft = (request: ApiRequest) => get().draftsById[request.id] ?? request;
+      const hydratedServices = services.map(service => ({ ...service, requests: service.requests.map(draft) }));
+      const hydratedTopLevel = topLevelRequests.map(draft);
+      const selected = get().activeRequestId;
+      const activeRequest = selected ? findRequestById(hydratedServices, hydratedTopLevel, selected) : null;
+      set({ services: hydratedServices, topLevelRequests: hydratedTopLevel, loading: false,
+        activeRequest, activeRequestId: activeRequest?.id ?? null });
+    } catch (error) {
+      if (version === workspaceLoadVersion) set({ loading: false,
+        error: error instanceof Error ? error.message : 'Could not load this workspace. Retry loading it.' });
+    }
   },
 
   createService: async (workspaceId, name, storagePath) => {
@@ -317,22 +312,22 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   selectRequest: async (id) => {
-    set((s) => {
-      if (s.activeRequestId === id) return s;
-      const nextIds = s.openRequestIds.includes(id)
-        ? s.openRequestIds
-        : [...s.openRequestIds, id];
-      return { activeRequestId: id, openRequestIds: nextIds };
-    });
-    const request = await requestsApi.getById(id);
-    set((s) => {
-      const next = new Set(s.dirtyRequests);
-      next.delete(id);
-      return { activeRequest: request, dirtyRequests: next };
-    });
+    const version = ++selectionVersion;
+    const cached = get().draftsById[id] ?? findRequestById(get().services, get().topLevelRequests, id);
+    set(state => ({ activeRequestId: id, activeRequest: cached,
+      openRequestIds: state.openRequestIds.includes(id) ? state.openRequestIds : [...state.openRequestIds, id] }));
+    if (get().draftsById[id]) return;
+    try {
+      const request = await requestsApi.getById(id);
+      if (version !== selectionVersion || get().activeRequestId !== id) return;
+      set({ activeRequest: get().draftsById[id] ?? request, error: null });
+    } catch (error) {
+      if (version === selectionVersion) set({ error: error instanceof Error ? error.message : 'Could not open request' });
+    }
   },
 
   closeRequest: (id) => {
+    if (get().activeRequestId === id) ++selectionVersion;
     set((s) => {
       const nextIds = s.openRequestIds.filter((rid) => rid !== id);
       const isActive = s.activeRequestId === id;
@@ -341,7 +336,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       // When closing the active tab, find the replacement request in the existing services tree
       let newActiveRequest: ApiRequest | null = null;
       if (isActive && newActiveId) {
-        newActiveRequest = findRequestById(s.services, s.topLevelRequests, newActiveId);
+        newActiveRequest = s.draftsById[newActiveId] ?? findRequestById(s.services, s.topLevelRequests, newActiveId);
       }
 
       const responses = { ...s.responses };
@@ -441,52 +436,37 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   saveRequest: async (id) => {
-    const existingTimer = requestSaveTimers.get(id);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      requestSaveTimers.delete(id);
-    }
-
-    const currentVersion = (requestSaveVersions.get(id) ?? 0) + 1;
-    requestSaveVersions.set(id, currentVersion);
-    const state = get();
-    const latest = state.activeRequest?.id === id
-      ? state.activeRequest
-      : findRequestById(state.services, state.topLevelRequests, id);
-
-    if (!latest) return;
-
-    try {
-      const updated = await requestsApi.update(id, buildUpdatePayload(latest));
-
-      if (requestSaveVersions.get(id) !== currentVersion) return;
-
-      // Preserve stable row IDs in the UI to avoid remount/focus loss while editing.
-      const stableUpdated: ApiRequest = {
-        ...updated,
-        headers: latest.headers,
-        params: latest.params,
-        variables: latest.variables,
-      };
-
-      set((s) => {
-        const next = new Set(s.dirtyRequests);
-        next.delete(id);
-        return {
-          activeRequest: s.activeRequest?.id === id ? stableUpdated : s.activeRequest,
-          topLevelRequests: s.topLevelRequests.map((request) => (
-            request.id === id ? { ...request, ...stableUpdated } : request
-          )),
-          services: s.services.map((svc) => ({
-            ...svc,
-            requests: svc.requests.map((r) => (r.id === id ? { ...r, ...stableUpdated } : r)),
-          })),
-          dirtyRequests: next,
-        };
-      });
-    } catch (err) {
-      console.error('Failed to persist request update', err);
-    }
+    const timer = requestSaveTimers.get(id);
+    if (timer) clearTimeout(timer);
+    requestSaveTimers.delete(id);
+    const save = (requestSaveQueues.get(id) ?? Promise.resolve()).then(async () => {
+      const state = get();
+      const latest = state.draftsById[id] ?? (state.activeRequest?.id === id ? state.activeRequest
+        : findRequestById(state.services, state.topLevelRequests, id));
+      if (!latest) return;
+      const revision = requestSaveVersions.get(id) ?? 0;
+      try {
+        const updated = await requestsApi.update(id, buildUpdatePayload(latest));
+        if ((requestSaveVersions.get(id) ?? 0) !== revision) return;
+        const stableUpdated = { ...updated, headers: latest.headers, params: latest.params, variables: latest.variables };
+        set(current => {
+          const dirtyRequests = new Set(current.dirtyRequests);
+          dirtyRequests.delete(id);
+          const draftsById = { ...current.draftsById };
+          delete draftsById[id];
+          return { activeRequest: current.activeRequest?.id === id ? stableUpdated : current.activeRequest,
+            topLevelRequests: current.topLevelRequests.map(request => request.id === id ? stableUpdated : request),
+            services: current.services.map(service => ({ ...service,
+              requests: service.requests.map(request => request.id === id ? stableUpdated : request) })),
+            dirtyRequests, draftsById, error: null };
+        });
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : 'Could not save request. Your draft is retained.' });
+      }
+    });
+    requestSaveQueues.set(id, save);
+    try { await save; }
+    finally { if (requestSaveQueues.get(id) === save) requestSaveQueues.delete(id); }
   },
 
   updateRequest: async (id, data) => {
@@ -507,6 +487,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
       return {
         activeRequest: s.activeRequest?.id === id ? mergedRequest : s.activeRequest,
+        draftsById: { ...s.draftsById, [id]: mergedRequest! },
+        error: null,
         topLevelRequests: s.topLevelRequests.map((request) => (
           request.id === id ? mergeRequestPatch(request, data) : request
         )),
@@ -519,12 +501,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
     if (!mergedRequest) return;
 
-    if (!useSettingsStore.getState().settings?.autoSave && useSettingsStore.getState().settings !== null) {
-      return;
-    }
-
-    const currentVersion = (requestSaveVersions.get(id) ?? 0) + 1;
-    requestSaveVersions.set(id, currentVersion);
+    requestSaveVersions.set(id, (requestSaveVersions.get(id) ?? 0) + 1);
+    if (useSettingsStore.getState().settings?.autoSave === false) return;
 
     const existingTimer = requestSaveTimers.get(id);
     if (existingTimer) {
@@ -641,13 +619,23 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   deleteRequest: async (id) => {
+    const timer = requestSaveTimers.get(id);
+    if (timer) clearTimeout(timer);
+    requestSaveTimers.delete(id);
+    await requestSaveQueues.get(id);
     await requestsApi.delete(id);
+    requestSaveVersions.set(id, (requestSaveVersions.get(id) ?? 0) + 1);
     set((s) => {
       const nextIds = s.openRequestIds.filter((rid) => rid !== id);
       const isActive = s.activeRequestId === id;
       const responses = { ...s.responses };
       delete responses[id];
+      const draftsById = { ...s.draftsById };
+      delete draftsById[id];
+      const dirtyRequests = new Set(s.dirtyRequests);
+      dirtyRequests.delete(id);
       return {
+        draftsById, dirtyRequests,
         topLevelRequests: s.topLevelRequests.filter((request) => request.id !== id),
         services: s.services.map((svc) => ({
           ...svc,
@@ -681,7 +669,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
   sendRequest: async (workspaceId) => {
     const { activeRequest } = get();
-    if (!activeRequest) return;
+    if (!activeRequest || get().sending || get().activeRequestId !== activeRequest.id ||
+      (get().workspaceId && get().workspaceId !== workspaceId)) return;
 
     const abortController = new AbortController();
     const startedAt = new Date().toISOString();
@@ -707,6 +696,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         serviceId: activeRequest.serviceId,
         requestId: activeRequest.id,
       }, abortController.signal);
+      if (get().abortController !== abortController) return;
       set((state) => ({
         responses: { ...state.responses, [activeRequest.id]: response },
         sending: false,
@@ -751,6 +741,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       });
       window.dispatchEvent(new CustomEvent('history:updated'));
     } catch (err: unknown) {
+      if (get().abortController !== abortController) return;
       if (err instanceof Error && err.name === 'CanceledError') {
         set({ sending: false, abortController: null });
       } else {

@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using RequestLoom.Api.Data.Repositories;
 using RequestLoom.Api.Models;
 
@@ -29,115 +28,7 @@ public partial class ToolsService
         _runtimeVariableStore = runtimeVariableStore;
     }
 
-    public CurlParseResult ParseCurl(string curlCommand)
-    {
-        var result = new CurlParseResult();
-        var input = curlCommand.Trim();
-
-        if (input.StartsWith("curl ", StringComparison.OrdinalIgnoreCase))
-            input = input[5..];
-
-        // Remove line continuations
-        input = Regex.Replace(input, @"\\\r?\n\s*", " ");
-        // Collapse whitespace
-        input = Regex.Replace(input, @"\s+", " ");
-
-        // Extract URL (last non-flag argument or the one with quotes)
-        var urlMatch = UrlRegex().Match(input);
-        if (urlMatch.Success)
-        {
-            result.Url = urlMatch.Groups[1].Value.Trim('\'', '"');
-        }
-
-        // Extract method
-        var methodMatch = Regex.Match(input, @"(?:-X|--request)\s+['""]?(\w+)['""]?", RegexOptions.IgnoreCase);
-        if (methodMatch.Success)
-        {
-            result.Method = methodMatch.Groups[1].Value.ToUpperInvariant();
-        }
-        else
-        {
-            // If there's -d/--data, it's POST; otherwise GET
-            result.Method = Regex.IsMatch(input, @"(?:-d|--data|--data-raw|--data-binary)\s+") ? "POST" : "GET";
-        }
-
-        // Extract headers
-        var headerMatches = Regex.Matches(input, @"(?:-H|--header)\s+['""]([^'""]+)['""]", RegexOptions.IgnoreCase);
-        foreach (Match m in headerMatches)
-        {
-            var header = m.Groups[1].Value;
-            var colonIndex = header.IndexOf(':');
-            if (colonIndex > 0)
-            {
-                var key = header[..colonIndex].Trim();
-                var value = header[(colonIndex + 1)..].Trim();
-                result.Headers.Add(new KeyValuePairRequest { Key = key, Value = value, Enabled = true });
-            }
-        }
-
-        // Extract body
-        var bodyMatch = Regex.Match(input, @"(?:-d|--data|--data-raw)\s+['""]([^'""]*)['""]", RegexOptions.IgnoreCase);
-        if (!bodyMatch.Success)
-            bodyMatch = Regex.Match(input, @"(?:--data-binary)\s+['""]([^'""]*)['""]", RegexOptions.IgnoreCase);
-        if (!bodyMatch.Success)
-            bodyMatch = Regex.Match(input, @"(?:--data-binary)\s+@(['""]?[\w.\\/-]+['""]?)", RegexOptions.IgnoreCase);
-
-        if (bodyMatch.Success)
-        {
-            result.Body = bodyMatch.Groups[1].Value;
-            // Detect content type from headers or body content
-            var contentType = result.Headers
-                .FirstOrDefault(h => h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))?.Value ?? "";
-            if (contentType.Contains("json") || LooksLikeJson(result.Body))
-                result.BodyType = "json";
-            else if (contentType.Contains("xml"))
-                result.BodyType = "xml";
-            else if (contentType.Contains("form"))
-                result.BodyType = "form";
-            else
-                result.BodyType = "text";
-        }
-
-        // Extract basic auth
-        var basicAuthMatch = Regex.Match(input, @"(?:-u|--user)\s+['""]?([^:'""\s]+):([^'""\s]+)['""]?", RegexOptions.IgnoreCase);
-        if (basicAuthMatch.Success)
-        {
-            var username = basicAuthMatch.Groups[1].Value;
-            var password = basicAuthMatch.Groups[2].Value;
-            result.Auth = new AuthRequest
-            {
-                AuthType = "basic",
-                ConfigJson = JsonSerializer.Serialize(new { username, password })
-            };
-        }
-
-        // Extract bearer token
-        var bearerMatch = Regex.Match(input, @"(?:-H|--header)\s+['""]Authorization:\s*Bearer\s+([^'""]+)['""]", RegexOptions.IgnoreCase);
-        if (bearerMatch.Success && result.Auth == null)
-        {
-            result.Auth = new AuthRequest
-            {
-                AuthType = "bearer",
-                ConfigJson = JsonSerializer.Serialize(new { token = bearerMatch.Groups[1].Value.Trim() })
-            };
-        }
-
-        // Try to infer service name from URL path
-        if (!string.IsNullOrWhiteSpace(result.Url) && Uri.TryCreate(result.Url, UriKind.Absolute, out var uri))
-        {
-            var segments = uri.AbsolutePath.Trim('/').Split('/');
-            result.ServiceName = segments.Length > 0 ? segments[0] : "";
-        }
-
-        return result;
-    }
-
-    private static bool LooksLikeJson(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        var trimmed = text.TrimStart();
-        return trimmed.StartsWith('{') || trimmed.StartsWith('[');
-    }
+    public CurlParseResult ParseCurl(string curlCommand) => CurlCommandParser.Parse(curlCommand);
 
     public async Task<string> GenerateCurlAsync(ExecuteRequestPayload payload)
     {
@@ -399,11 +290,8 @@ public partial class ToolsService
         return result;
     }
 
-    private static string AppendQueryParameter(string url, string key, string value)
-    {
-        var separator = url.Contains('?') ? "&" : "?";
-        return $"{url}{separator}{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}";
-    }
+    private static string AppendQueryParameter(string url, string key, string value) =>
+        RequestUrl.AppendQueryParameter(url, key, value);
 
     private static void ApplyAuthToSnapshot(
         List<KeyValuePairRequest> headers,
@@ -818,7 +706,4 @@ public partial class ToolsService
 
         return sb.ToString().TrimEnd();
     }
-
-    [System.Text.RegularExpressions.GeneratedRegex(@"(?:'([^']*)'|\""([^\""]*)\"")\s*$|(\S+)$")]
-    private static partial Regex UrlRegex();
 }

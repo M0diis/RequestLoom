@@ -6,11 +6,15 @@ import type {
 } from '../types';
 import { mockServersApi } from '../services/api';
 
+let loadVersion = 0;
+
 interface MockServerState {
+  workspaceId: string | null;
   mockServers: MockServer[];
   selectedServerId: string | null;
   selectedEndpointId: string | null;
   loading: boolean;
+  error: string | null;
 
   // Server actions
   load: (workspaceId: string) => Promise<void>;
@@ -28,31 +32,36 @@ interface MockServerState {
   deleteEndpoint: (workspaceId: string, mockServerId: string, endpointId: string) => Promise<void>;
 }
 
-export const useMockServerStore = create<MockServerState>((set) => ({
+export const useMockServerStore = create<MockServerState>((set, get) => ({
+  workspaceId: null,
+  error: null,
   mockServers: [],
   selectedServerId: null,
   selectedEndpointId: null,
   loading: false,
 
   load: async (workspaceId) => {
-    if (!workspaceId) return;
-    set({ loading: true });
+    const version = ++loadVersion;
+    if (get().workspaceId !== workspaceId) set({ workspaceId, mockServers: [], selectedServerId: null, selectedEndpointId: null });
+    set({ loading: true, error: null });
     try {
-      const servers = await mockServersApi.getAll(workspaceId);
-      set({ mockServers: Array.isArray(servers) ? servers : [], loading: false });
-    } catch {
-      set({ loading: false });
+      const values = await mockServersApi.getAll(workspaceId);
+      if (version === loadVersion) set({ mockServers: values, loading: false });
+    } catch (error) {
+      if (version === loadVersion) set({ loading: false,
+        error: error instanceof Error ? error.message : 'Could not load workspace data. Retry loading it.' });
     }
   },
-
   create: async (workspaceId, data) => {
     const server = await mockServersApi.create(workspaceId, data);
+    if (get().workspaceId !== workspaceId) return server;
     set((s) => ({ mockServers: [...s.mockServers, { ...server, endpoints: server.endpoints ?? [] }] }));
     return server;
   },
 
   update: async (workspaceId, id, data) => {
     const updated = await mockServersApi.update(workspaceId, id, data);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       mockServers: s.mockServers.map((m) =>
         m.id === id
@@ -64,6 +73,7 @@ export const useMockServerStore = create<MockServerState>((set) => ({
 
   remove: async (workspaceId, id) => {
     await mockServersApi.delete(workspaceId, id);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       mockServers: s.mockServers.filter((m) => m.id !== id),
       selectedServerId: s.selectedServerId === id ? null : s.selectedServerId,
@@ -75,6 +85,7 @@ export const useMockServerStore = create<MockServerState>((set) => ({
 
   start: async (workspaceId, id) => {
     await mockServersApi.start(workspaceId, id);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       mockServers: s.mockServers.map((m) => (m.id === id ? { ...m, isRunning: true } : m)),
     }));
@@ -82,6 +93,7 @@ export const useMockServerStore = create<MockServerState>((set) => ({
 
   stop: async (workspaceId, id) => {
     await mockServersApi.stop(workspaceId, id);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       mockServers: s.mockServers.map((m) => (m.id === id ? { ...m, isRunning: false } : m)),
     }));
@@ -92,6 +104,7 @@ export const useMockServerStore = create<MockServerState>((set) => ({
 
   createEndpoint: async (workspaceId, mockServerId, data) => {
     const endpoint = await mockServersApi.createEndpoint(workspaceId, mockServerId, data);
+    if (get().workspaceId !== workspaceId) return endpoint;
     set((s) => ({
       mockServers: s.mockServers.map((m) =>
         m.id === mockServerId ? { ...m, endpoints: [...m.endpoints, endpoint] } : m
@@ -102,6 +115,7 @@ export const useMockServerStore = create<MockServerState>((set) => ({
 
   updateEndpoint: async (workspaceId, mockServerId, endpointId, data) => {
     const updated = await mockServersApi.updateEndpoint(workspaceId, mockServerId, endpointId, data);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       mockServers: s.mockServers.map((m) =>
         m.id === mockServerId
@@ -113,6 +127,7 @@ export const useMockServerStore = create<MockServerState>((set) => ({
 
   deleteEndpoint: async (workspaceId, mockServerId, endpointId) => {
     await mockServersApi.deleteEndpoint(workspaceId, mockServerId, endpointId);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       mockServers: s.mockServers.map((m) =>
         m.id === mockServerId

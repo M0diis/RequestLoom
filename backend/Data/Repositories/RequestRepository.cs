@@ -101,6 +101,7 @@ public class RequestRepository : IRequestRepository
             return null;
         }
 
+        await using var transaction = await _db.Database.BeginTransactionAsync();
         row.Name = request.Name;
         row.Method = request.Method;
         row.Url = request.Url;
@@ -182,6 +183,7 @@ public class RequestRepository : IRequestRepository
         }
 
         await _db.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return await BuildAsync(_db, row);
     }

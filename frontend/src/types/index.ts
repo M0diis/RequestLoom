@@ -396,15 +396,22 @@ export interface UpdateMockEndpointRequest {
 
 // Export/Import types
 export interface WorkspaceExport {
+  formatVersion?: number;
   name: string;
   environments: EnvironmentExport[];
   workspaceVariables: WorkspaceVariable[];
   services: ServiceExport[];
   topLevelRequests: RequestExport[];
   history: HistoryEntry[];
+  includesSecrets?: boolean;
+  includesHistory?: boolean;
+  mockServers?: unknown[];
+  cookies?: unknown[];
+  files?: unknown[];
 }
 
 export interface EnvironmentExport {
+  id?: string;
   name: string;
   isActive: boolean;
   sortOrder: number;
@@ -419,6 +426,7 @@ export interface EnvironmentVariableExport {
 }
 
 export interface ServiceExport {
+  environments?: EnvironmentExport[];
   name: string;
   description: string;
   sortOrder: number;
@@ -438,6 +446,7 @@ export interface ServiceVariableExport {
 }
 
 export interface RequestExport {
+  id?: string;
   name: string;
   method: string;
   url: string;
@@ -445,6 +454,7 @@ export interface RequestExport {
   bodyType: string;
   preRequestScript: string;
   postRequestScript: string;
+  testScript?: string;
   notes: string;
   sortOrder: number;
   isFavorite: boolean;
@@ -526,6 +536,8 @@ export interface AppSettings {
   storagePath: string;
   jsonStorageStrategy: JsonStorageStrategy;
   restartRequired: boolean;
+  pendingStorageMode?: StorageMode;
+  pendingJsonStorageStrategy?: JsonStorageStrategy;
   requestTimeoutMs: number;
   autoSave: boolean;
   followRedirects: boolean;

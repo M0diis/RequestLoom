@@ -99,8 +99,9 @@ export function SettingsModal({ onClose }: Props) {
 
   useEffect(() => {
     if (!settings) return;
-    setSelectedMode(settings.storageMode);
-    setSelectedJsonStrategy(settings.jsonStorageStrategy);
+    setSelectedMode(settings.pendingStorageMode ?? settings.storageMode);
+    setSelectedJsonStrategy(settings.pendingJsonStorageStrategy ?? settings.jsonStorageStrategy);
+    if (settings.restartRequired) setSaved({ restartRequired: true });
     setTimeoutSec(String(Math.round(settings.requestTimeoutMs / 1000)));
     setAutoSave(settings.autoSave);
     setFollowRedirects(settings.followRedirects);
@@ -709,11 +710,13 @@ export function SettingsModal({ onClose }: Props) {
                 <div className="flex items-center gap-3 rounded border border-emerald-900/60 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
                   <span className="min-w-0 flex-1">
                     Settings saved.
-                    {saved.restartRequired ? ' Reload the app to apply the storage change.' : ''}
+                    {saved.restartRequired ? window.desktopShell
+                      ? ' Restart the app to apply the storage change.'
+                      : ' Restart the RequestLoom backend to apply the storage change. Refreshing the page does not restart it.' : ''}
                   </span>
-                  {saved.restartRequired ? (
+                  {saved.restartRequired && window.desktopShell ? (
                     <button type="button" onClick={() => void handleReloadApp()} className={BTN_PRIMARY} disabled={busy}>
-                      Reload now
+                      Restart now
                     </button>
                   ) : null}
                 </div>
@@ -737,7 +740,7 @@ export function SettingsModal({ onClose }: Props) {
               void handleSave();
             }}
             className={BTN_PRIMARY}
-            disabled={busy || loading || !settings}
+            disabled={busy || loading || !settings || settings.restartRequired}
           >
             {busy ? 'Saving...' : 'Save'}
           </button>

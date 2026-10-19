@@ -2,9 +2,13 @@ import { create } from 'zustand';
 import type { Environment } from '../types';
 import { environmentsApi } from '../services/api';
 
+let loadVersion = 0;
+
 interface EnvironmentState {
+  workspaceId: string | null;
   environments: Environment[];
   loading: boolean;
+  error: string | null;
   load: (workspaceId: string) => Promise<void>;
   create: (workspaceId: string, name: string) => Promise<Environment>;
   update: (workspaceId: string, id: string, name: string) => Promise<void>;
@@ -14,27 +18,33 @@ interface EnvironmentState {
 }
 
 export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
+  workspaceId: null,
+  error: null,
   environments: [],
   loading: false,
 
   load: async (workspaceId) => {
-    set({ loading: true, environments: [] });
+    const version = ++loadVersion;
+    if (get().workspaceId !== workspaceId) set({ workspaceId, environments: [] });
+    set({ loading: true, error: null });
     try {
-      const environments = await environmentsApi.getAll(workspaceId);
-      set({ environments, loading: false });
-    } catch {
-      set({ loading: false });
+      const values = await environmentsApi.getAll(workspaceId);
+      if (version === loadVersion) set({ environments: values, loading: false });
+    } catch (error) {
+      if (version === loadVersion) set({ loading: false,
+        error: error instanceof Error ? error.message : 'Could not load workspace data. Retry loading it.' });
     }
   },
-
   create: async (workspaceId, name) => {
     const env = await environmentsApi.create(workspaceId, name);
+    if (get().workspaceId !== workspaceId) return env;
     set((s) => ({ environments: [...s.environments, env] }));
     return env;
   },
 
   update: async (workspaceId, id, name) => {
     const updated = await environmentsApi.update(workspaceId, id, name);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       environments: s.environments.map((e) => (e.id === id ? updated : e)),
     }));
@@ -42,6 +52,7 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
 
   activate: async (workspaceId, id) => {
     await environmentsApi.activate(workspaceId, id);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       environments: s.environments.map((e) => ({
         ...e,
@@ -52,6 +63,7 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
 
   remove: async (workspaceId, id) => {
     await environmentsApi.delete(workspaceId, id);
+    if (get().workspaceId !== workspaceId) return;
     set((s) => ({
       environments: s.environments.filter((e) => e.id !== id),
     }));
