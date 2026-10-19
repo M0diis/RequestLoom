@@ -14,6 +14,7 @@ import type {
 import { servicesApi, requestsApi, executeApi, serviceVariablesApi } from '../services/api';
 import { useDevToolsStore } from './devToolsStore';
 import { useSettingsStore } from './settingsStore';
+import { scheduleUndoableDelete, flushPendingDeletes } from '../lib/undoableDelete';
 
 const requestSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const requestSaveVersions = new Map<string, number>();
@@ -74,6 +75,9 @@ interface RequestState {
   responses: Record<string, ExecuteResponse | null>;
   runtimeScriptVariablesByRequest: Record<string, Record<string, RuntimeScriptVariable>>;
   sending: boolean;
+  /** Request currently in flight and when it started (ms epoch), for the live timer. */
+  sendingRequestId: string | null;
+  sendStartedAt: number | null;
   loading: boolean;
   abortController: AbortController | null;
   dirtyRequests: Set<string>;
@@ -100,6 +104,9 @@ interface RequestState {
 
   selectRequest: (id: string) => Promise<void>;
   closeRequest: (id: string) => void;
+  closeOtherRequests: (id: string) => void;
+  closeRequestsToRight: (id: string) => void;
+  moveOpenRequest: (id: string, beforeId: string | null) => void;
   createRequest: (serviceId: string, name: string, method: string, folderId?: string | null, url?: string) => Promise<ApiRequest>;
   createTopLevelRequest: (workspaceId: string, name: string, method: string, url?: string) => Promise<ApiRequest>;
   saveRequest: (id: string) => Promise<void>;
@@ -110,6 +117,8 @@ interface RequestState {
   moveRequestToFolder: (id: string, folderId: string | null) => Promise<void>;
   reorderRequest: (id: string, folderId: string | null, beforeRequestId?: string | null) => Promise<void>;
   deleteRequest: (id: string) => Promise<void>;
+  deleteRequestsWithUndo: (ids: string[]) => void;
+  deleteServiceWithUndo: (workspaceId: string, id: string) => void;
   toggleFavorite: (id: string) => Promise<void>;
 
   sendRequest: (workspaceId: string) => Promise<void>;
@@ -134,11 +143,15 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   responses: {},
   runtimeScriptVariablesByRequest: {},
   sending: false,
+  sendingRequestId: null,
+  sendStartedAt: null,
   loading: false,
   abortController: null,
   dirtyRequests: new Set<string>(),
 
   loadServices: async (workspaceId) => {
+    // Pending deletes would otherwise reappear in the freshly loaded tree.
+    await flushPendingDeletes();
     const version = ++workspaceLoadVersion;
     if (get().workspaceId !== workspaceId) {
       ++selectionVersion;
@@ -366,6 +379,29 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       selectRequest(s.activeRequestId);
     }
   },
+
+  closeOtherRequests: (id) => {
+    set((s) => ({
+      openRequestIds: s.openRequestIds.filter((rid) => rid === id),
+      responses: s.responses[id] ? { [id]: s.responses[id] } : {},
+    }));
+    if (get().activeRequestId !== id) void get().selectRequest(id);
+  },
+
+  closeRequestsToRight: (id) => {
+    const index = get().openRequestIds.indexOf(id);
+    if (index < 0) return;
+    const closing = get().openRequestIds.slice(index + 1);
+    closing.forEach((rid) => get().closeRequest(rid));
+  },
+
+  moveOpenRequest: (id, beforeId) => set((s) => {
+    if (id === beforeId || !s.openRequestIds.includes(id)) return s;
+    const next = s.openRequestIds.filter((rid) => rid !== id);
+    const insertAt = beforeId ? next.indexOf(beforeId) : -1;
+    next.splice(insertAt < 0 ? next.length : insertAt, 0, id);
+    return { openRequestIds: next };
+  }),
 
   createFolder: async (workspaceId, serviceId, name, parentFolderId) => {
     const folder = await servicesApi.createFolder(workspaceId, serviceId, name, parentFolderId);
@@ -728,6 +764,110 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     });
   },
 
+  deleteRequestsWithUndo: (ids) => {
+    const idSet = new Set(ids.filter((id) => findRequestById(get().services, get().topLevelRequests, id)));
+    if (idSet.size === 0) return;
+    const first = findRequestById(get().services, get().topLevelRequests, [...idSet][0]);
+    const committed = new Set<string>();
+    let placements: { request: ApiRequest; serviceId: string | null; index: number; openIndex: number; wasActive: boolean }[] = [];
+
+    scheduleUndoableDelete({
+      message: idSet.size === 1 ? `Deleted "${first?.name ?? 'request'}"` : `Deleted ${idSet.size} requests`,
+      unloadUrls: [...idSet].map((id) => `/api/requests/${id}`),
+      hide: () => {
+        const s = get();
+        placements = [...idSet].map((id) => {
+          const service = s.services.find((svc) => svc.requests.some((request) => request.id === id));
+          const list = service ? service.requests : s.topLevelRequests;
+          const index = list.findIndex((request) => request.id === id);
+          return { request: list[index], serviceId: service?.id ?? null, index,
+            openIndex: s.openRequestIds.indexOf(id), wasActive: s.activeRequestId === id };
+        });
+        const nextIds = s.openRequestIds.filter((id) => !idSet.has(id));
+        const activeHidden = s.activeRequestId !== null && idSet.has(s.activeRequestId);
+        if (activeHidden) ++selectionVersion;
+        set({
+          topLevelRequests: s.topLevelRequests.filter((request) => !idSet.has(request.id)),
+          services: s.services.map((svc) => ({ ...svc, requests: svc.requests.filter((request) => !idSet.has(request.id)) })),
+          openRequestIds: nextIds,
+          ...(activeHidden ? { activeRequestId: null, activeRequest: null } : {}),
+        });
+        if (activeHidden && nextIds.length > 0) void get().selectRequest(nextIds[nextIds.length - 1]);
+      },
+      restore: () => {
+        const restorable = placements.filter((placement) => !committed.has(placement.request.id)).sort((a, b) => a.index - b.index);
+        set((s) => {
+          const topLevelRequests = [...s.topLevelRequests];
+          const services = s.services.map((svc) => ({ ...svc, requests: [...svc.requests] }));
+          const openRequestIds = [...s.openRequestIds];
+          for (const placement of restorable) {
+            const request = s.draftsById[placement.request.id] ?? placement.request;
+            const target = placement.serviceId
+              ? services.find((svc) => svc.id === placement.serviceId)?.requests
+              : topLevelRequests;
+            if (!target) continue;
+            target.splice(Math.min(placement.index, target.length), 0, request);
+            if (placement.openIndex >= 0) openRequestIds.splice(Math.min(placement.openIndex, openRequestIds.length), 0, request.id);
+          }
+          return { topLevelRequests, services, openRequestIds };
+        });
+        const active = restorable.find((placement) => placement.wasActive);
+        if (active) void get().selectRequest(active.request.id);
+      },
+      commit: async () => {
+        const results = await Promise.allSettled([...idSet].map(async (id) => {
+          await get().deleteRequest(id);
+          committed.add(id);
+        }));
+        const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failure) throw failure.reason;
+      },
+    });
+  },
+
+  deleteServiceWithUndo: (workspaceId, id) => {
+    const service = get().services.find((svc) => svc.id === id);
+    if (!service) return;
+    let index = -1;
+    let openRequestIds: string[] = [];
+    let activeRequestId: string | null = null;
+
+    scheduleUndoableDelete({
+      message: `Removed collection "${service.name}"`,
+      unloadUrls: [`/api/workspaces/${workspaceId}/services/${id}`],
+      hide: () => {
+        const s = get();
+        index = s.services.findIndex((svc) => svc.id === id);
+        const requestIds = new Set(s.services[index].requests.map((request) => request.id));
+        openRequestIds = s.openRequestIds;
+        activeRequestId = s.activeRequestId;
+        const nextIds = s.openRequestIds.filter((rid) => !requestIds.has(rid));
+        const activeHidden = s.activeRequestId !== null && requestIds.has(s.activeRequestId);
+        if (activeHidden) ++selectionVersion;
+        set({
+          services: s.services.filter((svc) => svc.id !== id),
+          openRequestIds: nextIds,
+          ...(activeHidden ? { activeRequestId: null, activeRequest: null } : {}),
+        });
+        if (activeHidden && nextIds.length > 0) void get().selectRequest(nextIds[nextIds.length - 1]);
+      },
+      restore: () => {
+        const requestIds = new Set(service.requests.map((request) => request.id));
+        set((s) => {
+          const services = [...s.services];
+          services.splice(Math.min(index, services.length), 0, service);
+          // Reopen the collection's tabs in their old positions.
+          const stillOpen = new Set(s.openRequestIds);
+          const reopened = openRequestIds.filter((rid) => stillOpen.has(rid) || requestIds.has(rid));
+          const extra = s.openRequestIds.filter((rid) => !reopened.includes(rid));
+          return { services, openRequestIds: [...reopened, ...extra] };
+        });
+        if (activeRequestId && requestIds.has(activeRequestId)) void get().selectRequest(activeRequestId);
+      },
+      commit: () => get().deleteService(workspaceId, id),
+    });
+  },
+
   toggleFavorite: async (id) => {
     await requestsApi.toggleFavorite(id);
     set((s) => ({
@@ -754,7 +894,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     const abortController = new AbortController();
     const startedAt = new Date().toISOString();
     const startedAtMs = performance.now();
-    set((s) => ({ sending: true, abortController, responses: { ...s.responses, [activeRequest.id]: null } }));
+    set((s) => ({ sending: true, sendingRequestId: activeRequest.id, sendStartedAt: Date.now(), abortController, responses: { ...s.responses, [activeRequest.id]: null } }));
 
     try {
       const response = await executeApi.send({
@@ -779,6 +919,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       set((state) => ({
         responses: { ...state.responses, [activeRequest.id]: response },
         sending: false,
+        sendingRequestId: null,
         abortController: null,
         runtimeScriptVariablesByRequest: (() => {
           const nextRuntimeVariables = { ...state.runtimeScriptVariablesByRequest };
@@ -822,7 +963,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     } catch (err: unknown) {
       if (get().abortController !== abortController) return;
       if (err instanceof Error && err.name === 'CanceledError') {
-        set({ sending: false, abortController: null });
+        set({ sending: false, sendingRequestId: null, abortController: null });
       } else {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
         set((s) => ({
@@ -844,6 +985,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
             },
           },
           sending: false,
+          sendingRequestId: null,
           abortController: null,
         }));
         useDevToolsStore.getState().recordNetworkEntry({
@@ -912,7 +1054,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   cancelRequest: () => {
     const { abortController } = get();
     abortController?.abort();
-    set({ sending: false, abortController: null });
+    set({ sending: false, sendingRequestId: null, abortController: null });
   },
 
   clearResponse: (id: string) => set((s) => {

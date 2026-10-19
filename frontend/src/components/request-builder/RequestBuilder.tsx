@@ -3,6 +3,9 @@ import { useRequestStore } from '../../stores/requestStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useEnvironmentStore } from '../../stores/environmentStore';
 import { useUiStore } from '../../stores/uiStore';
+import { toast } from '../../stores/toastStore';
+import { withShortcut } from '../../lib/shortcuts';
+import { saveActiveTab } from '../../lib/appActions';
 import { serviceVariablesApi, workspaceVariablesApi, toolsApi, historyApi } from '../../services/api';
 import { KeyValueEditor } from '../common/KeyValueEditor';
 import { RequestVariableEditor } from '../common/RequestVariableEditor';
@@ -82,6 +85,7 @@ type PathVariableIndicator = {
   pending?: boolean;
 };
 
+const EMPTY_STATE_SECONDARY = 'border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800';
 const URL_VARIABLE_PATTERN_SOURCE = '\\{\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}\\}|\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}';
 
 function createUrlVariablePattern(): RegExp {
@@ -202,10 +206,10 @@ export function RequestBuilder() {
   const {
     activeRequest,
     services,
+    topLevelRequests,
     updateRequest,
     selectRequest,
     duplicateRequest,
-    saveRequest,
     isRequestDirty,
     sendRequest,
     cancelRequest,
@@ -215,7 +219,7 @@ export function RequestBuilder() {
   } = useRequestStore();
   const { activeWorkspaceId } = useWorkspaceStore();
   const { environments } = useEnvironmentStore();
-  const { activeRequestTab, setActiveRequestTab } = useUiStore();
+  const { activeRequestTab, setActiveRequestTab, setNewRequestModalOpen, setImportDialogKind, setCommandPaletteOpen } = useUiStore();
 
   const [showSnippets, setShowSnippets] = useState(false);
   const [showDynamicValues, setShowDynamicValues] = useState(false);
@@ -520,9 +524,41 @@ export function RequestBuilder() {
   );
 
   if (!activeRequest) {
+    const noRequestsYet = services.length === 0 && topLevelRequests.length === 0;
     return (
-      <div className="flex h-full items-center justify-center text-sm text-gray-400 dark:text-gray-600">
-        Select or create a request to get started
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <div className="text-sm text-gray-300">{noRequestsYet ? 'No requests yet' : 'No request open'}</div>
+        <p className="max-w-sm text-xs text-gray-500">
+          {noRequestsYet
+            ? 'Create one or import from Postman, SoapUI or cURL.'
+            : 'Pick a request in the sidebar, search with the command palette, or create a new one.'}
+        </p>
+        <div className="flex flex-wrap justify-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setNewRequestModalOpen(true)}
+            className="border border-[#ff6c37] bg-[#ff6c37] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#f95e26]"
+            title={withShortcut('New request', 'newRequest')}
+          >
+            New request
+          </button>
+          {noRequestsYet ? (
+            <>
+              <button type="button" onClick={() => setImportDialogKind('postman')} className={EMPTY_STATE_SECONDARY}>Import Postman</button>
+              <button type="button" onClick={() => setImportDialogKind('soapui')} className={EMPTY_STATE_SECONDARY}>Import SoapUI</button>
+              <button type="button" onClick={() => setImportDialogKind('curl')} className={EMPTY_STATE_SECONDARY}>Paste cURL</button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCommandPaletteOpen(true)}
+              className={EMPTY_STATE_SECONDARY}
+              title={withShortcut('Search', 'commandPalette')}
+            >
+              Search requests
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -564,6 +600,7 @@ export function RequestBuilder() {
         requestId: activeRequest.id,
       });
       await navigator.clipboard.writeText(curl);
+      toast('Copied as cURL');
       setCurlCopied(true);
       setTimeout(() => setCurlCopied(false), 2000);
     } catch {
@@ -637,6 +674,7 @@ export function RequestBuilder() {
             <button
               onClick={cancelRequest}
               className="border border-rose-900 bg-rose-950/30 px-4 py-1.5 text-sm font-medium text-rose-300 hover:bg-rose-950/50 whitespace-nowrap"
+              title="Cancel the request in flight"
             >
               Cancel
             </button>
@@ -644,9 +682,9 @@ export function RequestBuilder() {
             <div className="flex items-center gap-1">
               {requestIsDirty && (
                 <button
-                  onClick={() => { void saveRequest(activeRequest.id); }}
+                  onClick={() => { void saveActiveTab(); }}
                   className="border border-amber-700 bg-amber-950/30 px-2.5 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-950/50 whitespace-nowrap"
-                  title="Save request (Ctrl/Cmd+S)"
+                  title={withShortcut('Save request', 'save')}
                 >
                   Save
                 </button>
@@ -654,6 +692,8 @@ export function RequestBuilder() {
               <button
                 onClick={handleSend}
                 className="border border-[#ff6c37] bg-[#ff6c37] px-3 py-1 text-sm font-semibold text-white hover:bg-[#f95e26] whitespace-nowrap"
+                title={withShortcut('Send', 'send')}
+                aria-label="Send request"
               >
                   <svg className="inline-block h-4 w-4 -mt-[1px] fill-current" viewBox="0 3 24 24">
                     <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />

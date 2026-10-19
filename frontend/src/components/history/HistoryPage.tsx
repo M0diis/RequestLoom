@@ -3,6 +3,8 @@ import { useHistoryStore } from '../../stores/historyStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useRequestStore } from '../../stores/requestStore';
 import { useUiStore } from '../../stores/uiStore';
+import { toast } from '../../stores/toastStore';
+import { ConfirmModal } from '../common/ConfirmModal';
 import type { HistoryEntry, HttpMethod } from '../../types';
 import { ResponseDiffPanel } from './ResponseDiffPanel';
 
@@ -72,6 +74,7 @@ export function HistoryPage() {
   const [selectedEntry, setSelectedEntry] = useState<HistoryEntry | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [methodFilter, setMethodFilter] = useState<'ALL' | HttpMethod>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [compareEntryIds, setCompareEntryIds] = useState<string[]>([]);
@@ -135,12 +138,10 @@ export function HistoryPage() {
   };
 
   const clearHistory = async () => {
-    const confirmed = window.confirm('Clear all history for this workspace?');
-    if (!confirmed) return;
-
     setBusy(true);
     try {
       await clearAll(activeWorkspaceId);
+      toast('History cleared');
       setSelectedEntryId(null);
       setSelectedEntry(null);
       setCompareEntryIds([]);
@@ -208,6 +209,7 @@ export function HistoryPage() {
   };
 
   return (
+    <>
     <div className="flex h-full flex-col overflow-hidden bg-[#0c0c0c] text-gray-200">
       <div className="border-b border-gray-800 bg-[#1b1b1b] px-4 py-3">
         <div className="mb-2 text-sm font-semibold">Execution History</div>
@@ -272,9 +274,7 @@ export function HistoryPage() {
 
           <button
             type="button"
-            onClick={() => {
-              void clearHistory();
-            }}
+            onClick={() => setConfirmClearOpen(true)}
             className="border border-rose-900 bg-rose-950/20 px-2 py-1 text-xs text-rose-300 hover:bg-rose-950/40 disabled:opacity-50"
             disabled={busy || entries.length === 0}
           >
@@ -427,5 +427,17 @@ export function HistoryPage() {
         </div>
       </div>
     </div>
+    {confirmClearOpen && (
+      <ConfirmModal
+        title="Clear history"
+        message="Clear all history for this workspace? This cannot be undone."
+        confirmLabel="Clear history"
+        variant="danger"
+        busy={busy}
+        onConfirm={() => { void clearHistory().finally(() => setConfirmClearOpen(false)); }}
+        onClose={() => setConfirmClearOpen(false)}
+      />
+    )}
+    </>
   );
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useEnvironmentStore } from '../../stores/environmentStore';
 import { useUiStore } from '../../stores/uiStore';
+import { SHORTCUTS, withShortcut } from '../../lib/shortcuts';
 import { CustomDropdown } from './CustomDropdown';
 import { ConfirmModal } from './ConfirmModal';
 import { ExportImportModal } from './ExportImportModal';
@@ -226,8 +227,13 @@ export function TopBar() {
     }
   };
 
-  const [importExportModalOpen, setImportExportModalOpen] = useState(false);
-  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const {
+    exportImportModalOpen: importExportModalOpen,
+    setExportImportModalOpen: setImportExportModalOpen,
+    settingsModalOpen,
+    setSettingsModalOpen,
+    setCommandPaletteOpen,
+  } = useUiStore();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const handleEnvironmentChange = async (environmentId: string) => {
@@ -324,7 +330,7 @@ export function TopBar() {
           <button
             onClick={() => setResponseLayout('right')}
             className={`p-1 transition-colors ${responseLayout === 'right' ? 'bg-gray-700 text-[#ffbca3]' : 'text-gray-500 hover:text-gray-300'}`}
-            title="Response on right"
+            title={withShortcut('Response on right', 'toggleLayout')}
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
               <rect x="1" y="2" width="6" height="12" rx="1" opacity="0.9" />
@@ -334,7 +340,7 @@ export function TopBar() {
           <button
             onClick={() => setResponseLayout('bottom')}
             className={`p-1 transition-colors ${responseLayout === 'bottom' ? 'bg-gray-700 text-[#ffbca3]' : 'text-gray-500 hover:text-gray-300'}`}
-            title="Response on bottom"
+            title={withShortcut('Response on bottom', 'toggleLayout')}
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
               <rect x="2" y="1" width="12" height="6" rx="1" opacity="0.9" />
@@ -342,6 +348,19 @@ export function TopBar() {
             </svg>
           </button>
         </div>
+
+        {/* Command palette */}
+        <button
+          onClick={() => setCommandPaletteOpen(true)}
+          className="titlebar-no-drag flex h-7 items-center gap-2 border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+          title={withShortcut('Search requests, environments and actions', 'commandPalette')}
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <circle cx="11" cy="11" r="7" /><path strokeLinecap="round" d="M20 20l-3.5-3.5" />
+          </svg>
+          <span className="max-lg:hidden">Search</span>
+          <kbd className="font-mono text-[10px] text-gray-500 max-lg:hidden">{SHORTCUTS.commandPalette.keys}</kbd>
+        </button>
 
         {/* Documentation */}
         <button

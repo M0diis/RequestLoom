@@ -16,6 +16,10 @@ function load(file, api = {}, settings = { autoSave: false }) {
     '../services/api': api,
     './settingsStore': { useSettingsStore: { getState: () => ({ settings }) } },
     './devToolsStore': { useDevToolsStore: { getState: () => ({ recordNetworkEntry() {} }) } },
+    '../lib/undoableDelete': {
+      scheduleUndoableDelete(options) { options.hide(); scheduledDeletes.push(options); },
+      flushPendingDeletes: async () => {},
+    },
   };
   vm.runInNewContext(compiled, { module, exports: module.exports,
     require: name => name in mocks ? mocks[name] : require(name),
@@ -24,6 +28,7 @@ function load(file, api = {}, settings = { autoSave: false }) {
   }, { filename: file });
   return module.exports;
 }
+const scheduledDeletes = [];
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -178,4 +183,26 @@ test('URL query materialization preserves fragments and exact query separators',
   const { appendQueryParameter } = load('lib/requestUrl.ts');
   assert.equal(appendQueryParameter('https://example.com/a#b', 'q', 'a b'), 'https://example.com/a?q=a%20b#b');
   assert.equal(appendQueryParameter('https://example.com/a?x=1#b', 'q', '+'), 'https://example.com/a?x=1&q=%2B#b');
+});
+
+test('deleting requests hides them until the undo window closes and undo restores order and tabs', async () => {
+  const deleted = [];
+  const store = requests({ requestsApi: { delete: async id => { deleted.push(id); }, getById: async id => request(id) } });
+  store.setState({ openRequestIds: ['a', 'b'] });
+  scheduledDeletes.length = 0;
+
+  store.getState().deleteRequestsWithUndo(['a']);
+  assert.deepEqual(Array.from(store.getState().topLevelRequests, r => r.id), ['b']);
+  assert.deepEqual(Array.from(store.getState().openRequestIds), ['b']);
+  assert.equal(store.getState().activeRequestId, 'b');
+  assert.deepEqual(deleted, [], 'nothing is deleted on the backend before the undo window closes');
+
+  scheduledDeletes[0].restore();
+  assert.deepEqual(Array.from(store.getState().topLevelRequests, r => r.id), ['a', 'b']);
+  assert.deepEqual(Array.from(store.getState().openRequestIds), ['a', 'b']);
+
+  store.getState().deleteRequestsWithUndo(['b']);
+  await scheduledDeletes[1].commit();
+  assert.deepEqual(deleted, ['b']);
+  assert.deepEqual(Array.from(store.getState().topLevelRequests, r => r.id), ['a']);
 });

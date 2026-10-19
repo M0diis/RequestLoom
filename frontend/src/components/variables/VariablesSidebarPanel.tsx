@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { SkeletonRows } from '../common/Skeleton';
 import { useEnvironmentStore } from '../../stores/environmentStore';
 import { useRequestStore } from '../../stores/requestStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -6,7 +7,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 
 export function VariablesSidebarPanel() {
   const { activeWorkspaceId } = useWorkspaceStore();
-  const { environments, activate: activateEnvironment, load: loadEnvironments } = useEnvironmentStore();
+  const { environments, loading: environmentsLoading, activate: activateEnvironment, load: loadEnvironments } = useEnvironmentStore();
   const { services } = useRequestStore();
   const {
     variableServiceFilterId,
@@ -49,6 +50,10 @@ export function VariablesSidebarPanel() {
         <section>
           <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Environments</div>
           <div className="space-y-1">
+            {environmentsLoading && environments.length === 0 && <SkeletonRows rows={3} label="Loading environments" />}
+            {!environmentsLoading && environments.length === 0 && (
+              <p className="text-[11px] text-gray-500">No environments yet. Create one in the Variables page to switch between dev, staging and production values.</p>
+            )}
             {environments.map((env) => (
               <button
                 key={env.id}

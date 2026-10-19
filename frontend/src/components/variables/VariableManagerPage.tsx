@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SkeletonRows } from '../common/Skeleton';
 import { serviceVariablesApi, workspaceVariablesApi } from '../../services/api';
 import { useEnvironmentStore } from '../../stores/environmentStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
@@ -77,7 +78,7 @@ const INPUT = 'border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono 
 
 export function VariableManagerPage() {
   const { activeWorkspaceId } = useWorkspaceStore();
-  const { environments, load: loadEnvironments, create: createEnvironment, update: updateEnvironment, activate: activateEnvironment, remove: removeEnvironment } = useEnvironmentStore();
+  const { environments, loading: environmentsLoading, load: loadEnvironments, create: createEnvironment, update: updateEnvironment, activate: activateEnvironment, removeWithUndo: removeEnvironmentWithUndo } = useEnvironmentStore();
   const { services } = useRequestStore();
   const { variableServiceFilterId, variableSearchQuery, setVariableServiceFilterId, setVariableSearchQuery } = useUiStore();
 
@@ -270,19 +271,12 @@ export function VariableManagerPage() {
     } finally { setSaving(false); }
   };
 
-  const handleDeleteEnv = async () => {
+  const handleDeleteEnv = () => {
     if (!selectedEnv) return;
-    if (!window.confirm(`Delete environment "${selectedEnv.name}"?`)) return;
-    setSaving(true); setError(null);
-    try {
-      await removeEnvironment(activeWorkspaceId, selectedEnv.id);
-      setSelectedEnvId('');
-      await loadEnvironments(activeWorkspaceId);
-      await refreshGlobal();
-      await refreshService();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete environment');
-    } finally { setSaving(false); }
+    setError(null);
+    // Removed from view now; committed when the Undo toast closes.
+    removeEnvironmentWithUndo(activeWorkspaceId, selectedEnv.id);
+    setSelectedEnvId('');
   };
 
   const addGlobalVar = async () => {
@@ -571,6 +565,15 @@ export function VariableManagerPage() {
         )}
 
         <div className="flex flex-wrap gap-1.5 px-3 py-2.5">
+          {environmentsLoading && environments.length === 0 && <SkeletonRows rows={1} label="Loading environments" className="w-48" />}
+          {!environmentsLoading && environments.length === 0 && !showNewEnvInput && (
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <span>No environments yet.</span>
+              <button type="button" onClick={() => setShowNewEnvInput(true)} className="text-gray-300 underline hover:text-gray-100">
+                Create one
+              </button>
+            </div>
+          )}
           {environments.map((env) => {
             const isSelected = env.id === selectedEnvId;
             return (
@@ -617,7 +620,7 @@ export function VariableManagerPage() {
             )}
             <button
               type="button"
-              onClick={() => void handleDeleteEnv()}
+              onClick={handleDeleteEnv}
               disabled={saving || !canDeleteEnv}
               title={!canDeleteEnv ? 'Select an environment to delete' : 'Delete environment'}
               className="border border-rose-900/60 bg-rose-950/10 px-2.5 py-1 text-xs text-rose-400 hover:bg-rose-950/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"

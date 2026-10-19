@@ -14,6 +14,7 @@ import { MoveRequestFolderModal } from '../common/MoveRequestFolderModal';
 import { DeleteRequestFolderModal } from '../common/DeleteRequestFolderModal';
 import { MoveRequestCollectionModal } from '../common/MoveRequestCollectionModal';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { toast, copyWithToast } from '../../stores/toastStore';
 import { useScriptFileStore, type ScriptFileEntry } from '../../stores/scriptFileStore';
 import { exportImportApi, requestsApi, serviceFilesApi } from '../../services/api';
 import type { ApiRequest, FolderContentsAction } from '../../types';
@@ -140,8 +141,8 @@ export function Sidebar() {
     createRequest,
     createTopLevelRequest,
     updateRequest,
-    deleteService,
-    deleteRequest,
+    deleteServiceWithUndo,
+    deleteRequestsWithUndo,
     duplicateRequest,
     toggleFavorite,
     isRequestDirty,
@@ -156,6 +157,7 @@ export function Sidebar() {
     reorderRequest,
     moveRequestToService,
     moveRequestToTopLevel,
+    loading: requestsLoading,
   } = useRequestStore();
   const { activeWorkspaceId } = useWorkspaceStore();
   const {
@@ -164,6 +166,8 @@ export function Sidebar() {
     serviceSettingsServiceId,
     setServiceSettingsServiceId,
     setTerminalCwd,
+    setNewRequestModalOpen,
+    setImportDialogKind,
   } = useUiStore();
   const {
     files: scriptFiles,
@@ -190,6 +194,10 @@ export function Sidebar() {
   const [renamingRequestName, setRenamingRequestName] = useState('');
   const [renamingServiceId, setRenamingServiceId] = useState<string | null>(null);
   const [renamingServiceName, setRenamingServiceName] = useState('');
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renamingFolderName, setRenamingFolderName] = useState('');
+  const [collectionPathDialogOpen, setCollectionPathDialogOpen] = useState(false);
+  const [filterQuery, setFilterQuery] = useState('');
   const [folderDialog, setFolderDialog] = useState<{
     mode: 'create' | 'rename';
     serviceId: string;
@@ -238,6 +246,26 @@ export function Sidebar() {
   const favorites = [...topLevelRequests, ...services.flatMap((s) => s.requests)].filter((r) => r.isFavorite);
   const allRequests = [...topLevelRequests, ...services.flatMap((service) => service.requests)];
 
+  // Sidebar filter: matching items are shown with their ancestors, and collapsed state is ignored.
+  const normalizedFilter = filterQuery.trim().toLowerCase();
+  const filterActive = normalizedFilter.length > 0;
+  const textMatchesFilter = (text: string) => text.toLowerCase().includes(normalizedFilter);
+  const requestMatchesFilter = (request: ApiRequest) =>
+    !filterActive || textMatchesFilter(`${request.method} ${request.name} ${request.url}`);
+  const folderHasMatch = (service: (typeof services)[number], folderId: string): boolean =>
+    service.folders.some((folder) => folder.id === folderId && textMatchesFilter(folder.name))
+    || service.requests.some((request) => request.folderId === folderId && requestMatchesFilter(request))
+    || service.folders.some((folder) => folder.parentFolderId === folderId && folderHasMatch(service, folder.id));
+  const serviceShowsAll = (service: (typeof services)[number]) => !filterActive || textMatchesFilter(service.name);
+  const visibleServices = filterActive
+    ? services.filter((service) => serviceShowsAll(service)
+      || service.requests.some(requestMatchesFilter)
+      || service.folders.some((folder) => textMatchesFilter(folder.name)))
+    : services;
+  const visibleTopLevelRequests = topLevelRequests.filter(requestMatchesFilter);
+  const isServiceCollapsed = (serviceId: string) => !filterActive && collapsedServices.has(serviceId);
+  const workspaceIsEmpty = services.length === 0 && topLevelRequests.length === 0;
+
   const toggleCollapse = (serviceId: string) => {
     setCollapsedServices((prev) => {
       const next = new Set(prev);
@@ -268,8 +296,7 @@ export function Sidebar() {
       return;
     }
 
-    const selected = window.prompt('Collection folder path');
-    if (selected) setNewServicePath(selected);
+    setCollectionPathDialogOpen(true);
   };
 
   const handleAddRequest = async (serviceId: string, folderId: string | null = null) => {
@@ -408,9 +435,23 @@ export function Sidebar() {
     setFolderDialog({ mode: 'create', serviceId, parentFolderId, initialValue: '' });
   };
 
-  const openRenameFolderDialog = (serviceId: string, folderId: string, name: string) => {
+  const startRenameFolder = (folderId: string, name: string) => {
     setContextMenu(null);
-    setFolderDialog({ mode: 'rename', serviceId, folderId, initialValue: name });
+    setRenamingFolderId(folderId);
+    setRenamingFolderName(name);
+  };
+
+  const commitRenameFolder = async (serviceId: string, folderId: string, candidateName: string) => {
+    const folder = services.find((row) => row.id === serviceId)?.folders.find((row) => row.id === folderId);
+    const nextName = candidateName.trim();
+    setRenamingFolderId(null);
+    setRenamingFolderName('');
+    if (!folder || !nextName || nextName === folder.name) return;
+    try {
+      await updateFolder(activeWorkspaceId, serviceId, folderId, nextName);
+    } catch (error) {
+      setAlertMessage(error instanceof Error ? error.message : 'Failed to rename request folder');
+    }
   };
 
   const handleFolderDialogSubmit = async (name: string) => {
@@ -734,8 +775,12 @@ export function Sidebar() {
 
   const handleCopyRequest = async (requestId: string) => {
     setContextMenu(null);
-    const stored = await requestsApi.getFile(requestId);
-    await navigator.clipboard.writeText(stored.content).catch(() => {});
+    try {
+      const stored = await requestsApi.getFile(requestId);
+      await copyWithToast(stored.content, 'Request copied to clipboard');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not copy request', { variant: 'error' });
+    }
   };
 
   const handleCloneRequest = async (requestId: string) => {
@@ -744,6 +789,7 @@ export function Sidebar() {
     try {
       const clonedRequest = await duplicateRequest(requestId);
       await selectRequest(clonedRequest.id);
+      toast(`Cloned as "${clonedRequest.name}"`);
     } catch (error) {
       setAlertMessage(error instanceof Error ? error.message : 'Failed to clone request');
     }
@@ -780,8 +826,7 @@ export function Sidebar() {
 
   const handleCopyScriptPath = async (file: ScriptFileEntry) => {
     setContextMenu(null);
-    await navigator.clipboard.writeText(file.path).catch(() => {});
-    setAlertMessage(`Path copied to clipboard:\n${file.path}`);
+    await copyWithToast(file.path, 'Path copied to clipboard');
   };
 
   const handleDeleteScript = async () => {
@@ -819,8 +864,12 @@ export function Sidebar() {
 
   const handleShareCollection = async (serviceId: string) => {
     setContextMenu(null);
-    const data = await exportImportApi.exportService(serviceId);
-    await navigator.clipboard.writeText(JSON.stringify(data, null, 2)).catch(() => {});
+    try {
+      const data = await exportImportApi.exportService(serviceId);
+      await copyWithToast(JSON.stringify(data, null, 2), 'Collection JSON copied to clipboard');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not share collection', { variant: 'error' });
+    }
   };
 
   const handleGenerateDocs = (serviceId: string) => {
@@ -834,7 +883,7 @@ export function Sidebar() {
       '',
       ...service.requests.map((request) => `- **${request.method} ${request.name}** — ${request.url || '(no URL)'}`),
     ].join('\n');
-    void navigator.clipboard.writeText(markdown).catch(() => {});
+    void copyWithToast(markdown, 'Collection docs copied as Markdown');
   };
 
   const handleOpenTerminal = (serviceId: string) => {
@@ -874,15 +923,18 @@ export function Sidebar() {
     };
   }, [contextMenu]);
 
-  const renderFolderLevel = (service: (typeof services)[number], parentId: string | null, depth: number): React.ReactNode => {
+  const renderFolderLevel = (service: (typeof services)[number], parentId: string | null, depth: number, showAll = true): React.ReactNode => {
     const knownFolderIds = new Set(service.folders.map((folder) => folder.id));
     return service.folders
       .filter((folder) => parentId === null
         ? !folder.parentFolderId || !knownFolderIds.has(folder.parentFolderId)
         : folder.parentFolderId === parentId)
+      .filter((folder) => showAll || folderHasMatch(service, folder.id))
       .map((folder) => {
       const folderRequests = service.requests.filter((request) => request.folderId === folder.id);
-      const folderCollapsed = collapsedFolders.has(folder.id);
+      const folderShowsAll = showAll || textMatchesFilter(folder.name);
+      const visibleFolderRequests = folderShowsAll ? folderRequests : folderRequests.filter(requestMatchesFilter);
+      const folderCollapsed = !filterActive && collapsedFolders.has(folder.id);
       return (
         <div key={folder.id}>
           <div
@@ -905,7 +957,7 @@ export function Sidebar() {
             }}
             onDragEnd={clearDragState}
             onClick={() => {
-              if (draggingFolderId) return;
+              if (draggingFolderId || renamingFolderId === folder.id) return;
               setCollapsedFolders((previous) => {
                 const next = new Set(previous);
                 if (next.has(folder.id)) next.delete(folder.id);
@@ -914,6 +966,7 @@ export function Sidebar() {
               });
             }}
             onContextMenu={(event) => handleContextMenu(event, 'folder', folder.id)}
+            onDoubleClick={(event) => { event.stopPropagation(); startRenameFolder(folder.id, folder.name); }}
             onDragOver={(event) => {
               if (draggingFolderId) {
                 if (draggingFolderId === folder.id) return;
@@ -961,7 +1014,24 @@ export function Sidebar() {
             <svg className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
             </svg>
-            <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+            {renamingFolderId === folder.id ? (
+              <input
+                autoFocus
+                value={renamingFolderName}
+                onChange={(event) => setRenamingFolderName(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void commitRenameFolder(service.id, folder.id, event.currentTarget.value);
+                  if (event.key === 'Escape') { setRenamingFolderId(null); setRenamingFolderName(''); }
+                }}
+                onBlur={(event) => { void commitRenameFolder(service.id, folder.id, event.currentTarget.value); }}
+                className="min-w-0 flex-1 border border-gray-600 bg-gray-900 px-1 py-0.5 text-xs text-gray-100 outline-none"
+                aria-label="Folder name"
+              />
+            ) : (
+              <span className="min-w-0 flex-1 truncate" title="Double-click to rename">{folder.name}</span>
+            )}
             <span
               className="ml-auto min-w-5 text-right text-[10px] text-gray-500"
               title={`${folderRequests.length} request${folderRequests.length === 1 ? '' : 's'}`}
@@ -1000,8 +1070,8 @@ export function Sidebar() {
               </button>
             )}
           </div>
-          {!folderCollapsed && renderFolderLevel(service, folder.id, depth + 1)}
-          {!folderCollapsed && folderRequests.map((request) => renderRequest(request, REQUEST_INDENTS[Math.min(depth, REQUEST_INDENTS.length - 1)]))}
+          {!folderCollapsed && renderFolderLevel(service, folder.id, depth + 1, folderShowsAll)}
+          {!folderCollapsed && visibleFolderRequests.map((request) => renderRequest(request, REQUEST_INDENTS[Math.min(depth, REQUEST_INDENTS.length - 1)]))}
           {!folderCollapsed && addingRequestToFolder?.serviceId === service.id && addingRequestToFolder.folderId === folder.id && (
             <div style={{ paddingLeft: 72 + depth * 16 }} className={`pr-3 py-1 ${QUICK_FORM_ROW}`}>
               <input
@@ -1119,6 +1189,8 @@ export function Sidebar() {
             void selectRequest(request.id);
           }}
           onContextMenu={(event) => handleContextMenu(event, 'request', request.id)}
+          onDoubleClick={() => startRenameRequest(request.id)}
+          title={`${request.name}${request.url ? ` — ${request.url}` : ''} (double-click to rename)`}
           className={`flex w-full items-center gap-2 py-1 pr-3 text-left text-xs active:cursor-grabbing ${
             activeRequestId === request.id ? 'text-gray-100' : 'text-gray-400'
           }`}
@@ -1305,7 +1377,65 @@ export function Sidebar() {
           </div>
 
 
+          {/* Filter */}
+          {!workspaceIsEmpty && (
+            <div className="border-b border-gray-800/80 px-3 py-2">
+              <div className="relative">
+                <svg className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" /><path strokeLinecap="round" d="M20 20l-3.5-3.5" />
+                </svg>
+                <input
+                  type="search"
+                  value={filterQuery}
+                  onChange={(event) => setFilterQuery(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Escape') setFilterQuery(''); }}
+                  placeholder="Filter requests"
+                  aria-label="Filter requests"
+                  className="h-7 w-full border border-gray-700 bg-gray-900 pl-7 pr-2 text-xs text-gray-200 outline-none placeholder:text-gray-600 focus:border-gray-500"
+                />
+              </div>
+            </div>
+          )}
+
+          {requestsLoading && workspaceIsEmpty && (
+            <div className="space-y-2 px-3 py-3" aria-busy="true" aria-label="Loading collections">
+              {[72, 56, 64, 48, 60].map((width, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <div className="h-3 w-7 animate-pulse bg-gray-800" />
+                  <div className="h-3 animate-pulse bg-gray-800/80" style={{ width: `${width}%` }} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!requestsLoading && workspaceIsEmpty && (
+            <div className="px-4 py-6 text-center">
+              <div className="text-xs font-semibold text-gray-300">No requests yet</div>
+              <p className="mt-1 text-[11px] leading-4 text-gray-500">Create one or import from Postman, SoapUI or cURL.</p>
+              <div className="mt-3 grid gap-1.5">
+                <button type="button" onClick={() => setNewRequestModalOpen(true)} className={QUICK_FORM_PRIMARY} title="New request (Ctrl+N)">
+                  New request
+                </button>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button type="button" onClick={() => setImportDialogKind('postman')} className={QUICK_FORM_CANCEL}>Postman</button>
+                  <button type="button" onClick={() => setImportDialogKind('soapui')} className={QUICK_FORM_CANCEL}>SoapUI</button>
+                  <button type="button" onClick={() => setImportDialogKind('curl')} className={QUICK_FORM_CANCEL}>cURL</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {filterActive && visibleServices.length === 0 && visibleTopLevelRequests.length === 0 && (
+            <div className="px-4 py-6 text-center text-[11px] text-gray-500">
+              No requests match “{filterQuery.trim()}”.
+              <button type="button" onClick={() => setFilterQuery('')} className="ml-1 text-gray-300 underline hover:text-gray-100">
+                Clear filter
+              </button>
+            </div>
+          )}
+
           {/* Top-level requests */}
+          {!workspaceIsEmpty && !(filterActive && visibleTopLevelRequests.length === 0) && (
           <div
             className={`border-b border-gray-800/80 px-3 py-2 ${dragOverServiceId === '__top_level__' ? 'bg-cyan-500/10 ring-1 ring-inset ring-cyan-400/70' : ''}`}
             onDragOver={(event) => {
@@ -1339,14 +1469,15 @@ export function Sidebar() {
                 <span>No collection</span>
               </span>
             </button>
-            {!topLevelCollapsed && topLevelRequests.map((request) => renderRequest(request, '-mx-3 pl-3'))}
+            {(filterActive || !topLevelCollapsed) && visibleTopLevelRequests.map((request) => renderRequest(request, '-mx-3 pl-3'))}
             {!topLevelCollapsed && topLevelRequests.length === 0 && draggingRequestId !== null && (
               <div className="py-1 text-[10px] text-cyan-300/80">Drop here for top level</div>
             )}
           </div>
+          )}
 
           {/* Favorites */}
-          {favorites.length > 0 && (
+          {!filterActive && favorites.length > 0 && (
             <div className="px-3 py-2">
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Favorites</div>
               {favorites.map((req) => (
@@ -1367,7 +1498,7 @@ export function Sidebar() {
           )}
 
           {/* Services tree */}
-          {services.map((service) => (
+          {visibleServices.map((service) => (
             <div key={service.id} className="border-b border-gray-900/70">
               <div
                 draggable
@@ -1389,10 +1520,11 @@ export function Sidebar() {
                 }}
                 onDragEnd={clearDragState}
                 onClick={() => {
-                  if (draggingServiceId) return;
+                  if (draggingServiceId || renamingServiceId === service.id) return;
                   toggleCollapse(service.id);
                 }}
                 onContextMenu={(e) => handleContextMenu(e, 'service', service.id)}
+                onDoubleClick={() => startRenameService(service.id)}
                 onDragOver={(event) => {
                   if (draggingServiceId) {
                     event.preventDefault();
@@ -1429,7 +1561,7 @@ export function Sidebar() {
                 }}
               >
                 <svg
-                  className={`mr-1.5 h-3 w-3 text-gray-500 transition-transform ${collapsedServices.has(service.id) ? '' : 'rotate-90'}`}
+                  className={`mr-1.5 h-3 w-3 text-gray-500 transition-transform ${isServiceCollapsed(service.id) ? '' : 'rotate-90'}`}
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -1512,15 +1644,15 @@ export function Sidebar() {
               </div>
 
               {/* Request folders and direct service requests */}
-              {!collapsedServices.has(service.id) && renderFolderLevel(service, null, 0)}
+              {!isServiceCollapsed(service.id) && renderFolderLevel(service, null, 0, serviceShowsAll(service))}
 
-              {!collapsedServices.has(service.id) && service.requests
-                .filter((request) => !request.folderId)
+              {!isServiceCollapsed(service.id) && service.requests
+                .filter((request) => !request.folderId && (serviceShowsAll(service) || requestMatchesFilter(request)))
                 .map((request) => renderRequest(request))}
 
               {/* Collection JavaScript files */}
-              {!collapsedServices.has(service.id) && scriptFiles
-                .filter((file) => file.serviceId === service.id)
+              {!isServiceCollapsed(service.id) && scriptFiles
+                .filter((file) => file.serviceId === service.id && (serviceShowsAll(service) || textMatchesFilter(file.name)))
                 .map((file) => (
                   <button
                     key={file.key}
@@ -1538,7 +1670,7 @@ export function Sidebar() {
                 ))}
 
               {/* Add request inline */}
-              {!collapsedServices.has(service.id) && addingRequestToService === service.id && (
+              {!isServiceCollapsed(service.id) && addingRequestToService === service.id && (
                 <div className={`pl-8 pr-3 py-1 ${QUICK_FORM_ROW}`}>
                   <input
                     autoFocus
@@ -1633,7 +1765,7 @@ export function Sidebar() {
                 <ContextMenuItem icon="trash" danger onClick={() => {
                   setContextMenu(null);
                   setSelectedRequestIds(new Set());
-                  ids.forEach((id) => { void deleteRequest(id); });
+                  deleteRequestsWithUndo(ids);
                 }}>
                   Delete {label}
                 </ContextMenuItem>
@@ -1722,7 +1854,7 @@ export function Sidebar() {
                 Toggle Favorite
               </ContextMenuItem>
               <div role="separator" className="my-1.5 border-t border-gray-800/80" />
-              <ContextMenuItem icon="trash" danger onClick={() => { deleteRequest(contextMenu.id); setContextMenu(null); }}>
+              <ContextMenuItem icon="trash" danger onClick={() => { deleteRequestsWithUndo([contextMenu.id]); setContextMenu(null); }}>
                 Delete
               </ContextMenuItem>
             </>
@@ -1806,7 +1938,7 @@ export function Sidebar() {
                   if (serviceSettingsServiceId === contextMenu.id) {
                     setServiceSettingsServiceId(null);
                   }
-                  deleteService(activeWorkspaceId, contextMenu.id);
+                  deleteServiceWithUndo(activeWorkspaceId, contextMenu.id);
                   setContextMenu(null);
                 }}
               >
@@ -1840,7 +1972,7 @@ export function Sidebar() {
                 <ContextMenuItem icon="play" onClick={() => { setShowCollectionRunner({ serviceId: service.id, folderId: folder.id }); setContextMenu(null); }}>
                   Run Folder
                 </ContextMenuItem>
-                <ContextMenuItem icon="rename" onClick={() => { openRenameFolderDialog(service.id, folder.id, folder.name); }}>
+                <ContextMenuItem icon="rename" onClick={() => { startRenameFolder(folder.id, folder.name); }}>
                   Rename
                 </ContextMenuItem>
                 <div role="separator" className="my-1.5 border-t border-gray-800/80" />
@@ -1905,6 +2037,18 @@ export function Sidebar() {
           confirmLabel={folderDialog.mode === 'create' ? 'Create' : 'Save'}
           onConfirm={handleFolderDialogSubmit}
           onClose={() => setFolderDialog(null)}
+        />
+      )}
+
+      {collectionPathDialogOpen && (
+        <TextInputModal
+          title="Collection folder"
+          label="Folder path"
+          placeholder="e.g. D:\collections\orders"
+          initialValue={newServicePath}
+          confirmLabel="Use folder"
+          onConfirm={(value) => { setNewServicePath(value); setCollectionPathDialogOpen(false); }}
+          onClose={() => setCollectionPathDialogOpen(false)}
         />
       )}
 

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
+import type { ImportKind } from '../components/common/ImportModal';
 
 export type DevToolTab = 'console' | 'network' | 'performance' | 'terminal';
+export type ResponseViewMode = 'pretty' | 'raw' | 'tree' | 'preview';
 export type DocumentationSection = 'overview' | 'http' | 'requestloom' | 'automation' | 'mock-servers' | 'scripting' | 'storage' | 'imports';
 
 interface UiState {
@@ -13,7 +15,15 @@ interface UiState {
   variableSearchQuery: string;
   activeRequestTab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings' | 'cookies' | 'file' | 'notes';
   activeResponseTab: 'body' | 'headers' | 'info' | 'scripts' | 'tests';
+  /** Default body view for tabs that have not picked one yet. */
   responseViewMode: 'pretty' | 'raw';
+  /** Body view chosen per request tab. */
+  responseViewModeByRequest: Record<string, ResponseViewMode>;
+  newRequestModalOpen: boolean;
+  importDialogKind: ImportKind | null;
+  exportImportModalOpen: boolean;
+  settingsModalOpen: boolean;
+  commandPaletteOpen: boolean;
   responseLayout: 'right' | 'bottom';
   requestPanelSize: number;
   terminalOpen: boolean;
@@ -30,6 +40,12 @@ interface UiState {
   setActiveRequestTab: (tab: 'params' | 'headers' | 'variables' | 'body' | 'auth' | 'pre-script' | 'post-script' | 'tests' | 'runs' | 'settings' | 'cookies' | 'file' | 'notes') => void;
   setActiveResponseTab: (tab: 'body' | 'headers' | 'info' | 'scripts' | 'tests') => void;
   setResponseViewMode: (mode: 'pretty' | 'raw') => void;
+  setRequestResponseViewMode: (requestId: string, mode: ResponseViewMode) => void;
+  setNewRequestModalOpen: (open: boolean) => void;
+  setImportDialogKind: (kind: ImportKind | null) => void;
+  setExportImportModalOpen: (open: boolean) => void;
+  setSettingsModalOpen: (open: boolean) => void;
+  setCommandPaletteOpen: (open: boolean) => void;
   setResponseLayout: (layout: 'right' | 'bottom') => void;
   setRequestPanelSize: (size: number) => void;
   setTerminalOpen: (open: boolean) => void;
@@ -55,6 +71,12 @@ export const useUiStore = create<UiState>((set) => ({
   activeRequestTab: 'params',
   activeResponseTab: 'body',
   responseViewMode: 'pretty',
+  responseViewModeByRequest: {},
+  newRequestModalOpen: false,
+  importDialogKind: null,
+  exportImportModalOpen: false,
+  settingsModalOpen: false,
+  commandPaletteOpen: false,
   responseLayout: 'bottom',
   requestPanelSize: 50,
   terminalOpen: false,
@@ -76,6 +98,14 @@ export const useUiStore = create<UiState>((set) => ({
   setActiveRequestTab: (tab) => set({ activeRequestTab: tab }),
   setActiveResponseTab: (tab) => set({ activeResponseTab: tab }),
   setResponseViewMode: (mode) => set({ responseViewMode: mode }),
+  setRequestResponseViewMode: (requestId, mode) => set((state) => ({
+    responseViewModeByRequest: { ...state.responseViewModeByRequest, [requestId]: mode },
+  })),
+  setNewRequestModalOpen: (open) => set({ newRequestModalOpen: open }),
+  setImportDialogKind: (kind) => set({ importDialogKind: kind }),
+  setExportImportModalOpen: (open) => set({ exportImportModalOpen: open }),
+  setSettingsModalOpen: (open) => set({ settingsModalOpen: open }),
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   setResponseLayout: (layout) => set({ responseLayout: layout }),
   setRequestPanelSize: (size) => set({ requestPanelSize: size }),
   setTerminalOpen: (open) => set({ terminalOpen: open, devToolsOpen: open }),

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useMockServerStore } from '../../stores/mockServerStore';
+import { confirmDialog } from '../../stores/confirmStore';
+import { toast, copyWithToast } from '../../stores/toastStore';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 import type { HttpMethod, KeyValuePairRequest, MockEndpointBehavior } from '../../types';
 
@@ -255,14 +257,16 @@ export function MockEndpointDetail() {
 
   const handleDelete = async () => {
     if (!selectedServerId || !selectedEndpointId) return;
-    if (!confirm('Delete this endpoint?')) return;
+    const confirmed = await confirmDialog({ title: 'Delete endpoint', message: 'Delete this endpoint?', confirmLabel: 'Delete', variant: 'danger' });
+    if (!confirmed) return;
     await deleteEndpoint(activeWorkspaceId, selectedServerId, selectedEndpointId);
+    toast('Endpoint deleted');
   };
 
   const copyMockUrl = () => {
     const slug = server.slug || server.id;
     const url = `${window.location.origin}/mock/${slug}${epPath}`;
-    navigator.clipboard.writeText(url);
+    void copyWithToast(url, 'Mock URL copied');
     setCopiedUrl(url);
     setTimeout(() => setCopiedUrl(null), 2000);
   };

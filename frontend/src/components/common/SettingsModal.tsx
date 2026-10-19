@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SHORTCUTS as SHORTCUT_DEFINITIONS } from '../../lib/shortcuts';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import type { JsonStorageStrategy, StorageMode, SettingsUpdate } from '../../types';
@@ -56,16 +57,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'data', label: 'Data' },
 ];
 
-const SHORTCUTS: { keys: string; action: string }[] = [
-  { keys: 'Ctrl / Cmd + Enter', action: 'Send the current request' },
-  { keys: 'Ctrl / Cmd + S', action: 'Save the current request' },
-  { keys: 'Ctrl / Cmd + N', action: 'Create a new top-level request' },
-  { keys: 'Ctrl / Cmd + Alt + 1', action: 'Switch to Services panel' },
-  { keys: 'Ctrl / Cmd + Alt + 2', action: 'Switch to Variables panel' },
-  { keys: 'Ctrl / Cmd + Alt + 3', action: 'Switch to Mock Servers panel' },
-  { keys: 'Ctrl / Cmd + Alt + L', action: 'Toggle response layout (bottom/right)' },
-  { keys: 'Ctrl / Cmd + Alt + P', action: 'Toggle response view (pretty/raw)' },
-];
+const SHORTCUTS = Object.values(SHORTCUT_DEFINITIONS);
 
 export function SettingsModal({ onClose }: Props) {
   const { settings, loading, load, update, migrateStorage, generateExamples, clearAllData } = useSettingsStore();

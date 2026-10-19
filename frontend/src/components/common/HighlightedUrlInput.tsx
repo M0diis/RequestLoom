@@ -148,6 +148,7 @@ export function HighlightedUrlInput({
 
       <input
         ref={inputRef}
+        data-request-url-input
         type="text"
         value={value}
         onChange={(event) => { onChange(event.target.value); setOpen(true); setHighlightIndex(-1); }}

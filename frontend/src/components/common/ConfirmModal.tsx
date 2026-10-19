@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useConfirmStore } from '../../stores/confirmStore';
 
 interface ConfirmModalProps {
   title: string;
@@ -75,5 +76,22 @@ export function ConfirmModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Renders dialogs requested through confirmDialog(). Mount once near the app root. */
+export function ConfirmHost() {
+  const pending = useConfirmStore((state) => state.pending);
+  const settle = useConfirmStore((state) => state.settle);
+  if (!pending) return null;
+  return (
+    <ConfirmModal
+      title={pending.title}
+      message={pending.message}
+      confirmLabel={pending.confirmLabel}
+      variant={pending.variant}
+      onConfirm={() => settle(true)}
+      onClose={() => settle(false)}
+    />
   );
 }

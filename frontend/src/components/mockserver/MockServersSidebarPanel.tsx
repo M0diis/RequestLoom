@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useMockServerStore } from '../../stores/mockServerStore';
+import { confirmDialog } from '../../stores/confirmStore';
+import { toast } from '../../stores/toastStore';
 import type { MockServer } from '../../types';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
@@ -98,8 +100,15 @@ export function MockServersSidebarPanel() {
   };
 
   const handleDeleteServer = async (id: string) => {
-    if (!confirm('Delete this mock server and all its endpoints?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete mock server',
+      message: 'Delete this mock server and all its endpoints?',
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
     await remove(activeWorkspaceId, id);
+    toast('Mock server deleted');
   };
 
   const handleToggleRunning = async (s: MockServer) => {

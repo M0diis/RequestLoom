@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { SkeletonRows } from '../common/Skeleton';
 import type { HistoryEntry } from '../../types';
 import { historyApi } from '../../services/api';
 import { useRequestStore } from '../../stores/requestStore';
@@ -235,7 +236,7 @@ export function RequestHistoryTab({ workspaceId, requestId }: Props) {
 
         <div className="max-h-[380px] min-h-0 flex-1 overflow-y-auto lg:max-h-none">
           {loading && entries.length === 0 ? (
-            <div className="px-3 py-4 text-xs text-gray-500">Loading...</div>
+            <SkeletonRows rows={5} label="Loading history" className="px-3 py-4" />
           ) : entries.length === 0 ? (
             <div className="px-3 py-4 text-xs text-gray-500">No executions yet for this request.</div>
           ) : (

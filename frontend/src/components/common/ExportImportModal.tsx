@@ -5,6 +5,7 @@ import { exportImportApi } from '../../services/api';
 import type { WorkspaceExport, ServiceExport, RequestExport } from '../../types';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 import { ImportModal } from './ImportModal';
+import { toast, toastAfterReload } from '../../stores/toastStore';
 
 interface Props {
   onClose: () => void;
@@ -117,6 +118,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
         const safeName = (selectedRequest?.name ?? 'request').replace(/[^a-zA-Z0-9_-]/g, '_');
         downloadJson(data, `RequestLoom-request-${safeName}-${new Date().toISOString().slice(0, 10)}.json`);
       }
+      toast('Export saved');
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed');
@@ -174,6 +176,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
         return;
       }
       if (importTarget !== 'new') onClose();
+      toastAfterReload('Import complete');
       window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed');
@@ -452,7 +455,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
               <button
                 type="button"
                 className="mt-2 rounded border border-amber-700/60 px-2 py-1 text-amber-100 hover:bg-amber-900/30"
-                onClick={() => window.location.reload()}
+                onClick={() => { toastAfterReload('Import complete'); window.location.reload(); }}
               >
                 Done
               </button>

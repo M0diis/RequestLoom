@@ -2,15 +2,17 @@ import { useState, useMemo } from 'react';
 import axios from 'axios';
 import { toolsApi, importsApi } from '../../services/api';
 import { useRequestStore } from '../../stores/requestStore';
+import { toast } from '../../stores/toastStore';
 import type { ApiRequest, CurlParseResult } from '../../types';
 import { DocumentationLink, DocHelpButton } from '../documentation/DocumentationLink';
 
 interface Props {
   onClose: () => void;
+  initialKind?: ImportKind;
   workspaceId: string;
 }
 
-type ImportKind = 'openapi' | 'wsdl' | 'curl' | 'postman' | 'soapui' | 'bruno';
+export type ImportKind = 'openapi' | 'wsdl' | 'curl' | 'postman' | 'soapui' | 'bruno';
 type SourceType = 'url' | 'raw';
 
 const KIND_LABELS: Record<ImportKind, string> = {
@@ -27,10 +29,10 @@ const BTN_SECONDARY = 'border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs te
 const SELECT_CLASS = 'border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-gray-500';
 const INPUT_CLASS = 'w-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-100 outline-none focus:border-gray-500';
 
-export function ImportModal({ onClose, workspaceId }: Props) {
+export function ImportModal({ onClose, workspaceId, initialKind = 'openapi' }: Props) {
   const { services, createService, createRequest, createTopLevelRequest, loadServices } = useRequestStore();
 
-  const [kind, setKind] = useState<ImportKind>('openapi');
+  const [kind, setKind] = useState<ImportKind>(initialKind);
 
   // Import kind & source
   const [sourceType, setSourceType] = useState<SourceType>('url');
@@ -86,6 +88,7 @@ export function ImportModal({ onClose, workspaceId }: Props) {
 
       const warnings = result.warnings.length > 0 ? ` (${result.warnings.length} warnings)` : '';
       setSpecResult(`Imported ${result.createdRequests} request(s)${warnings}.`);
+      toast(`Imported ${result.createdRequests} request(s)${warnings}`);
       setSource('');
       setServiceName('');
     } catch (err) {
@@ -129,6 +132,7 @@ export function ImportModal({ onClose, workspaceId }: Props) {
 
       const warnings = result.warnings.length > 0 ? ` (${result.warnings.length} warnings)` : '';
       setSpecResult(`Imported ${result.createdRequests} request(s)${warnings}.`);
+      toast(`Imported ${result.createdRequests} request(s)${warnings}`);
       setBrunoFiles([]);
       setServiceName('');
     } catch (err) {
@@ -197,6 +201,7 @@ export function ImportModal({ onClose, workspaceId }: Props) {
       });
 
       await selectRequest(req.id);
+      toast('Imported request from cURL');
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to import request');

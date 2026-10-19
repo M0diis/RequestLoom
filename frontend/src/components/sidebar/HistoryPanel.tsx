@@ -3,6 +3,8 @@ import { useHistoryStore } from '../../stores/historyStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useRequestStore } from '../../stores/requestStore';
 import { useUiStore } from '../../stores/uiStore';
+import { toast } from '../../stores/toastStore';
+import { ConfirmModal } from '../common/ConfirmModal';
 import type { HistoryEntry, HttpMethod } from '../../types';
 
 const METHOD_FILTERS: Array<'ALL' | HttpMethod> = ['ALL', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
@@ -77,6 +79,7 @@ export function HistoryPanel() {
   const [selectedEntry, setSelectedEntry] = useState<HistoryEntry | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
   useEffect(() => {
     void load(activeWorkspaceId);
@@ -151,12 +154,10 @@ export function HistoryPanel() {
   };
 
   const handleClear = async () => {
-    const confirmed = window.confirm('Clear all history for this workspace?');
-    if (!confirmed) return;
-
     setBusy(true);
     try {
       await clearAll(activeWorkspaceId);
+      toast('History cleared');
       setSelectedEntryId(null);
       setSelectedEntry(null);
     } finally {
@@ -178,6 +179,7 @@ export function HistoryPanel() {
   };
 
   return (
+    <>
     <div className="flex h-full flex-col bg-[#111111] text-gray-200">
       <div className="border-b border-gray-800 px-3 py-2">
         <div className="mb-2 flex items-center gap-2">
@@ -212,7 +214,7 @@ export function HistoryPanel() {
           </button>
 
           <button
-            onClick={handleClear}
+            onClick={() => setConfirmClearOpen(true)}
             disabled={busy || entries.length === 0}
             className="border border-rose-900 bg-rose-950/20 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950/40 disabled:opacity-50"
           >
@@ -325,5 +327,17 @@ export function HistoryPanel() {
         )}
       </div>
     </div>
+    {confirmClearOpen && (
+      <ConfirmModal
+        title="Clear history"
+        message="Clear all history for this workspace? This cannot be undone."
+        confirmLabel="Clear history"
+        variant="danger"
+        busy={busy}
+        onConfirm={() => { void handleClear().finally(() => setConfirmClearOpen(false)); }}
+        onClose={() => setConfirmClearOpen(false)}
+      />
+    )}
+    </>
   );
 }

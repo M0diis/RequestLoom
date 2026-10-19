@@ -18,6 +18,13 @@ import { DevToolsPanel } from './components/common/DevToolsPanel';
 import { JavaScriptFileEditor } from './components/script-files/JavaScriptFileEditor';
 import { DocumentationPage } from './components/documentation/DocumentationPage';
 import { NewRequestModal } from './components/common/NewRequestModal';
+import { ImportModal } from './components/common/ImportModal';
+import { CommandPalette } from './components/common/CommandPalette';
+import { ConfirmHost } from './components/common/ConfirmModal';
+import { Toaster } from './components/common/Toaster';
+import { flushReloadToast } from './stores/toastStore';
+import { flushPendingDeletesOnUnload, hasPendingDeletes } from './lib/undoableDelete';
+import { closeActiveTab, cycleTabs, focusUrlBar, saveActiveTab, sendActiveTab } from './lib/appActions';
 import type { ApiRequest, HttpMethod } from './types';
 
 function App() {
@@ -25,10 +32,8 @@ function App() {
   const { load: loadEnvironments, error: environmentError } = useEnvironmentStore();
   const {
     loadServices,
-    sendRequest,
     services,
     activeRequestId,
-    saveRequest,
     createRequest,
     createService,
     createTopLevelRequest,
@@ -40,7 +45,6 @@ function App() {
   const { load: loadScriptFiles, activeFileKey, error: scriptError } = useScriptFileStore();
   const { load: loadMockServers, error: mockServerError } = useMockServerStore();
   const { load: loadSettings } = useSettingsStore();
-  const [newRequestModalOpen, setNewRequestModalOpen] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
   const {
     sidebarTab,
@@ -52,8 +56,15 @@ function App() {
     setSidebarTab,
     setDocsSection,
     responseViewMode,
-    setResponseViewMode,
+    responseViewModeByRequest,
+    setRequestResponseViewMode,
     setResponseLayout,
+    newRequestModalOpen,
+    setNewRequestModalOpen,
+    importDialogKind,
+    setImportDialogKind,
+    commandPaletteOpen,
+    setCommandPaletteOpen,
   } = useUiStore();
 
   const panelContainerRef = useRef<HTMLDivElement>(null);
@@ -79,6 +90,17 @@ function App() {
     const serviceIds = (JSON.parse(serviceSignature) as { id: string }[]).map((service) => service.id);
     void loadScriptFiles(activeWorkspaceId, serviceIds);
   }, [activeWorkspaceId, loadScriptFiles, serviceSignature, loadedWorkspaceId, requestsLoading]);
+
+  useEffect(() => {
+    flushReloadToast();
+  }, []);
+
+  useEffect(() => {
+    // Deletes waiting on an Undo toast are committed with keepalive requests.
+    const commitPendingDeletes = () => { if (hasPendingDeletes()) flushPendingDeletesOnUnload(); };
+    window.addEventListener('pagehide', commitPendingDeletes);
+    return () => window.removeEventListener('pagehide', commitPendingDeletes);
+  }, []);
 
   useEffect(() => {
     const protectDrafts = (event: BeforeUnloadEvent) => {
@@ -121,18 +143,31 @@ function App() {
             setResponseLayout(responseLayout === 'right' ? 'bottom' : 'right');
             e.preventDefault();
             return;
-          case 'p':
-            setResponseViewMode(responseViewMode === 'pretty' ? 'raw' : 'pretty');
+          case 'p': {
+            if (!activeRequestId) return;
+            const current = responseViewModeByRequest[activeRequestId] ?? responseViewMode;
+            setRequestResponseViewMode(activeRequestId, current === 'raw' ? 'pretty' : 'raw');
             e.preventDefault();
             return;
+          }
         }
+      }
+
+      if (mod && !e.altKey && e.key === 'Tab') {
+        cycleTabs(e.shiftKey ? -1 : 1);
+        e.preventDefault();
+        return;
       }
 
       if (mod && !e.altKey && !e.shiftKey) {
         const key = e.key.toLowerCase();
+        if (key === 'k') {
+          setCommandPaletteOpen(!useUiStore.getState().commandPaletteOpen);
+          e.preventDefault();
+          return;
+        }
         if (key === 's') {
-          if (activeFileKey) void useScriptFileStore.getState().save(activeWorkspaceId, activeFileKey).catch(() => {});
-          else if (activeRequestId) void saveRequest(activeRequestId);
+          void saveActiveTab();
           e.preventDefault();
           return;
         }
@@ -141,32 +176,38 @@ function App() {
           e.preventDefault();
           return;
         }
+        if (key === 'w' && sidebarTab === 'services') {
+          closeActiveTab();
+          e.preventDefault();
+          return;
+        }
+        if (key === 'l') {
+          focusUrlBar();
+          e.preventDefault();
+          return;
+        }
       }
 
       if (sidebarTab !== 'services' || serviceSettingsServiceId) return;
       if (mod && e.key === 'Enter') {
         e.preventDefault();
-        if (activeFileKey) void useScriptFileStore.getState().run(activeWorkspaceId, activeFileKey).catch(() => {});
-        else void sendRequest(activeWorkspaceId);
+        sendActiveTab();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [
-    activeWorkspaceId,
     activeRequestId,
-    activeFileKey,
-    saveRequest,
     setNewRequestModalOpen,
-    sendRequest,
+    setCommandPaletteOpen,
     serviceSettingsServiceId,
     sidebarTab,
     responseLayout,
     responseViewMode,
+    responseViewModeByRequest,
     setSidebarTab,
-    setDocsSection,
     setResponseLayout,
-    setResponseViewMode,
+    setRequestResponseViewMode,
   ]);
 
   const startPanelResize = useCallback((e: React.MouseEvent) => {
@@ -294,6 +335,16 @@ function App() {
           onCreate={handleNewRequestCreate}
         />
       )}
+      {importDialogKind && (
+        <ImportModal
+          workspaceId={activeWorkspaceId}
+          initialKind={importDialogKind}
+          onClose={() => setImportDialogKind(null)}
+        />
+      )}
+      {commandPaletteOpen && <CommandPalette />}
+      <ConfirmHost />
+      <Toaster />
     </>
   );
 }

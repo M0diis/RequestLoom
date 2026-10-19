@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Environment } from '../types';
 import { environmentsApi } from '../services/api';
+import { scheduleUndoableDelete, flushPendingDeletes } from '../lib/undoableDelete';
 
 let loadVersion = 0;
 
@@ -14,6 +15,7 @@ interface EnvironmentState {
   update: (workspaceId: string, id: string, name: string) => Promise<void>;
   activate: (workspaceId: string, id: string) => Promise<void>;
   remove: (workspaceId: string, id: string) => Promise<void>;
+  removeWithUndo: (workspaceId: string, id: string) => void;
   getActive: () => Environment | undefined;
 }
 
@@ -24,6 +26,7 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
   loading: false,
 
   load: async (workspaceId) => {
+    await flushPendingDeletes();
     const version = ++loadVersion;
     if (get().workspaceId !== workspaceId) set({ workspaceId, environments: [] });
     set({ loading: true, error: null });
@@ -67,6 +70,29 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
     set((s) => ({
       environments: s.environments.filter((e) => e.id !== id),
     }));
+  },
+
+  removeWithUndo: (workspaceId, id) => {
+    const environment = get().environments.find((e) => e.id === id);
+    if (!environment) return;
+    let index = -1;
+    scheduleUndoableDelete({
+      message: `Deleted environment "${environment.name}"`,
+      unloadUrls: [`/api/workspaces/${workspaceId}/environments/${id}`],
+      hide: () => {
+        index = get().environments.findIndex((e) => e.id === id);
+        set((s) => ({ environments: s.environments.filter((e) => e.id !== id) }));
+      },
+      restore: () => {
+        if (get().workspaceId !== workspaceId) return;
+        set((s) => {
+          const environments = [...s.environments];
+          environments.splice(Math.min(index, environments.length), 0, environment);
+          return { environments };
+        });
+      },
+      commit: () => get().remove(workspaceId, id),
+    });
   },
 
   getActive: () => get().environments.find((e) => e.isActive),
