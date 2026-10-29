@@ -266,6 +266,35 @@ export function Sidebar() {
   const isServiceCollapsed = (serviceId: string) => !filterActive && collapsedServices.has(serviceId);
   const workspaceIsEmpty = services.length === 0 && topLevelRequests.length === 0;
 
+  const collapseAll = () => {
+    setCollapsedServices(new Set(services.map((service) => service.id)));
+    setCollapsedFolders(new Set(services.flatMap((service) => service.folders.map((folder) => folder.id))));
+  };
+
+  const expandAll = () => {
+    setCollapsedServices(new Set());
+    setCollapsedFolders(new Set());
+  };
+
+  /** Collapses or expands every folder of one collection; the collection itself is opened when expanding. */
+  const setServiceFoldersCollapsed = (serviceId: string, collapsed: boolean) => {
+    const folderIds = services.find((service) => service.id === serviceId)?.folders.map((folder) => folder.id) ?? [];
+    setCollapsedFolders((previous) => {
+      const next = new Set(previous);
+      for (const folderId of folderIds) {
+        if (collapsed) next.add(folderId);
+        else next.delete(folderId);
+      }
+      return next;
+    });
+    setCollapsedServices((previous) => {
+      if (!previous.has(serviceId)) return previous;
+      const next = new Set(previous);
+      next.delete(serviceId);
+      return next;
+    });
+  };
+
   const toggleCollapse = (serviceId: string) => {
     setCollapsedServices((prev) => {
       const next = new Set(prev);
@@ -505,6 +534,8 @@ export function Sidebar() {
     await store.selectRequest(requestId);
     await store.sendRequest(activeWorkspaceId);
   };
+
+  const deferDragState = (update: () => void) => { window.setTimeout(update, 0); };
 
   const clearDragState = () => {
     setDraggingRequestId(null);
@@ -952,8 +983,10 @@ export function Sidebar() {
             onDragStart={(event) => {
               event.dataTransfer.setData('application/x-requestloom-folder', folder.id);
               event.dataTransfer.effectAllowed = 'move';
-              setDraggingFolderId(folder.id);
-              setDraggingRequestId(null);
+              deferDragState(() => {
+                setDraggingFolderId(folder.id);
+                setDraggingRequestId(null);
+              });
             }}
             onDragEnd={clearDragState}
             onClick={() => {
@@ -1147,12 +1180,15 @@ export function Sidebar() {
           const ids = dragsSelection
             ? getVisibleRequestOrder().filter((id) => selectedRequestIds.has(id))
             : [request.id];
-          if (!dragsSelection && selectedRequestIds.size > 0) setSelectedRequestIds(new Set());
           event.dataTransfer.setData('text/plain', request.id);
           event.dataTransfer.setData('application/x-requestloom-requests', JSON.stringify(ids));
           event.dataTransfer.effectAllowed = 'move';
-          setDraggingRequestId(request.id);
-          setDraggingRequestIds(ids);
+          // Re-rendering synchronously inside dragstart can make Chromium cancel the drag.
+          deferDragState(() => {
+            if (!dragsSelection) setSelectedRequestIds((previous) => previous.size > 0 ? new Set() : previous);
+            setDraggingRequestId(request.id);
+            setDraggingRequestIds(ids);
+          });
         }}
         onDragEnd={clearDragState}
         onDragOver={(event) => {
@@ -1265,6 +1301,30 @@ export function Sidebar() {
           <div className="border-b border-gray-800/80 px-3 py-2.5">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Workspace</span>
+              {services.length > 0 && (
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={expandAll}
+                    title="Expand all collections and folders"
+                    className="p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-200"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M7 8l5-5 5 5M7 16l5 5 5-5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={collapseAll}
+                    title="Collapse all collections and folders"
+                    className="p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-200"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M7 3l5 5 5-5M7 21l5-5 5 5" />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               <button
@@ -1514,9 +1574,11 @@ export function Sidebar() {
                 onDragStart={(event) => {
                   event.dataTransfer.setData('application/x-requestloom-service', service.id);
                   event.dataTransfer.effectAllowed = 'move';
-                  setDraggingServiceId(service.id);
-                  setDraggingRequestId(null);
-                  setDraggingFolderId(null);
+                  deferDragState(() => {
+                    setDraggingServiceId(service.id);
+                    setDraggingRequestId(null);
+                    setDraggingFolderId(null);
+                  });
                 }}
                 onDragEnd={clearDragState}
                 onClick={() => {
@@ -1905,6 +1967,12 @@ export function Sidebar() {
               <div role="separator" className="my-1.5 border-t border-gray-800/80" />
               <ContextMenuItem icon="collapse" onClick={() => { toggleCollapse(contextMenu.id); setContextMenu(null); }}>
                 Collapse
+              </ContextMenuItem>
+              <ContextMenuItem icon="collapse" onClick={() => { setServiceFoldersCollapsed(contextMenu.id, true); setContextMenu(null); }}>
+                Collapse All Folders
+              </ContextMenuItem>
+              <ContextMenuItem icon="chevron-down" onClick={() => { setServiceFoldersCollapsed(contextMenu.id, false); setContextMenu(null); }}>
+                Expand All Folders
               </ContextMenuItem>
               <ContextMenuItem icon="chevron-up" onClick={() => { void moveService(activeWorkspaceId, contextMenu.id, -1); setContextMenu(null); }}>
                 Move Up

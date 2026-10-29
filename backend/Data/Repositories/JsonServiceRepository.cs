@@ -92,10 +92,10 @@ public class JsonServiceRepository : IServiceRepository
             service.Description = description;
             ApplyHeaders(service, headers);
             ApplyAuth(service, auth);
-            updated = service;
+            updated = PopulateDefaults(doc, service);
         });
 
-        return Task.FromResult(updated == null ? null : Clone(updated));
+        return Task.FromResult(updated);
     }
 
     public Task<RequestFolder?> CreateFolderAsync(string workspaceId, string serviceId, string name, string? parentFolderId = null)
