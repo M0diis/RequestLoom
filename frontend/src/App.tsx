@@ -126,28 +126,34 @@ function App() {
           case '1':
             setSidebarTab('services');
             e.preventDefault();
+            e.stopPropagation();
             return;
           case '2':
             setSidebarTab('variables');
             e.preventDefault();
+            e.stopPropagation();
             return;
           case '3':
             setSidebarTab('mockservers');
             e.preventDefault();
+            e.stopPropagation();
             return;
           case '4':
             setSidebarTab('docs');
             e.preventDefault();
+            e.stopPropagation();
             return;
           case 'l':
             setResponseLayout(responseLayout === 'right' ? 'bottom' : 'right');
             e.preventDefault();
+            e.stopPropagation();
             return;
           case 'p': {
             if (!activeRequestId) return;
             const current = responseViewModeByRequest[activeRequestId] ?? responseViewMode;
             setRequestResponseViewMode(activeRequestId, current === 'raw' ? 'pretty' : 'raw');
             e.preventDefault();
+            e.stopPropagation();
             return;
           }
         }
@@ -156,6 +162,7 @@ function App() {
       if (mod && !e.altKey && e.key === 'Tab') {
         cycleTabs(e.shiftKey ? -1 : 1);
         e.preventDefault();
+        e.stopPropagation();
         return;
       }
 
@@ -164,26 +171,31 @@ function App() {
         if (key === 'k') {
           setCommandPaletteOpen(!useUiStore.getState().commandPaletteOpen);
           e.preventDefault();
+          e.stopPropagation();
           return;
         }
         if (key === 's') {
           void saveActiveTab();
           e.preventDefault();
+          e.stopPropagation();
           return;
         }
         if (key === 'n') {
           setNewRequestModalOpen(true);
           e.preventDefault();
+          e.stopPropagation();
           return;
         }
         if (key === 'w' && sidebarTab === 'services') {
           closeActiveTab();
           e.preventDefault();
+          e.stopPropagation();
           return;
         }
         if (key === 'l') {
           focusUrlBar();
           e.preventDefault();
+          e.stopPropagation();
           return;
         }
       }
@@ -191,11 +203,13 @@ function App() {
       if (sidebarTab !== 'services' || serviceSettingsServiceId) return;
       if (mod && e.key === 'Enter') {
         e.preventDefault();
+        e.stopPropagation();
         sendActiveTab();
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    // Capture app shortcuts before Monaco consumes keys for editor commands/chords.
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
   }, [
     activeRequestId,
     setNewRequestModalOpen,

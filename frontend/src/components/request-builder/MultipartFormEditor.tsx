@@ -89,7 +89,15 @@ export function MultipartFormEditor({ body, requestId, onChange }: Props) {
     setMessage('Uploading file…');
 
     try {
-      const uploaded = await requestsApi.upload(requestId, file);
+      const uploaded = requestId.startsWith('ephemeral-') ? {
+        filePath: await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error('Could not read file.'));
+          reader.readAsDataURL(file);
+        }),
+        fileName: file.name, contentType: file.type || 'application/octet-stream', size: file.size,
+      } : await requestsApi.upload(requestId, file);
       updateField(fieldId, {
         kind: 'file',
         filePath: uploaded.filePath,
@@ -110,7 +118,7 @@ export function MultipartFormEditor({ body, requestId, onChange }: Props) {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray-300">Multipart form-data</p>
-          <p className="text-[11px] text-gray-500">Text fields support {'{{variable}}'} interpolation. Files are stored in the RequestLoom upload directory.</p>
+          <p className="text-[11px] text-gray-500">Text fields support {'{{variable}}'} interpolation. {requestId.startsWith('ephemeral-') ? 'Files stay in memory until the tab closes.' : 'Files are stored in the RequestLoom upload directory.'}</p>
         </div>
         <button
           type="button"

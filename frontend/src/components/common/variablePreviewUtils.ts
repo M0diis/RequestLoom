@@ -15,7 +15,7 @@ export interface VariablePreviewResult {
   hasSecrets: boolean;
 }
 
-const VARIABLE_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}|\{\s*([a-zA-Z0-9_.-]+)\s*\}/g;
+const VARIABLE_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}|\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g;
 const SECRET_MASK = '••••••••';
 
 export function resolveValueForPreview(
@@ -47,14 +47,14 @@ export function resolveValueForPreview(
 
         changed = true;
         sources.add(variable.source);
-        const shouldMask = masked || variable.isSecret === true;
+        const shouldMask = masked && (sensitive || variable.isSecret === true);
         if (shouldMask) hasSecrets = true;
         return shouldMask ? SECRET_MASK : variable.value ?? '';
       },
     );
 
     const nextResolvedValue = resolvePass(resolvedValue, false);
-    const nextDisplayValue = resolvePass(displayValue, sensitive);
+    const nextDisplayValue = resolvePass(displayValue, true);
     resolvedValue = nextResolvedValue;
     displayValue = nextDisplayValue;
 

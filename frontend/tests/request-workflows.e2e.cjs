@@ -1,0 +1,102 @@
+// Run through tests/backend/run_ui_smoke.py against isolated backend storage.
+const assert = require('node:assert/strict');
+const { chromium } = require('playwright');
+
+(async () => {
+  const api = async (method, path, body) => {
+    const res = await fetch(process.env.REQUESTLOOM_API + '/api' + path, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    assert.ok(res.ok, `${method} ${path}: ${res.status} ${await (res.ok ? Promise.resolve('') : res.text())}`);
+    return res.status === 204 ? null : res.json();
+  };
+  const workspace = await api('POST', '/workspaces', { name: 'UI regression' });
+  const one = await api('POST', `/workspaces/${workspace.id}/services`, { name: 'KYC' });
+  const two = await api('POST', `/workspaces/${workspace.id}/services`, { name: 'Other service' });
+  const host = 'https://kycreview-route-clm-workflow-kyc.sebshift.dev02.sebank.se';
+  const a = await api('POST', `/requests/service/${one.id}`, { name: 'Review case', method: 'GET', url: host + '/cases/{00F94C74-0000-C718-9B9F-49BA9C66D80C}' });
+  const b = await api('POST', `/requests/service/${two.id}`, { name: 'Other review', method: 'GET', url: host + '/review-data' });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on('pageerror', error => {
+      // Monaco cancels pending language work when an editor is disposed during a tab switch.
+      if (error.name === 'Canceled' && /editor\.(api|main)-/.test(error.stack || '')) return;
+      errors.push(error.message);
+    });
+    await page.addInitScript(id => localStorage.setItem('activeWorkspaceId', id), workspace.id);
+    await page.route('**/api/**', async route => {
+      const url = new URL(route.request().url());
+      const response = await route.fetch({ url: process.env.REQUESTLOOM_API + url.pathname + url.search });
+      await route.fulfill({ response });
+    });
+    await page.goto(process.env.REQUESTLOOM_UI);
+    const ephemeral = page.getByRole('button', { name: 'New ephemeral request', exact: true });
+    await ephemeral.click();
+    const url = page.locator('[data-request-url-input]');
+    await url.fill(host + '/{literal}');
+    await url.focus();
+    await page.keyboard.press('Control+k');
+    await page.getByPlaceholder('Search requests, environments and actions…').waitFor();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Body', exact: true }).click();
+    await page.getByRole('button', { name: 'JSON', exact: true }).click();
+    const editor = page.locator('.monaco-editor textarea.inputarea').first();
+    await editor.waitFor();
+    await editor.focus();
+    await page.keyboard.press('Control+k');
+    await page.getByRole('combobox').waitFor();
+    await page.keyboard.press('Control+k');
+    await page.getByRole('combobox').waitFor({ state: 'hidden' });
+    await editor.focus();
+    await page.keyboard.press('Control+l');
+    assert.equal(await url.evaluate(input => input === document.activeElement), true);
+    await page.getByText('Settings', { exact: true }).click();
+    await page.getByText('Ignore TLS/SSL certificate errors', { exact: true }).click();
+    await page.getByRole('button', { name: 'Params', exact: true }).click();
+    await url.focus();
+    await url.evaluate((input, length) => input.setSelectionRange(0, length), host.length);
+    await url.click({ button: 'right', position: { x: 25, y: 12 } });
+    await page.getByRole('menuitem', { name: 'Extract to variable…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Extract URL selection to variable' });
+    await dialog.getByLabel('Store in').selectOption('request');
+    await dialog.getByRole('button', { name: 'Extract variable and replace', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal(await url.inputValue(), '{{baseUrl}}/{literal}');
+    await url.focus();
+    await page.keyboard.press('Control+w');
+    await ephemeral.click();
+    assert.equal(await url.inputValue(), '');
+    await page.getByRole('button', { name: 'Close Ephemeral request', exact: true }).click();
+    await page.getByText('Review case', { exact: true }).click();
+    await url.waitFor();
+    assert.ok((await url.inputValue()).includes('{00F94C74'));
+    assert.equal(await page.getByText(/Missing variables:/).count(), 0);
+    await url.focus();
+    await url.evaluate((input, length) => input.setSelectionRange(0, length), host.length);
+    await url.click({ button: 'right', position: { x: 25, y: 12 } });
+    await page.getByRole('menuitem', { name: 'Extract to variable…' }).click();
+    assert.equal(await dialog.getByLabel('Store in').inputValue(), one.id);
+    await dialog.getByLabel('Find URL occurrences in').selectOption('all');
+    assert.equal(await dialog.locator('input[type=checkbox]').count(), 1, 'service variables cannot replace URLs in another service');
+    await dialog.getByLabel('Store in').selectOption('global');
+    await dialog.getByLabel('Find URL occurrences in').selectOption('all');
+    await dialog.getByLabel('Find URL occurrences in').selectOption(two.id);
+    assert.equal(await dialog.locator('input[type=checkbox]').count(), 1);
+    assert.ok((await dialog.innerText()).includes('Other service / Other review'));
+    await dialog.getByLabel('Find URL occurrences in').selectOption('all');
+    await dialog.getByRole('button', { name: 'Select all occurrences' }).click();
+    assert.equal(await dialog.locator('input[type=checkbox]:checked').count(), 2);
+    await page.screenshot({ path: process.env.REQUESTLOOM_SCREENSHOT || 'extraction-dialog.png' });
+    await dialog.getByRole('button', { name: 'Extract variable and replace', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal((await api('GET', `/requests/${a.id}`)).url, '{{baseUrl}}/cases/{00F94C74-0000-C718-9B9F-49BA9C66D80C}');
+    assert.equal((await api('GET', `/requests/${b.id}`)).url, '{{baseUrl}}/review-data');
+    await page.getByText('Other review', { exact: true }).click();
+    const tabs = page.locator('[draggable=true]').filter({ has: page.locator('button[aria-label^="Close "]') });
+    assert.equal(await tabs.count(), 2);
+    await tabs.nth(0).dragTo(tabs.nth(1));
+    assert.ok((await tabs.nth(0).innerText()).includes('Other review'));
+    assert.deepEqual(errors, []);
+    console.log('UI workflows passed: ephemeral lifecycle, local settings, selection extraction, global replacement, GUID literals, tab dragging, Ctrl+K/Ctrl+L from Monaco, Ctrl+W cleanup.');
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

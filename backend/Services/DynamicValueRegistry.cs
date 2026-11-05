@@ -71,10 +71,7 @@ public sealed class TemplateResolutionSession
     private const char EscapedTokenEnd = '\uE001';
 
     private static readonly System.Text.RegularExpressions.Regex VariablePattern =
-        new(@"\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}", System.Text.RegularExpressions.RegexOptions.Compiled);
-
-    private static readonly System.Text.RegularExpressions.Regex SinglePathVariablePattern =
-        new(@"(?<!\{)\{\s*([a-zA-Z0-9_.-]+)\s*\}(?!\})", System.Text.RegularExpressions.RegexOptions.Compiled);
+        new(@"(?:\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}|\$\{\s*([a-zA-Z0-9_.-]+)\s*\})", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private readonly Dictionary<string, string> _rawVariables;
     private readonly Dictionary<string, string> _variables;
@@ -153,26 +150,14 @@ public sealed class TemplateResolutionSession
         return RestoreEscapedTokens(ExpandDynamicTokens(withVariables, owner: null));
     }
 
-    /// <summary>
-    /// Resolves a URL, additionally supporting single-brace path variables such as
-    /// "/cases/{customer_number}" (matching the editor's variable highlighting).
-    /// Unknown names are left untouched.
-    /// </summary>
-    public string ResolveUrl(string? input)
-    {
-        var resolved = Resolve(input);
-        if (string.IsNullOrEmpty(resolved)) return resolved;
-
-        return SinglePathVariablePattern.Replace(resolved, match =>
-            GetVariable(match.Groups[1].Value) is { } value ? Uri.EscapeDataString(value) : match.Value);
-    }
+    public string ResolveUrl(string? input) => Resolve(input);
 
     internal string ResolveOrdinary(string? input)
     {
         if (string.IsNullOrEmpty(input)) return input ?? "";
 
         return VariablePattern.Replace(input, match =>
-            _rawVariables.TryGetValue(match.Groups[1].Value, out var value) ? value : match.Value);
+            _rawVariables.TryGetValue((match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value), out var value) ? value : match.Value);
     }
 
     private void MaterializeVariables()
@@ -195,7 +180,7 @@ public sealed class TemplateResolutionSession
     {
         return VariablePattern.Replace(input, match =>
         {
-            var key = match.Groups[1].Value;
+            var key = (match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value);
             return _variables.TryGetValue(key, out var value) ? value : match.Value;
         });
     }

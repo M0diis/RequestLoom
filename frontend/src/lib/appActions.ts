@@ -21,6 +21,10 @@ export async function saveActiveTab() {
 
   const { activeRequestId, saveRequest } = useRequestStore.getState();
   if (!activeRequestId) return;
+  if (useRequestStore.getState().activeRequest?.ephemeral) {
+    toast('Ephemeral requests are discarded when closed.');
+    return;
+  }
   await saveRequest(activeRequestId);
   const state = useRequestStore.getState();
   if (state.isRequestDirty(activeRequestId)) {

@@ -21,6 +21,7 @@ import { RequestFileViewer } from './RequestFileViewer';
 import { RequestNotesEditor } from './RequestNotesEditor';
 import { CodeSnippetsModal } from '../common/CodeSnippetsModal';
 import { DynamicValueReferenceModal } from '../common/DynamicValueReferenceModal';
+import { ExtractVariableModal } from '../common/ExtractVariableModal';
 import { AlertModal } from '../common/AlertModal';
 import {
   type ResolvedVariableInfo,
@@ -86,7 +87,7 @@ type PathVariableIndicator = {
 };
 
 const EMPTY_STATE_SECONDARY = 'border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800';
-const URL_VARIABLE_PATTERN_SOURCE = '\\{\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}\\}|\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}';
+const URL_VARIABLE_PATTERN_SOURCE = '\\{\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}\\}|\\$\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}';
 
 function createUrlVariablePattern(): RegExp {
   return new RegExp(URL_VARIABLE_PATTERN_SOURCE, 'g');
@@ -221,6 +222,8 @@ export function RequestBuilder() {
   const { environments } = useEnvironmentStore();
   const { activeRequestTab, setActiveRequestTab, setNewRequestModalOpen, setImportDialogKind, setCommandPaletteOpen } = useUiStore();
 
+  const [extraction, setExtraction] = useState<{ value: string; start: number; end: number } | null>(null);
+  const [variableRevision, setVariableRevision] = useState(0);
   const [showSnippets, setShowSnippets] = useState(false);
   const [showDynamicValues, setShowDynamicValues] = useState(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
@@ -277,7 +280,7 @@ export function RequestBuilder() {
     return () => {
       canceled = true;
     };
-  }, [activeWorkspaceId]);
+  }, [activeWorkspaceId, variableRevision]);
 
   useEffect(() => {
     let canceled = false;
@@ -325,13 +328,13 @@ export function RequestBuilder() {
       canceled = true;
       window.removeEventListener('service-variables:updated', handleServiceVariablesUpdated);
     };
-  }, [activeServiceId, clearServiceRuntimeVariables]);
+  }, [activeServiceId, clearServiceRuntimeVariables, variableRevision]);
 
   useEffect(() => {
     let canceled = false;
 
     const loadHistoryCount = async () => {
-      if (!activeRequestId) return;
+      if (!activeRequestId || activeRequest?.ephemeral) { setHistoryCount(0); return; }
       try {
         const { count } = await historyApi.count(activeWorkspaceId, activeRequestId);
         if (!canceled) setHistoryCount(count);
@@ -351,7 +354,7 @@ export function RequestBuilder() {
       canceled = true;
       window.removeEventListener('history:updated', handleHistoryUpdate);
     };
-  }, [activeWorkspaceId, activeRequestId]);
+  }, [activeWorkspaceId, activeRequestId, activeRequest?.ephemeral]);
 
   const variableResolutionReady = useMemo(() => {
     if (workspaceVariablesLoading) return false;
@@ -667,6 +670,7 @@ export function RequestBuilder() {
             onChange={handleUrlChange}
             placeholder="{{baseUrl}}/api/endpoint"
             variableStates={urlVariableStates}
+            onExtract={setExtraction}
             dynamicSuggestions={dynamicSuggestions}
           />
 
@@ -680,7 +684,7 @@ export function RequestBuilder() {
             </button>
           ) : (
             <div className="flex items-center gap-1">
-              {requestIsDirty && (
+              {requestIsDirty && !activeRequest.ephemeral && (
                 <button
                   onClick={() => { void saveActiveTab(); }}
                   className="border border-amber-700 bg-amber-950/30 px-2.5 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-950/50 whitespace-nowrap"
@@ -853,7 +857,7 @@ export function RequestBuilder() {
         {activeRequestTab === 'tests' && (
           <RequestScriptEditor request={activeRequest} stage="test" onUpdate={updateRequest} />
         )}
-        {activeRequestTab === 'runs' && (
+        {activeRequestTab === 'runs' && !activeRequest.ephemeral && (
           <RequestHistoryTab workspaceId={activeWorkspaceId} requestId={activeRequest.id} />
         )}
         {activeRequestTab === 'settings' && (
@@ -868,11 +872,16 @@ export function RequestBuilder() {
         {activeRequestTab === 'cookies' && (
           <CookieJarPanel workspaceId={activeWorkspaceId} />
         )}
-        {activeRequestTab === 'file' && (
+        {activeRequestTab === 'file' && !activeRequest.ephemeral && (
           <RequestFileViewer requestId={activeRequest.id} />
         )}
       </div>
 
+      {activeRequest.ephemeral && (activeRequestTab === 'file' || activeRequestTab === 'runs') &&
+        <p className="p-4 text-xs text-gray-400">Ephemeral requests have no saved file or history. Closing this tab discards the request.</p>}
+      {extraction && <ExtractVariableModal key={activeRequest.id} request={activeRequest} selection={extraction}
+        onClose={() => { setExtraction(null); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-request-url-input]')?.focus()); }}
+        onExtracted={() => setVariableRevision(value => value + 1)} />}
       {showSnippets && (
         <CodeSnippetsModal
           onClose={() => setShowSnippets(false)}

@@ -23,7 +23,7 @@ function load(file, api = {}, settings = { autoSave: false }) {
   };
   vm.runInNewContext(compiled, { module, exports: module.exports,
     require: name => name in mocks ? mocks[name] : require(name),
-    console, Error, setTimeout, clearTimeout, AbortController, performance,
+    crypto: require("node:crypto").webcrypto, console, Error, setTimeout, clearTimeout, AbortController, performance,
     window: { dispatchEvent() {} }, CustomEvent: class {},
   }, { filename: file });
   return module.exports;
@@ -205,4 +205,77 @@ test('deleting requests hides them until the undo window closes and undo restore
   await scheduledDeletes[1].commit();
   assert.deepEqual(deleted, ['b']);
   assert.deepEqual(Array.from(store.getState().topLevelRequests, r => r.id), ['a']);
+});
+
+
+test('ephemeral edits never autosave and disappear with all runtime state on close', async () => {
+  let writes = 0;
+  const store = load('stores/requestStore.ts', { requestsApi: { update: async () => { writes++; } } }, { autoSave: true }).useRequestStore;
+  store.setState({ workspaceId: 'w' });
+  const req = store.getState().createEphemeralRequest('w');
+  await store.getState().updateRequest(req.id, { url: 'https://example.com', body: 'draft' });
+  await store.getState().saveRequest(req.id);
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(writes, 0);
+  assert.equal(store.getState().topLevelRequests.length, 0);
+  store.setState({ responses: { [req.id]: response(200) }, runtimeScriptVariablesByRequest: { [req.id]: { token: {} } } });
+  store.getState().closeRequest(req.id);
+  assert.equal(store.getState().draftsById[req.id], undefined);
+  assert.equal(store.getState().responses[req.id], undefined);
+  assert.equal(store.getState().runtimeScriptVariablesByRequest[req.id], undefined);
+  assert.equal(store.getState().dirtyRequests.has(req.id), false);
+  assert.equal(store.getState().activeRequestId, null);
+});
+
+test('ephemeral requests survive tab selection and refresh; close others discards them', async () => {
+  const store = requests({ requestsApi: { getById: async id => request(id), getTopLevel: async () => [request('a')] }, servicesApi: { getAll: async () => [] } });
+  const req = store.getState().createEphemeralRequest('w');
+  await store.getState().updateRequest(req.id, { url: 'https://draft' });
+  await store.getState().selectRequest('a');
+  await store.getState().selectRequest(req.id);
+  await store.getState().loadServices('w');
+  assert.equal(store.getState().activeRequest.url, 'https://draft');
+  store.getState().closeOtherRequests('a');
+  assert.equal(store.getState().draftsById[req.id], undefined);
+  assert.equal(store.getState().activeRequestId, 'a');
+});
+
+test('closing an in-flight ephemeral send cannot resurrect its response', async () => {
+  const pending = deferred(); let payload;
+  const store = requests({ executeApi: { send: data => { payload = data; return pending.promise; } } });
+  const req = store.getState().createEphemeralRequest('w');
+  const sending = store.getState().sendRequest('w');
+  assert.equal(payload.ephemeral, true);
+  assert.equal(payload.requestId, undefined);
+  store.getState().closeRequest(req.id);
+  pending.resolve(response(200)); await sending;
+  assert.equal(store.getState().responses[req.id], undefined);
+  assert.equal(store.getState().sending, false);
+});
+
+test('URL extraction finds literal matches with folder paths and replaces only selected occurrences', () => {
+  const { findUrlOccurrences, replaceUrlOccurrences } = load('lib/variableExtraction.ts');
+  const host = 'https://example.com';
+  const req = { ...request('a'), serviceId: 's', folderId: 'child', url: host + '/{00F94C74-0000-C718-9B9F-49BA9C66D80C}?next=' + host };
+  const service = { id: 's', name: 'KYC', requests: [req], folders: [{ id: 'parent', name: 'Cases' }, { id: 'child', parentFolderId: 'parent', name: 'Review' }] };
+  const found = findUrlOccurrences([service], [], host);
+  assert.equal(found.length, 2);
+  assert.equal(found[0].location, 'KYC / Cases / Review / a');
+  assert.equal(replaceUrlOccurrences(req.url, host, '{{baseUrl}}', [found[0]]), '{{baseUrl}}/{00F94C74-0000-C718-9B9F-49BA9C66D80C}?next=' + host);
+  assert.equal(replaceUrlOccurrences(req.url, host, '{{baseUrl}}', found), '{{baseUrl}}/{00F94C74-0000-C718-9B9F-49BA9C66D80C}?next={{baseUrl}}');
+  assert.equal(findUrlOccurrences([service], [], req.url).length, 1);
+  assert.throws(() => replaceUrlOccurrences(req.url + '/changed', host, '{{baseUrl}}', found), /changed/);
+  assert.equal(findUrlOccurrences([service], [], '').length, 0);
+});
+
+test('preview resolves double braces and dollar braces, preserving literal single braces', () => {
+  const { resolveValueForPreview } = load('components/common/variablePreviewUtils.ts');
+  const vars = new Map([['base', { value: 'https://example.com', source: 'global' }], ['id', { value: '123', source: 'request' }]]);
+  const result = resolveValueForPreview('{{base}}/${id}/{id}/{00F94C74-0000-C718-9B9F-49BA9C66D80C}', vars);
+  assert.equal(result.resolvedValue, 'https://example.com/123/{id}/{00F94C74-0000-C718-9B9F-49BA9C66D80C}');
+  assert.equal(result.missingVariables.length, 0);
+  assert.equal(resolveValueForPreview('{id}', vars).hasVariables, false);
+  const secret = resolveValueForPreview('${token}', new Map([['token', { value: 'secret', source: 'global', isSecret: true }]]));
+  assert.equal(secret.resolvedValue, 'secret');
+  assert.equal(secret.displayValue.includes('secret'), false);
 });

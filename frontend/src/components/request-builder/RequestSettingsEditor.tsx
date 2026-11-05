@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRequestStore } from '../../stores/requestStore';
 import { requestsApi } from '../../services/api';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { ApiRequestSettings, RequestProxyMode } from '../../types';
@@ -32,10 +33,15 @@ export default function RequestSettingsEditor({ requestId, workspaceId }: Reques
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const debounceRef = useRef<number | undefined>(undefined);
 
+  const ephemeral = useRequestStore(state => state.draftsById[requestId]?.ephemeral === true);
   useEffect(() => {
     let cancelled = false;
-    void requestsApi
-      .getSettings(requestId)
+    const local = useRequestStore.getState().draftsById[requestId]?.ephemeralSettings;
+    const settings = ephemeral ? Promise.resolve(local ?? {
+      requestId, followRedirects: true, maxRedirects: 10, ignoreSslErrors: false,
+      timeoutSeconds: null, proxyMode: 'inherit', proxyUrl: '', proxyUsername: '', proxyPassword: '',
+    } satisfies ApiRequestSettings) : requestsApi.getSettings(requestId);
+    void settings
       .then((s) => {
         if (cancelled) return;
         setFollowRedirects(s.followRedirects);
@@ -55,10 +61,14 @@ export default function RequestSettingsEditor({ requestId, workspaceId }: Reques
       cancelled = true;
       window.clearTimeout(debounceRef.current);
     };
-  }, [requestId]);
+  }, [requestId, ephemeral]);
 
   const autoSave = useCallback(
     (next: ApiRequestSettings) => {
+      if (ephemeral) {
+        void useRequestStore.getState().updateRequest(requestId, { ephemeralSettings: next });
+        return;
+      }
       window.clearTimeout(debounceRef.current);
       setSaveStatus('saving');
       debounceRef.current = window.setTimeout(() => {
@@ -68,7 +78,7 @@ export default function RequestSettingsEditor({ requestId, workspaceId }: Reques
           .catch(() => setSaveStatus('error'));
       }, 400);
     },
-    [requestId],
+    [requestId, ephemeral],
   );
 
   const buildAndSave = useCallback(

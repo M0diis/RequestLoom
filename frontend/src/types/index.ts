@@ -67,6 +67,8 @@ export interface ServiceVariable {
 }
 
 export interface ApiRequest {
+  ephemeral?: boolean;
+  ephemeralSettings?: ApiRequestSettings;
   id: string;
   workspaceId: string;
   serviceId: string | null;
@@ -123,6 +125,8 @@ export interface WorkspaceVariable {
 }
 
 export interface ExecuteRequestPayload {
+  ephemeral?: boolean;
+  ephemeralSettings?: ApiRequestSettings;
   method: string;
   url: string;
   body?: string | null;

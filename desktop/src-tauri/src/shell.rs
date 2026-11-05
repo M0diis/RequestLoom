@@ -991,6 +991,8 @@ pub fn run() {
             let navigation_handle = handle.clone();
             let window_label = "main";
             WebviewWindowBuilder::new(app, window_label, WebviewUrl::App("index.html".into()))
+                // Let WebView2 deliver HTML drag events to tabs and the collection tree.
+                .disable_drag_drop_handler()
                 .title("RequestLoom")
                 .inner_size(1480.0, 920.0)
                 .min_inner_size(1024.0, 680.0)

@@ -13,6 +13,7 @@ interface Props {
   placeholder?: string;
   variableStates?: Record<string, UrlVariableState>;
   dynamicSuggestions?: string[];
+  onExtract?: (selection: { value: string; start: number; end: number }) => void;
 }
 
 type UrlToken = {
@@ -20,7 +21,7 @@ type UrlToken = {
   variableName?: string;
 };
 
-const URL_VARIABLE_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}|\{\s*([a-zA-Z0-9_.-]+)\s*\}/g;
+const URL_VARIABLE_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}|\$\{\s*([a-zA-Z0-9_.-]+)\s*\}/g;
 
 function tokenizeUrl(value: string): UrlToken[] {
   if (!value) return [];
@@ -57,7 +58,17 @@ export function HighlightedUrlInput({
   placeholder,
   variableStates,
   dynamicSuggestions = [],
+  onExtract,
 }: Props) {
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; value: string; start: number; end: number } | null>(null);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    document.addEventListener('click', close);
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); close(); inputRef.current?.focus(); } };
+    document.addEventListener('keydown', onKeyDown);
+    return () => { document.removeEventListener('click', close); document.removeEventListener('keydown', onKeyDown); };
+  }, [contextMenu]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -155,6 +166,13 @@ export function HighlightedUrlInput({
         onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
         onScroll={syncOverlayScroll}
+        onContextMenu={event => {
+          const start = event.currentTarget.selectionStart ?? 0;
+          const end = event.currentTarget.selectionEnd ?? start;
+          if (!onExtract || start === end) return;
+          event.preventDefault();
+          setContextMenu({ x: Math.max(0, Math.min(event.clientX, window.innerWidth - 220)), y: Math.max(0, Math.min(event.clientY, window.innerHeight - 44)), value: value.slice(start, end), start, end });
+        }}
         placeholder={placeholder}
         autoComplete="off"
         autoCapitalize="off"
@@ -162,6 +180,10 @@ export function HighlightedUrlInput({
         spellCheck={false}
         className="relative z-10 block w-full border-0 bg-transparent px-3 py-1.5 text-sm font-mono text-gray-100 outline-none placeholder:text-gray-500 selection:bg-gray-700 selection:text-gray-100"
       />
+      {contextMenu && <div role="menu" aria-label="URL selection actions" style={{ left: contextMenu.x, top: contextMenu.y }} className="fixed z-50 w-[220px] border border-gray-700 bg-gray-900 p-1 shadow-xl">
+        <button autoFocus type="button" role="menuitem" className="w-full px-3 py-2 text-left text-xs text-gray-100 hover:bg-gray-800"
+          onClick={() => { onExtract?.(contextMenu); setContextMenu(null); }}>Extract to variable…</button>
+      </div>}
       {open && filteredDynamicSuggestions.length > 0 && (
         <div className="absolute left-0 right-0 top-full z-40 mt-0.5 max-h-48 overflow-y-auto rounded-md border border-gray-700 bg-gray-900 shadow-xl">
           {filteredDynamicSuggestions.map((suggestion, index) => (

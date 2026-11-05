@@ -102,6 +102,7 @@ interface RequestState {
   moveFolder: (workspaceId: string, serviceId: string, folderId: string, parentFolderId: string | null) => Promise<void>;
   reorderFolders: (workspaceId: string, serviceId: string, folderIds: string[]) => Promise<void>;
 
+  createEphemeralRequest: (workspaceId: string) => ApiRequest;
   selectRequest: (id: string) => Promise<void>;
   closeRequest: (id: string) => void;
   closeOtherRequests: (id: string) => void;
@@ -157,7 +158,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       ++selectionVersion;
       get().cancelRequest();
       set({ workspaceId, services: [], topLevelRequests: [], activeRequestId: null, activeRequest: null,
-        openRequestIds: [], responses: {}, runtimeScriptVariablesByRequest: {} });
+        openRequestIds: [], responses: {}, runtimeScriptVariablesByRequest: {},
+        draftsById: Object.fromEntries(Object.entries(get().draftsById).filter(([, r]) => !r.ephemeral)) });
     }
     set({ loading: true, error: null });
     try {
@@ -169,7 +171,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       const hydratedServices = services.map(service => ({ ...service, requests: service.requests.map(draft) }));
       const hydratedTopLevel = topLevelRequests.map(draft);
       const selected = get().activeRequestId;
-      const activeRequest = selected ? findRequestById(hydratedServices, hydratedTopLevel, selected) : null;
+      const activeRequest = selected ? (get().draftsById[selected] ?? findRequestById(hydratedServices, hydratedTopLevel, selected)) : null;
       set({ services: hydratedServices, topLevelRequests: hydratedTopLevel, loading: false,
         activeRequest, activeRequestId: activeRequest?.id ?? null });
     } catch (error) {
@@ -333,6 +335,19 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     }
   },
 
+  createEphemeralRequest: (workspaceId) => {
+    const id = `ephemeral-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    const request: ApiRequest = { id, workspaceId, ephemeral: true, serviceId: null, folderId: null,
+      name: 'Ephemeral request', method: 'GET', url: '', body: null, bodyType: 'none',
+      preRequestScript: '', postRequestScript: '', testScript: '', notes: '', sortOrder: 0,
+      isFavorite: false, createdAt: now, updatedAt: now, headers: [], params: [], variables: [], auth: null };
+    ++selectionVersion;
+    set(state => ({ draftsById: { ...state.draftsById, [id]: request }, activeRequestId: id,
+      activeRequest: request, openRequestIds: [...state.openRequestIds, id] }));
+    return request;
+  },
+
   selectRequest: async (id) => {
     const version = ++selectionVersion;
     const cached = get().draftsById[id] ?? findRequestById(get().services, get().topLevelRequests, id);
@@ -349,6 +364,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   closeRequest: (id) => {
+    if (get().sendingRequestId === id && get().draftsById[id]?.ephemeral) get().cancelRequest();
     if (get().activeRequestId === id) ++selectionVersion;
     set((s) => {
       const nextIds = s.openRequestIds.filter((rid) => rid !== id);
@@ -363,8 +379,17 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
       const responses = { ...s.responses };
       delete responses[id];
+      const draftsById = { ...s.draftsById };
+      const runtimeScriptVariablesByRequest = { ...s.runtimeScriptVariablesByRequest };
+      const dirtyRequests = new Set(s.dirtyRequests);
+      if (draftsById[id]?.ephemeral) {
+        delete draftsById[id];
+        delete runtimeScriptVariablesByRequest[id];
+        dirtyRequests.delete(id);
+      }
 
       return {
+        draftsById, runtimeScriptVariablesByRequest, dirtyRequests,
         openRequestIds: nextIds,
         activeRequestId: newActiveId,
         activeRequest: isActive ? newActiveRequest : s.activeRequest,
@@ -381,10 +406,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   closeOtherRequests: (id) => {
-    set((s) => ({
-      openRequestIds: s.openRequestIds.filter((rid) => rid === id),
-      responses: s.responses[id] ? { [id]: s.responses[id] } : {},
-    }));
+    get().openRequestIds.filter(rid => rid !== id).forEach(rid => get().closeRequest(rid));
     if (get().activeRequestId !== id) void get().selectRequest(id);
   },
 
@@ -551,6 +573,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   saveRequest: async (id) => {
+    if (get().draftsById[id]?.ephemeral) return;
     const timer = requestSaveTimers.get(id);
     if (timer) clearTimeout(timer);
     requestSaveTimers.delete(id);
@@ -585,17 +608,19 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   updateRequest: async (id, data) => {
+    const state = get();
+    if (!state.draftsById[id] && state.activeRequest?.id !== id && !findRequestById(state.services, state.topLevelRequests, id)) return;
     let mergedRequest: ApiRequest | null = null;
 
     // Mark as dirty immediately
     set((s) => {
       const next = new Set(s.dirtyRequests);
-      next.add(id);
+      if (!get().draftsById[id]?.ephemeral) next.add(id);
       return { dirtyRequests: next };
     });
 
     set((s) => {
-      const source = (s.activeRequest?.id === id ? s.activeRequest : findRequestById(s.services, s.topLevelRequests, id));
+      const source = s.draftsById[id] ?? (s.activeRequest?.id === id ? s.activeRequest : findRequestById(s.services, s.topLevelRequests, id));
       if (!source) return s;
 
       mergedRequest = mergeRequestPatch(source, data);
@@ -614,7 +639,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       };
     });
 
-    if (!mergedRequest) return;
+    if (!mergedRequest || get().draftsById[id]?.ephemeral) return;
 
     requestSaveVersions.set(id, (requestSaveVersions.get(id) ?? 0) + 1);
     if (useSettingsStore.getState().settings?.autoSave === false) return;
@@ -632,6 +657,12 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   duplicateRequest: async (id) => {
+    const source = get().draftsById[id];
+    if (source?.ephemeral) {
+      const duplicated = { ...source, id: `ephemeral-${crypto.randomUUID()}`, name: `${source.name} (copy)` };
+      set(state => ({ draftsById: { ...state.draftsById, [duplicated.id]: duplicated } }));
+      return duplicated;
+    }
     const duplicated = await requestsApi.duplicate(id);
     set((s) => ({
       topLevelRequests: duplicated.serviceId === null
@@ -913,7 +944,9 @@ export const useRequestStore = create<RequestState>((set, get) => ({
           : null,
         workspaceId,
         serviceId: activeRequest.serviceId,
-        requestId: activeRequest.id,
+        requestId: activeRequest.ephemeral ? undefined : activeRequest.id,
+        ephemeral: activeRequest.ephemeral === true,
+        ephemeralSettings: activeRequest.ephemeralSettings,
       }, abortController.signal);
       if (get().abortController !== abortController) return;
       set((state) => ({

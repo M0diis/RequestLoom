@@ -17,7 +17,7 @@ const METHOD_COLORS: Record<string, string> = {
 
 export function RequestTabBar() {
   const {
-    services, topLevelRequests, openRequestIds, activeRequestId, selectRequest, closeRequest, dirtyRequests,
+    services, topLevelRequests, draftsById, createEphemeralRequest, workspaceId, openRequestIds, activeRequestId, selectRequest, closeRequest, dirtyRequests,
     closeOtherRequests, closeRequestsToRight, moveOpenRequest,
   } = useRequestStore();
   const { tabs: scriptTabs, openFileKeys, activeFileKey, setActiveFile, closeFile } = useScriptFileStore();
@@ -64,10 +64,13 @@ export function RequestTabBar() {
         }
       }
     }
+    for (const req of Object.values(draftsById)) {
+      if (req.ephemeral && openRequestIds.includes(req.id)) result.push(req);
+    }
     // Preserve tab order
     result.sort((a, b) => openRequestIds.indexOf(a.id) - openRequestIds.indexOf(b.id));
     return result;
-  }, [services, topLevelRequests, openRequestIds]);
+  }, [services, topLevelRequests, draftsById, openRequestIds]);
 
   const openScripts = useMemo(
     () => openFileKeys
@@ -78,10 +81,15 @@ export function RequestTabBar() {
 
   // Always render the tab bar when at least one request is open so the layout
   // doesn't shift when a second tab is opened or the last tab is closed.
-  if (openRequests.length === 0 && openScripts.length === 0) return null;
+
 
   return (
     <div className="flex items-center border-b border-gray-800 bg-[#111111] overflow-x-auto flex-shrink-0 overflow-y-hidden scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
+      <button type="button" className="shrink-0 px-3 py-2 text-xs text-gray-300 hover:bg-gray-800"
+        title="New ephemeral request — discarded when closed" aria-label="New ephemeral request"
+        onClick={() => { if (workspaceId) { setActiveFile(null); createEphemeralRequest(workspaceId); } }}>
+        + Ephemeral
+      </button>
       {openRequests.map((req) => (
         <div
           key={req.id}

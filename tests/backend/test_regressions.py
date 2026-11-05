@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIGURATION = os.environ.get('REQUESTLOOM_TEST_CONFIGURATION', 'Debug')
-DLL = ROOT / f'backend/bin/{CONFIGURATION}/net10.0/RequestLoom.Api.dll'
+DLL = Path(os.environ.get('REQUESTLOOM_TEST_DLL', str(ROOT / f'backend/bin/{CONFIGURATION}/net10.0/RequestLoom.Api.dll')))
 
 
 def free_port():
@@ -297,6 +297,34 @@ test("negative",()=>expect({a:1}).not.toEqual({a:2}));'''
                 self.assertEqual(wire['path'], '/resolved?q=a%20b')
                 self.assertEqual(wire['headers']['Content-Type'], 'application/soap+xml')
                 self.assertEqual(wire['headers']['Content-Language'], 'lt')
+
+    def test_explicit_variable_syntax_and_ephemeral_history(self):
+        for app in self.apps:
+            with self.subTest(storage=(app.mode, app.strategy)):
+                workspace = self.workspace(app)
+                app.api('PUT', f'/workspaces/{workspace}/variables', {'key': 'id', 'value': 'resolved'})
+                before = app.api('GET', f'/workspaces/{workspace}/history/count')['count']
+                response = app.api('POST', '/execute', {'workspaceId': workspace, 'ephemeral': True,
+                    'url': self.url + '/{{id}}/${id}/{id}/{00F94C74-0000-C718-9B9F-49BA9C66D80C}',
+                    'method': 'POST', 'bodyType': 'text', 'body': '${id} {{id}} {id}',
+                    'headers': [{'key': 'X-Variable', 'value': '${id}'}]})
+                self.assertEqual(response['statusCode'], 200, response)
+                wire = json.loads(response['body'])
+                from urllib.parse import unquote
+                self.assertEqual(unquote(wire['path']), '/resolved/resolved/{id}/{00F94C74-0000-C718-9B9F-49BA9C66D80C}')
+                self.assertEqual(wire['body'], 'resolved resolved {id}')
+                self.assertEqual(wire['headers']['X-Variable'], 'resolved')
+                self.assertEqual(app.api('GET', f'/workspaces/{workspace}/history/count')['count'], before)
+                multipart = app.api('POST', '/execute', {'workspaceId': workspace, 'ephemeral': True,
+                    'ephemeralSettings': {'followRedirects': True, 'maxRedirects': 5, 'timeoutSeconds': 10},
+                    'url': self.url + '/inline-file', 'method': 'POST', 'bodyType': 'multipart',
+                    'body': json.dumps({'fields': [{'name': 'file', 'kind': 'file', 'enabled': True,
+                        'filePath': 'data:text/plain;base64,aGVsbG8=', 'fileName': 'hello.txt', 'contentType': 'text/plain'}]})})
+                self.assertEqual(multipart['statusCode'], 200, multipart)
+                self.assertIn('hello', json.loads(multipart['body'])['body'])
+                self.assertEqual(app.api('GET', f'/workspaces/{workspace}/history/count')['count'], before)
+                app.api('POST', '/execute', {'workspaceId': workspace, 'url': self.url + '/saved'})
+                self.assertEqual(app.api('GET', f'/workspaces/{workspace}/history/count')['count'], before + 1)
 
     def test_response_limit_counts_bytes_and_timeout_covers_the_body(self):
         for app in self.apps:

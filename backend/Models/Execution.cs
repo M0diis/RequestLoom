@@ -2,6 +2,8 @@ namespace RequestLoom.Api.Models;
 
 public class ExecuteRequestPayload
 {
+    public bool Ephemeral { get; set; }
+    public ApiRequestSettings? EphemeralSettings { get; set; }
     public string Method { get; set; } = "GET";
     public string Url { get; set; } = "";
     public string? Body { get; set; }

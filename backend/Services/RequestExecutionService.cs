@@ -154,7 +154,7 @@ public class RequestExecutionService
             }
 
             // Create HttpClient
-            var requestSettings = !string.IsNullOrWhiteSpace(payload.RequestId)
+            var requestSettings = payload.Ephemeral ? payload.EphemeralSettings : !string.IsNullOrWhiteSpace(payload.RequestId)
                 ? await _requestRepo.GetSettingsAsync(payload.RequestId)
                 : null;
             var followRedirects = requestSettings?.FollowRedirects ?? _settings.FollowRedirects;
@@ -330,7 +330,6 @@ public class RequestExecutionService
                         requestState.Body ?? "",
                         resolutionSession,
                         cancellationToken);
-                    request.Headers.Remove("Content-Type");
                     resolvedHeaders.RemoveAll(header =>
                         string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase));
                     var multipartContentType = request.Content.Headers.ContentType?.ToString();
@@ -453,7 +452,7 @@ public class RequestExecutionService
             }
 
             // Store in history
-            if (_settings.SaveHistory)
+            if (_settings.SaveHistory && !payload.Ephemeral)
             {
                 await _historyRepo.CreateAsync(new HistoryEntry
                 {
@@ -856,18 +855,29 @@ public class RequestExecutionService
 
                 if (string.Equals(field.Kind, "file", StringComparison.OrdinalIgnoreCase))
                 {
-                    var path = _uploadService.ResolvePath(resolutionSession.Resolve(field.FilePath));
-                    if (!File.Exists(path))
-                        throw new InvalidOperationException($"Multipart file was not found: {field.FileName}");
-
-                    var fileContent = new StreamContent(File.OpenRead(path));
+                    string? path = null;
+                    HttpContent fileContent;
+                    if (field.FilePath.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var separator = field.FilePath.IndexOf(',');
+                        if (separator < 0 || !field.FilePath[..separator].EndsWith(";base64", StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException("Invalid inline multipart file.");
+                        fileContent = new ByteArrayContent(Convert.FromBase64String(field.FilePath[(separator + 1)..]));
+                    }
+                    else
+                    {
+                        path = _uploadService.ResolvePath(resolutionSession.Resolve(field.FilePath));
+                        if (!File.Exists(path))
+                            throw new InvalidOperationException($"Multipart file was not found: {field.FileName}");
+                        fileContent = new StreamContent(File.OpenRead(path));
+                    }
                     if (MediaTypeHeaderValue.TryParse(field.ContentType, out var mediaType))
                     {
                         fileContent.Headers.ContentType = mediaType;
                     }
 
                     var fileName = resolutionSession.Resolve(field.FileName).Trim();
-                    if (string.IsNullOrWhiteSpace(fileName)) fileName = Path.GetFileName(path);
+                    if (string.IsNullOrWhiteSpace(fileName)) fileName = path == null ? "upload.bin" : Path.GetFileName(path);
                     content.Add(fileContent, name, fileName);
                 }
                 else
@@ -1124,8 +1134,8 @@ public class RequestExecutionService
 
     private static bool ContainsUnresolvedVariable(string value)
     {
-        return value.Contains("{{", StringComparison.Ordinal) &&
-            value.Contains("}}", StringComparison.Ordinal);
+        return (value.Contains("{{", StringComparison.Ordinal) && value.Contains("}}", StringComparison.Ordinal)) ||
+            (value.Contains("${", StringComparison.Ordinal) && value.Contains('}'));
     }
 
     private static string ResolveOAuthOwnerKey(ExecuteRequestPayload payload)
