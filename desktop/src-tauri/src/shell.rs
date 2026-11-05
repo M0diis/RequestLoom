@@ -44,21 +44,21 @@ struct TerminalSession {
     stdin: ChildStdin,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalData {
     terminal_id: String,
     data: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalExit {
     terminal_id: String,
     code: i32,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OAuthCallback {
     code: Option<String>,
@@ -405,7 +405,8 @@ fn start_backend(app: &AppHandle, data_dir: &Path, url: &str) -> Result<String, 
     }
 
     {
-        let mut runtime = app.state::<ShellState>().runtime.lock().map_err(|error| error.to_string())?;
+        let state = app.state::<ShellState>();
+        let mut runtime = state.runtime.lock().map_err(|error| error.to_string())?;
         runtime.backend = Some(child);
         runtime.session_id = Some(session_id.clone());
         runtime.app_url = Some(url.to_owned());
@@ -419,7 +420,8 @@ fn start_backend(app: &AppHandle, data_dir: &Path, url: &str) -> Result<String, 
 fn monitor_backend(app: AppHandle, session_id: String, path: PathBuf) {
     thread::spawn(move || loop {
         let exited = {
-            let Ok(mut runtime) = app.state::<ShellState>().runtime.lock() else {
+            let state = app.state::<ShellState>();
+            let Ok(mut runtime) = state.runtime.lock() else {
                 return;
             };
             if runtime.session_id.as_deref() != Some(&session_id) {
@@ -648,7 +650,7 @@ fn native_capability(remote_url: String) -> CapabilityBuilder {
         "kill_terminal",
         "restart_backend",
     ] {
-        capability = capability.permission(format!("allow-{command}"));
+        capability = capability.permission(format!("allow-{}", command.replace('_', "-")));
     }
     capability
 }
@@ -857,7 +859,8 @@ fn start_terminal(app: AppHandle, cwd: Option<String>) -> Result<String, String>
     let terminal_id = id.clone();
     thread::spawn(move || loop {
         let exit_code = {
-            let Ok(mut runtime) = app_for_exit.state::<ShellState>().runtime.lock() else {
+            let state = app_for_exit.state::<ShellState>();
+            let Ok(mut runtime) = state.runtime.lock() else {
                 return;
             };
             let Some(session) = runtime.terminals.get_mut(&terminal_id) else {
