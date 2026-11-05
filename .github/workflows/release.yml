@@ -161,7 +161,7 @@ jobs:
         run: cargo install tauri-cli --locked
 
       - name: Build portable Linux application
-        run: ./scripts/package-linux-desktop.sh --output-dir "$GITHUB_WORKSPACE/dist"
+        run: bash ./scripts/package-linux-desktop.sh --output-dir "$GITHUB_WORKSPACE/dist"
 
       - name: Attach to Release
         uses: softprops/action-gh-release@v2

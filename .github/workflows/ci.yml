@@ -111,7 +111,7 @@ jobs:
 
       - name: Build portable desktop application
         if: runner.os == 'Linux'
-        run: ./scripts/package-linux-desktop.sh --output-dir "$GITHUB_WORKSPACE/dist"
+        run: bash ./scripts/package-linux-desktop.sh --output-dir "$GITHUB_WORKSPACE/dist"
 
   docker:
     name: Docker Image

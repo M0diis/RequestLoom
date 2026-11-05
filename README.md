@@ -157,7 +157,7 @@ The Windows archive is `output/requestloom-desktop-win-x64.zip`. Extract the fol
 ### Portable Linux desktop app
 
 ```bash
-./scripts/package-linux-desktop.sh
+bash ./scripts/package-linux-desktop.sh
 ```
 
 This produces `output/requestloom-desktop-linux-x64.tar.gz`. Extract it, then launch `RequestLoom-Desktop`. Linux requires WebKitGTK 4.1 and the target machine's supported runtime libraries.
