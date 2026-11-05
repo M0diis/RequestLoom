@@ -3,7 +3,7 @@ import { useRequestStore } from '../../stores/requestStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { useEnvironmentStore } from '../../stores/environmentStore';
 import { useUiStore } from '../../stores/uiStore';
-import { toast } from '../../stores/toastStore';
+import { toast, writeClipboardText } from '../../stores/toastStore';
 import { withShortcut } from '../../lib/shortcuts';
 import { saveActiveTab } from '../../lib/appActions';
 import { serviceVariablesApi, workspaceVariablesApi, toolsApi, historyApi } from '../../services/api';
@@ -599,7 +599,7 @@ export function RequestBuilder() {
         serviceId: activeRequest.serviceId,
         requestId: activeRequest.id,
       });
-      await navigator.clipboard.writeText(curl);
+      await writeClipboardText(curl);
       toast('Copied as cURL');
       setCurlCopied(true);
       setTimeout(() => setCurlCopied(false), 2000);

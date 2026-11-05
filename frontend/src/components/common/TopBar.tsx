@@ -47,57 +47,17 @@ export function TopBar() {
   const handleTitlebarPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !desktopShell) return;
     if ((event.target as HTMLElement).closest('.titlebar-no-drag')) return;
-    // Portaled content (dropdown menus) bubbles through the React tree but is not part of the titlebar DOM.
     if (!event.currentTarget.contains(event.target as Node)) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-
-    // The manual drag swallows native dblclick, so detect a double-click on the title bar ourselves.
     const previous = lastTitlebarDownRef.current;
     if (previous && event.timeStamp - previous.time < 400
       && Math.abs(event.clientX - previous.x) < 6 && Math.abs(event.clientY - previous.y) < 6) {
       lastTitlebarDownRef.current = null;
-      void desktopShell.stopDrag();
       void desktopShell.maximizeToggle();
       return;
     }
     lastTitlebarDownRef.current = { time: event.timeStamp, x: event.clientX, y: event.clientY };
-
-    const titlebar = event.currentTarget;
-    const pointerId = event.pointerId;
-    let stopped = false;
-    const stop = () => {
-      if (stopped) return;
-      stopped = true;
-      void desktopShell.stopDrag();
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', stop);
-      window.removeEventListener('pointercancel', stop);
-      window.removeEventListener('blur', stop);
-      if (titlebar.hasPointerCapture(pointerId)) {
-        titlebar.releasePointerCapture(pointerId);
-      }
-    };
-    const move = () => {
-      if (!stopped) {
-        desktopShell.moveDrag();
-      }
-    };
-
-    try {
-      titlebar.setPointerCapture(pointerId);
-    } catch {
-      // Pointer capture is not available in every Electron/Windows combination.
-    }
-
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', stop);
-    window.addEventListener('pointercancel', stop);
-    window.addEventListener('blur', stop);
-    void desktopShell.startDrag().then((started) => {
-      if (!started) stop();
-    }, stop);
+    void desktopShell.startDrag().catch((error: unknown) => console.error('Unable to move the desktop window.', error));
   }, [desktopShell]);
 
   useEffect(() => {

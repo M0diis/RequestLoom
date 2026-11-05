@@ -62,13 +62,17 @@ function formatHeaders(headers: Record<string, string[]>) {
   return Object.entries(headers).map(([key, values]) => `${key}: ${values.join(', ')}`).join('\n');
 }
 
-function downloadText(content: string, fileName: string, mimeType: string) {
+async function downloadText(content: string, fileName: string, mimeType: string): Promise<boolean> {
+  if (window.desktopShell) {
+    return window.desktopShell.saveFile(fileName, content, mimeType || 'text/plain');
+  }
   const url = URL.createObjectURL(new Blob([content], { type: mimeType || 'text/plain' }));
   const link = document.createElement('a');
   link.href = url;
   link.download = fileName;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }
 
 function InFlightPanel({ startedAt, onCancel }: { startedAt: number; onCancel: () => void }) {
@@ -259,11 +263,15 @@ export function ResponseViewer() {
     void editor.getAction('actions.find')?.run();
   };
 
-  const saveToFile = () => {
+  const saveToFile = async () => {
     const baseName = (activeRequest?.name || 'response').replace(/[^a-zA-Z0-9_-]+/g, '_');
     const extension = FILE_EXTENSIONS[language] ?? 'txt';
-    downloadText(viewMode === 'raw' ? response.body : displayBody, `${baseName}.${extension}`, response.contentType);
-    toast('Response saved to file');
+    try {
+      const saved = await downloadText(viewMode === 'raw' ? response.body : displayBody, `${baseName}.${extension}`, response.contentType);
+      if (saved) toast('Response saved to file');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not save the response', { variant: 'error' });
+    }
   };
 
   const headerEntries = Object.entries(response.headers);
@@ -376,7 +384,7 @@ export function ResponseViewer() {
             <CopyAsMenu response={response} displayBody={displayBody} />
             <button
               type="button"
-              onClick={saveToFile}
+            onClick={() => { void saveToFile(); }}
               className="px-2 py-0.5 text-[10px] text-gray-500 hover:text-gray-300"
               title="Save response body to a file"
             >

@@ -80,9 +80,14 @@ export function flushReloadToast() {
 }
 
 /** Copies text and reports the outcome as a toast. */
+export async function writeClipboardText(text: string): Promise<void> {
+  if (window.desktopShell) await window.desktopShell.writeClipboard(text);
+  else await navigator.clipboard.writeText(text);
+}
+
 export async function copyWithToast(text: string, label = 'Copied to clipboard') {
   try {
-    await navigator.clipboard.writeText(text);
+    await writeClipboardText(text);
     toast(label);
   } catch {
     toast('Could not copy to clipboard', { variant: 'error' });

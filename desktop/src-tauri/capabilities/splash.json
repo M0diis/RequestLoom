@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash",
+  "description": "Minimal startup-window permissions while the local backend starts.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

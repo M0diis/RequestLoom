@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { DynamicValueDefinition } from '../../types';
+import { writeClipboardText } from '../../stores/toastStore';
 
 interface Props {
   definitions: DynamicValueDefinition[];
@@ -23,7 +24,7 @@ export function DynamicValueReferenceModal({ definitions, onClose }: Props) {
   }, [definitions, query]);
 
   const copy = (value: string) => {
-    navigator.clipboard.writeText(value).then(() => {
+    writeClipboardText(value).then(() => {
       setCopied(value);
       setTimeout(() => setCopied(null), 1500);
     }).catch(() => {});

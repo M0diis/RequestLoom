@@ -2,25 +2,19 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "electron: build debug",
+      "label": "Tauri: Desktop development",
       "type": "process",
-      "command": "pwsh",
-      "windows": {
-        "command": "${env:SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
-      },
-      "args": [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "${workspaceFolder}/scripts/electron-debug.ps1"
-      ],
-      "options": {
-        "env": {
-          "PATH": "${env:PATH};${env:ProgramFiles}\\nodejs"
+      "command": "npm",
+      "args": ["--prefix", "desktop", "run", "tauri:dev"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "requestloom-tauri",
+        "pattern": { "regexp": "." },
+        "background": {
+          "activeOnStart": true,
+          "endsPattern": "http://127\\.0\\.0\\.1:5173/"
         }
-      },
-      "problemMatcher": []
+      }
     },
     {
       "label": "web: start dev server",
@@ -40,9 +34,7 @@
       "isBackground": true,
       "problemMatcher": {
         "owner": "requestloom-web",
-        "pattern": {
-          "regexp": "."
-        },
+        "pattern": { "regexp": "." },
         "background": {
           "activeOnStart": true,
           "endsPattern": "Dev app started\\."

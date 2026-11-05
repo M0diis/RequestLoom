@@ -26,7 +26,10 @@ const TAB_CLASS = (active: boolean) =>
       : 'text-gray-500 hover:text-gray-300'
   }`;
 
-function downloadJson(data: unknown, filename: string) {
+async function downloadJson(data: unknown, filename: string): Promise<boolean> {
+  if (window.desktopShell) {
+    return window.desktopShell.saveFile(filename, JSON.stringify(data, null, 2), 'application/json');
+  }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -34,6 +37,7 @@ function downloadJson(data: unknown, filename: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+  return true;
 }
 
 export function ExportImportModal({ onClose, workspaceId }: Props) {
@@ -100,7 +104,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
       if (exportScope === 'workspace') {
         const data = await exportImportApi.export(workspaceId, { includeSecrets, includeHistory });
         const safeName = (workspace?.name ?? 'workspace').replace(/[^a-zA-Z0-9_-]/g, '_');
-        downloadJson(data, `RequestLoom-${safeName}-${new Date().toISOString().slice(0, 10)}.json`);
+        if (!await downloadJson(data, `RequestLoom-${safeName}-${new Date().toISOString().slice(0, 10)}.json`)) return;
       } else if (exportScope === 'service') {
         if (!exportServiceId) {
           setError('Please select a service to export');
@@ -108,7 +112,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
         }
         const data = await exportImportApi.exportService(exportServiceId);
         const safeName = (selectedService?.name ?? 'service').replace(/[^a-zA-Z0-9_-]/g, '_');
-        downloadJson(data, `RequestLoom-service-${safeName}-${new Date().toISOString().slice(0, 10)}.json`);
+        if (!await downloadJson(data, `RequestLoom-service-${safeName}-${new Date().toISOString().slice(0, 10)}.json`)) return;
       } else if (exportScope === 'request') {
         if (!exportRequestId) {
           setError('Please select a request to export');
@@ -116,7 +120,7 @@ export function ExportImportModal({ onClose, workspaceId }: Props) {
         }
         const data = await exportImportApi.exportRequest(exportRequestId);
         const safeName = (selectedRequest?.name ?? 'request').replace(/[^a-zA-Z0-9_-]/g, '_');
-        downloadJson(data, `RequestLoom-request-${safeName}-${new Date().toISOString().slice(0, 10)}.json`);
+        if (!await downloadJson(data, `RequestLoom-request-${safeName}-${new Date().toISOString().slice(0, 10)}.json`)) return;
       }
       toast('Export saved');
       onClose();

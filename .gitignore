@@ -2,9 +2,7 @@
 dist/
 output/
 .electron-tmp/
-.publish-windows/
-.publish-windows-backend/
-.publish-debug-backend/
+.publish-*/
 *.exe
 
 # Dev runtime
@@ -34,9 +32,11 @@ node_modules/
 frontend/node_modules/
 desktop/node_modules/
 
-# Electron
+# Tauri desktop build outputs
 desktop/dist/
 desktop/runtime/backend/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
 
 # Logs
 *.log

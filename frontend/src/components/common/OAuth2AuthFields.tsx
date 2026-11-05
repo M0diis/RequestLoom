@@ -97,18 +97,10 @@ export function OAuth2AuthFields({ config, onChange, ownerKey, resolvedVariables
   }, [ownerKey, config.authorizationUrl, config.tokenUrl, config.issuer, config.clientId, config.clientSecret, config.scope, config.audience]);
 
   useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      const data = event.data as {
-        type?: string;
-        state?: string;
-        code?: string;
-        error?: string;
-        errorDescription?: string;
-      } | null;
+    const completeAuthorization = (data: OAuthCallbackPayload) => {
       const pending = pendingRef.current;
 
-      if (!pending || data?.type !== 'requestloom-oauth-callback' || data.state !== pending.state) return;
+      if (!pending || data.state !== pending.state) return;
       pendingRef.current = null;
 
       if (data.error || !data.code) {
@@ -141,8 +133,33 @@ export function OAuth2AuthFields({ config, onChange, ownerKey, resolvedVariables
       });
     };
 
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as {
+        type?: string;
+        state?: string;
+        code?: string;
+        error?: string;
+        errorDescription?: string;
+      } | null;
+      if (data?.type !== 'requestloom-oauth-callback') return;
+      completeAuthorization(data);
+    };
+
+    let disposed = false;
+    let removeDesktopListener: (() => void) | undefined;
+    if (window.desktopShell) {
+      void window.desktopShell.onOAuthCallback(completeAuthorization).then((unsubscribe) => {
+        if (disposed) unsubscribe();
+        else removeDesktopListener = unsubscribe;
+      }).catch((error: unknown) => console.error('Unable to receive the OAuth callback.', error));
+    }
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    return () => {
+      disposed = true;
+      removeDesktopListener?.();
+      window.removeEventListener('message', handleMessage);
+    };
   }, [ownerKey]);
 
   const update = (field: string, value: string) => {
@@ -210,15 +227,19 @@ export function OAuth2AuthFields({ config, onChange, ownerKey, resolvedVariables
       authorizationUrl.searchParams.set('nonce', randomUrlSafeString(32));
     }
 
-    const popup = window.open(
-      authorizationUrl.toString(),
-      'requestloom-oauth',
-      'popup,width=620,height=760,resizable=yes,scrollbars=yes',
-    );
-    if (!popup) {
+    const started = window.desktopShell
+      ? await window.desktopShell.openOAuthWindow(authorizationUrl.toString(), redirectUri).catch(() => false)
+      : Boolean(window.open(
+        authorizationUrl.toString(),
+        'requestloom-oauth',
+        'popup,width=620,height=760,resizable=yes,scrollbars=yes',
+      ));
+    if (!started) {
       pendingRef.current = null;
       setConnectionState('error');
-      setMessage('The authorization popup was blocked. Allow popups and try again.');
+      setMessage(window.desktopShell
+        ? 'Could not open the authorization window.'
+        : 'The authorization popup was blocked. Allow popups and try again.');
     }
   };
 

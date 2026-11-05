@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toolsApi } from '../../services/api';
 import type { AuthRequest, CodeSnippet, KeyValuePairRequest } from '../../types';
+import { writeClipboardText } from '../../stores/toastStore';
 
 interface Props {
   onClose: () => void;
@@ -39,7 +40,7 @@ export function CodeSnippetsModal({ onClose, method, url, body, bodyType, header
   useEffect(() => { load(); }, [load]);
 
   const copyCode = (code: string, lang: string) => {
-    navigator.clipboard.writeText(code).then(() => {
+    writeClipboardText(code).then(() => {
       setCopiedLang(lang);
       setTimeout(() => setCopiedLang(null), 2000);
     }).catch(() => {});

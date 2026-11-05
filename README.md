@@ -5,7 +5,7 @@ A self-hosted API testing and development tool. Build and organize HTTP/SOAP req
 RequestLoom runs three ways:
 
 - **Web app** - React SPA served by the ASP.NET Core backend (also containerized with Docker)
-- **Desktop app** - Electron wrapper that bundles the backend and frontend into a native Windows application
+- **Desktop app** - Tauri shell that launches the bundled ASP.NET Core backend for a portable Windows or Linux application
 - **Dev mode** - Vite dev server with hot reload talking to the backend on a separate port
 
 ---
@@ -33,7 +33,7 @@ RequestLoom runs three ways:
 | --- | --- |
 | Frontend | React 19, TypeScript, Vite 8, Tailwind CSS 4, Monaco Editor, Zustand, React Router, Axios |
 | Backend | .NET 10 (ASP.NET Core), SQLite + JSON storage via Entity Framework Core 10, Jint, YamlDotNet, OpenAPI Readers |
-| Desktop | Electron 44, electron-packager |
+| Desktop | Tauri 2 (Rust), WebView2 on Windows, WebKitGTK 4.1 on Linux |
 | Linting | oxlint (frontend) |
 
 ## Project structure
@@ -54,10 +54,9 @@ RequestLoom runs three ways:
 │       ├── services/         # API client
 │       ├── stores/           # Zustand state
 │       └── types/            # Shared TypeScript types
-├── desktop/                  # Electron desktop wrapper
-│   ├── main.js               # Main process (spawns backend, hosts UI)
-│   ├── preload.js
-│   └── scripts/package-win.js
+├── desktop/                  # Tauri native host and portable packaging
+│   ├── src-tauri/            # Rust process supervisor and native commands
+│   └── splash/               # Bundled startup page; production UI comes from .NET
 ├── scripts/                  # Dev / build / package scripts
 ├── Dockerfile                # Multi-stage container build
 └── docker-compose.yml        # One-command Docker deployment
@@ -69,9 +68,11 @@ RequestLoom runs three ways:
 - **Node.js 22+** and npm - <https://nodejs.org>
 - **Docker** (optional, for container deployment) - <https://www.docker.com>
 
+Building the desktop application also requires the stable Rust toolchain and the Tauri CLI. Windows needs the WebView2 Evergreen Runtime. Linux requires WebKitGTK 4.1 and the native libraries listed in the [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux). Portable app users need the matching system WebView installed.
+
 ## Quick start (development)
 
-The dev launcher starts the backend (port `5056`) and the Vite dev server (port `5173`) together, and kills conflicting port holders automatically.
+The web development launcher starts the backend (port `5056`) and the Vite dev server (port `5173`) together, and kills conflicting port holders automatically.
 
 **Windows (PowerShell):**
 
@@ -94,11 +95,11 @@ Then open <http://localhost:5173>.
 | `restart` | Stop, then start both |
 | `status` | Show PID/port status |
 
-### Electron debug in VS Code
+### Desktop debug in VS Code
 
-Open the repository in VS Code, select **Electron: Debug** in the Run and Debug panel, and press **F5**. The pre-launch task builds the frontend, publishes a Debug backend, stages it for Electron, and launches `desktop/main.js` with the Node inspector. Electron DevTools open automatically; set breakpoints in `desktop/main.js` and `desktop/preload.js`.
+Install the stable Rust toolchain and Tauri CLI (`cargo install tauri-cli --locked`), then run `npm --prefix desktop run tauri:dev` from the repository root. The command builds the backend, starts Vite with hot reload, and launches the native shell with the framework-dependent Debug backend from `backend/bin/Debug/net10.0`. Use the WebView developer tools to debug the React frontend and Rust log output to diagnose the shell.
 
-The debug build uses the framework-dependent .NET backend, so the .NET SDK/runtime must be installed locally. Generated files are kept in ignored `backend/wwwroot`, `.publish-debug-backend`, and `desktop/runtime/backend` directories.
+The debug build uses the framework-dependent .NET backend, so the .NET SDK/runtime must be installed locally. Tauri development needs port `5056` to be free for its backend and port `5173` for Vite. Generated files are kept in ignored `backend/bin`, `backend/wwwroot`, and `desktop/src-tauri/target` directories.
 
 The Vite dev server proxies `/api` and `/mock` to the backend, so no CORS issues in development.
 
@@ -139,9 +140,9 @@ Run the result:
 dotnet dist/RequestLoom.Api.dll
 ```
 
-### Windows desktop app
+### Portable Windows desktop app
 
-Packages the frontend, backend, and Electron shell into a native Windows app with `.bat` launchers:
+Packages the frontend, self-contained backend, and Tauri host into a Windows x64 application directory and ZIP archive:
 
 ```powershell
 .\scripts\package-windows-desktop.ps1
@@ -151,12 +152,17 @@ Packages the frontend, backend, and Electron shell into a native Windows app wit
 ./scripts/package-windows-desktop.sh
 ```
 
-Useful options (PowerShell):
+The Windows archive is `output/requestloom-desktop-win-x64.zip`. Extract the folder and launch `RequestLoom-Desktop.exe`. The WebView2 Evergreen Runtime must already be installed.
 
-```powershell
-.\scripts\package-windows-desktop.ps1 -Runtime win-arm64   # other RID
-.\scripts\package-windows-desktop.ps1 -SingleFile          # single-file backend exe
+### Portable Linux desktop app
+
+```bash
+./scripts/package-linux-desktop.sh
 ```
+
+This produces `output/requestloom-desktop-linux-x64.tar.gz`. Extract it, then launch `RequestLoom-Desktop`. Linux requires WebKitGTK 4.1 and the target machine's supported runtime libraries.
+
+The desktop package scripts require Node.js 22+, .NET 10, Rust, and the Tauri CLI. Install the CLI with `cargo install tauri-cli --locked`. Linux development/build packages are listed in the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
 
 ## Configuration
 
@@ -177,7 +183,7 @@ The backend reads configuration from `appsettings.json` and environment variable
 | `BACKEND_PORT` | `5056` | Dev launcher backend port |
 | `FRONTEND_PORT` | `5173` | Dev launcher Vite port |
 | `DOTNET_ROOT` | `~/.dotnet` | .NET install location (dev launcher) |
-| `REQUESTLOOM_APP_URL` | `http://127.0.0.1:5056` | Backend URL used by the Electron shell |
+| `REQUESTLOOM_APP_URL` | `http://127.0.0.1:5056` when free | Optional loopback URL for the Tauri shell's backend |
 | `RequestLoom__PublicUrl` / `REQUESTLOOM_PUBLIC_URL` | derived from `ASPNETCORE_URLS` | Public backend origin used when generating Sandbox mock service variables |
 
 In Docker, `Database__Path` is set to `/data/RequestLoom.db` so data survives container restarts via the named volume.

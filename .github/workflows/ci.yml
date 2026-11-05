@@ -66,11 +66,15 @@ jobs:
         run: npm run build
 
   desktop:
-    name: Desktop (Electron)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: desktop
+    name: Desktop (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - platform: windows-x64
+            os: windows-latest
+          - platform: linux-x64
+            os: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -79,10 +83,35 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install
-        run: npm ci
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install Linux WebKitGTK build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - name: Build portable desktop application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\package-windows-desktop.ps1 -OutputDir dist
+
+      - name: Build portable desktop application
+        if: runner.os == 'Linux'
+        run: ./scripts/package-linux-desktop.sh --output-dir "$GITHUB_WORKSPACE/dist"
 
   docker:
     name: Docker Image

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using RequestLoom.Api.Data;
@@ -85,6 +87,24 @@ builder.Services.AddScoped<StorageMigrationService>();
 builder.Services.AddHostedService<ParentProcessWatcher>();
 
 var app = builder.Build();
+
+// The desktop host uses this private, per-launch probe to verify that the child
+// process it started is listening before granting its WebView access to the API.
+var desktopSession = Environment.GetEnvironmentVariable("REQUESTLOOM_DESKTOP_SESSION");
+if (!string.IsNullOrWhiteSpace(desktopSession))
+{
+    app.MapGet("/api/desktop/health", (HttpRequest request) =>
+    {
+        var suppliedBytes = Encoding.UTF8.GetBytes(request.Headers["X-RequestLoom-Session"].ToString());
+        var expectedBytes = Encoding.UTF8.GetBytes(desktopSession);
+        if (expectedBytes.Length == suppliedBytes.Length
+            && CryptographicOperations.FixedTimeEquals(expectedBytes, suppliedBytes))
+        {
+            return (IResult)Results.Ok(new { sessionId = desktopSession });
+        }
+        return (IResult)Results.Unauthorized();
+    });
+}
 
 // Initialize the active storage
 using (var scope = app.Services.CreateScope())

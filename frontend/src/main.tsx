@@ -3,9 +3,15 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { OAuthCallbackPage } from './components/common/OAuthCallbackPage.tsx'
+import { initializeDesktopShell } from './lib/desktopShell.ts'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    {window.location.pathname === '/oauth/callback' ? <OAuthCallbackPage /> : <App />}
-  </StrictMode>,
-)
+async function startApplication() {
+  await initializeDesktopShell()
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      {window.location.pathname === '/oauth/callback' ? <OAuthCallbackPage /> : <App />}
+    </StrictMode>,
+  )
+}
+
+void startApplication()

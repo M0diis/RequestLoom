@@ -7,11 +7,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:5056',
+        target: 'http://127.0.0.1:5056',
         changeOrigin: true,
       },
       '/mock': {
-        target: 'http://localhost:5056',
+        target: 'http://127.0.0.1:5056',
         changeOrigin: true,
       },
     },

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RequestLoom-Desktop",
+  "version": "1.0.0",
+  "identifier": "com.requestloom.desktop",
+  "build": {
+    "frontendDist": "../splash",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "npm --prefix ../../frontend run dev -- --host 127.0.0.1 --strictPort"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": ["splash"]
+    },
+    "windows": []
+  },
+  "bundle": {
+    "active": false
+  }
+}

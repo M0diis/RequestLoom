@@ -2,14 +2,9 @@
   "name": "requestloom-desktop",
   "version": "1.0.0",
   "private": true,
-  "description": "RequestLoom desktop wrapper",
-  "main": "main.js",
+  "description": "RequestLoom Tauri desktop shell",
   "scripts": {
-    "package:win": "node scripts/package-win.js",
-    "package:linux": "ELECTRON_PLATFORM=linux node scripts/package-win.js"
-  },
-  "devDependencies": {
-    "electron": "44.1.0",
-    "electron-packager": "17.1.2"
+    "tauri:dev": "dotnet build ../backend/RequestLoom.Api.csproj && cargo tauri dev",
+    "tauri:build": "cargo tauri build --no-bundle"
   }
 }
